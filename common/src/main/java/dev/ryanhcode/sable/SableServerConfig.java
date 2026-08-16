@@ -17,7 +17,7 @@ public final class SableServerConfig {
                 .defineInRange("sub_level_substeps_per_tick", 2, 1, 10);
 
         SUB_LEVEL_STORAGE_PRUNING = builder
-                .comment("Prunes and deletes empty sub-level storage files")
+                .comment("Prunes and deletes empty sub-level storage files. Experimental.")
                 .define("sub_level_storage_pruning", false);
 
         SPEC = builder.build();

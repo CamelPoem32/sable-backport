@@ -295,10 +295,11 @@ public class SubLevelStorage implements AutoCloseable {
             final SubLevelStorageFile storageFile = storageFiles.next();
 
             if (storageFile.isEmpty()) {
-                if (SableServerConfig.SUB_LEVEL_STORAGE_PRUNING.get())
+                if (SableServerConfig.SUB_LEVEL_STORAGE_PRUNING.get()) {
                     storageFile.delete();
-                else
+                } else {
                     storageFile.close();
+                }
                 storageFiles.remove();
             }
         }
@@ -309,10 +310,11 @@ public class SubLevelStorage implements AutoCloseable {
             final SubLevelRegionFile regionFile = regionFiles.next();
 
             if (regionFile.isEmpty()) {
-                if (SableServerConfig.SUB_LEVEL_STORAGE_PRUNING.get())
+                if (SableServerConfig.SUB_LEVEL_STORAGE_PRUNING.get()) {
                     regionFile.delete();
-                else
+                } else {
                     regionFile.close();
+                }
                 regionFiles.remove();
             }
         }
