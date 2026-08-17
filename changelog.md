@@ -1,3 +1,4 @@
+- Update Veil to fix an issue where sub-levels weren't directionally shaded when Iris was installed 
 - Allow UUIDs to be used to target sub-levels in commands
 - Removed LittleTiles as a marked incompatibility
 - Add a `/sable forceload query` command
