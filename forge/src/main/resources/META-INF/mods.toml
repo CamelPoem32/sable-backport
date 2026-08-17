@@ -1,0 +1,47 @@
+modLoader = "javafml"
+loaderVersion = "${forge_loader_version_range}"
+issueTrackerURL = "${issues}"
+license = "${license}"
+
+[[mods]]
+modId = "${mod_id}"
+version = "${version}"
+displayName = "${mod_name}"
+authors = "${mod_author}"
+credits = "${credits}"
+description = '''${description}'''
+logoFile = "icon.png"
+
+[[mixins]]
+config = "sable.mixins.json"
+
+[[mixins]]
+config = "sable-forge.mixins.json"
+
+[[dependencies.sable]]
+modId = "forge"
+mandatory = true
+versionRange = "[${forge_version},)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.sable]]
+modId = "minecraft"
+mandatory = true
+versionRange = "${minecraft_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.sable]]
+modId = "flywheel"
+mandatory = false
+versionRange = "${flywheel_version_range}"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[dependencies.sable]]
+modId = "create"
+mandatory = false
+versionRange = "${create_version_range}"
+ordering = "AFTER"
+side = "BOTH"

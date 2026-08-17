@@ -1,0 +1,135 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'net.minecraftforge.gradle'
+    id 'checkstyle'
+}
+
+base {
+    archivesName = "${mod_id}-forge-${forge_minecraft_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(forge_java_version)
+    withSourcesJar()
+}
+
+minecraft {
+    mappings channel: 'official', version: forge_minecraft_version
+    accessTransformer = rootProject.file('common/src/main/resources/META-INF/accesstransformer.cfg')
+
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            mods {
+                sable {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        server {
+            workingDirectory project.file('run-server')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            mods {
+                sable {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir rootProject.file('common/src/main/java')
+            srcDir 'src/main/java'
+        }
+        resources {
+            srcDir rootProject.file('common/src/main/resources')
+            srcDir 'src/main/resources'
+            exclude 'architectury.common.json'
+            exclude 'sable.accesswidener'
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.minecraftforge.net' }
+    maven { url = 'https://repo.spongepowered.org/repository/maven-public' }
+    maven { url = 'https://maven.parchmentmc.org/' }
+    maven { url = 'https://maven.blamejared.com' }
+    maven { url = 'https://maven.createmod.net' }
+    maven { url = 'https://maven.tterrag.com' }
+    maven { url = 'https://maven.ryanhcode.dev/releases' }
+    maven { url = 'https://maven.ryanhcode.dev/snapshots' }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${forge_minecraft_version}-${forge_version}"
+
+    compileOnly 'org.spongepowered:mixin:0.8.5'
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+    compileOnly 'io.github.llamalad7:mixinextras-common:0.4.1'
+    annotationProcessor 'io.github.llamalad7:mixinextras-common:0.4.1'
+
+    implementation 'org.apache.maven:maven-artifact:3.8.5'
+
+    compileOnly fg.deobf("com.simibubi.create:create-${forge_minecraft_version}:${forge_create_version}:slim") {
+        transitive = false
+    }
+    compileOnly fg.deobf("com.jozufozu.flywheel:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
+    compileOnly "com.tterrag.registrate:Registrate:${forge_registrate_version}"
+}
+
+processResources {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    var expandProps = [
+            'version'                   : rootProject.version,
+            'group'                     : project.group,
+            'minecraft_version'         : forge_minecraft_version,
+            'minecraft_version_range'   : forge_minecraft_version_range,
+            'forge_version'             : forge_version,
+            'forge_loader_version_range': forge_loader_version_range,
+            'create_version_range'      : forge_create_version_range,
+            'flywheel_version_range'    : forge_flywheel_version_range,
+            'mod_name'                  : mod_name,
+            'mod_author'                : mod_author,
+            'mod_id'                    : mod_id,
+            'license'                   : license,
+            'issues'                    : issues,
+            'description'               : description,
+            'credits'                   : credits,
+            'java_version'              : forge_java_version
+    ]
+
+    filesMatching(['pack.mcmeta', 'META-INF/mods.toml', '*.mixins.json']) {
+        expand expandProps
+        filter { line -> line.replace('"compatibilityLevel": "JAVA_21"', '"compatibilityLevel": "JAVA_17"') }
+    }
+    inputs.properties(expandProps)
+}
+
+jar {
+    from(rootProject.file('LICENSE.md')) {
+        rename { "${it}" }
+    }
+
+    manifest {
+        attributes([
+                'Specification-Title'   : mod_name,
+                'Specification-Vendor'  : mod_author,
+                'Specification-Version' : project.jar.archiveVersion,
+                'Implementation-Title'  : project.name,
+                'Implementation-Version': project.jar.archiveVersion,
+                'Implementation-Vendor' : mod_author,
+                'Built-On-Minecraft'    : forge_minecraft_version
+        ])
+    }
+}

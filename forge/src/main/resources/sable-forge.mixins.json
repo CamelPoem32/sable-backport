@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "package": "dev.ryanhcode.sable.forge.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "minVersion": "0.8",
+  "mixinextras": {
+    "minVersion": "0.4.0"
+  },
+  "plugin": "dev.ryanhcode.sable.plugin.SableMixinPlugin",
+  "client": [],
+  "mixins": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
