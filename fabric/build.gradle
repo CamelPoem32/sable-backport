@@ -1,6 +1,6 @@
 plugins {
     id 'me.modmuss50.mod-publish-plugin'
-    id 'net.fabricmc.fabric-loom-remap'
+    id 'net.fabricmc.fabric-loom-remap' version '1.16-SNAPSHOT'
     id 'multiloader-loader'
 }
 

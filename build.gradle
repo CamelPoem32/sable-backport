@@ -1,8 +1,6 @@
 plugins {
-    // see https://fabricmc.net/develop/ for new versions
-    id 'net.fabricmc.fabric-loom-remap' version '1.16-SNAPSHOT' apply false
-    // see https://projects.neoforged.net/neoforged/moddevgradle for new versions
-    id 'net.neoforged.moddev' version '2.0.140' apply false
+    // Fabric/NeoForge plugin versions live in their own 1.21 modules so the
+    // Forge 1.20.1 backport can run under ForgeGradle's Gradle 8.x range.
     // ForgeGradle is used only by the Minecraft 1.20.1 Forge backport module.
     id 'net.minecraftforge.gradle' version '[6.0,6.2)' apply false
     // see // https://github.com/modmuss50/mod-publish-plugin for new versions

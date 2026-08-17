@@ -70,6 +70,24 @@ repositories {
     maven { url = 'https://maven.ryanhcode.dev/snapshots' }
 }
 
+def targetModpackModsDir = rootProject.file('../target_modpack/mods')
+def targetCreateJar = new File(targetModpackModsDir, "create-${forge_minecraft_version}-${forge_create_version}.jar")
+def targetCreateJarJarDir = layout.buildDirectory.dir('targetCreateJarJar').get().asFile
+
+tasks.register('extractTargetCreateJarJar', Copy) {
+    onlyIf { targetCreateJar.exists() }
+    from({ zipTree(targetCreateJar) }) {
+        include 'META-INF/jarjar/*.jar'
+        eachFile { details -> details.path = details.name }
+        includeEmptyDirs = false
+    }
+    into targetCreateJarJarDir
+}
+
+tasks.named('compileJava') {
+    dependsOn tasks.named('extractTargetCreateJarJar')
+}
+
 dependencies {
     minecraft "net.minecraftforge:forge:${forge_minecraft_version}-${forge_version}"
 
@@ -80,11 +98,8 @@ dependencies {
 
     implementation 'org.apache.maven:maven-artifact:3.8.5'
 
-    compileOnly fg.deobf("com.simibubi.create:create-${forge_minecraft_version}:${forge_create_version}:slim") {
-        transitive = false
-    }
-    compileOnly fg.deobf("com.jozufozu.flywheel:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
-    compileOnly "com.tterrag.registrate:Registrate:${forge_registrate_version}"
+    compileOnly fg.deobf(files(targetCreateJar))
+    compileOnly fg.deobf(fileTree(dir: targetCreateJarJarDir, include: ['*.jar']))
 }
 
 processResources {
