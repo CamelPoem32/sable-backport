@@ -13,7 +13,7 @@ description = '''${description}'''
 logoFile = "icon.png"
 
 [[mixins]]
-config = "sable.mixins.json"
+config = "sable-common-forge.mixins.json"
 
 [[mixins]]
 config = "sable-forge.mixins.json"

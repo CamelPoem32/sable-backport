@@ -1,0 +1,204 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+def inventoryConfigs = [
+        [
+                id        : 'common',
+                file      : rootProject.file('common/src/main/resources/sable.mixins.json'),
+                sourceRoot: rootProject.file('common/src/main/java')
+        ],
+        [
+                id        : 'neoforge',
+                file      : rootProject.file('neoforge/src/main/resources/sable-neoforge.mixins.json'),
+                sourceRoot: rootProject.file('neoforge/src/main/java')
+        ]
+]
+
+def classifyMixin = { String configId, String side, String entry ->
+    if (configId == 'common') {
+        if (entry.startsWith('compatibility.') || entry.startsWith('sublevel_render.impl.sodium.')) {
+            return [category: 'OPTIONAL_COMPAT', action: 'EXCLUDE_FROM_FORGE_TARGET']
+        }
+        if (entry.startsWith('debug_render.') || entry.startsWith('loaded_chunk_debug.') ||
+                entry.startsWith('game_test.')) {
+            return [category: 'DEBUG_TEST_UI', action: 'DEFER']
+        }
+        return [category: side == 'client' ? 'CORE_CLIENT' : 'CORE_MINECRAFT', action: 'INVESTIGATE']
+    }
+
+    if (entry.startsWith('compatibility.create.')) {
+        return [category: side == 'client' ? 'CREATE_CLIENT' : 'CREATE_CORE', action: 'DEFER']
+    }
+    if (entry.startsWith('compatibility.flywheel.')) {
+        return [category: 'CREATE_CLIENT', action: 'DEFER']
+    }
+    if (entry.startsWith('compatibility.')) {
+        return [category: 'OPTIONAL_COMPAT', action: 'EXCLUDE_FROM_FORGE_TARGET']
+    }
+    [category: 'LOADER_SPECIFIC', action: 'INVESTIGATE']
+}
+
+def dependencyFor = { String configId, String entry ->
+    def knownDependencies = [
+            computercraft: 'ComputerCraft',
+            exposure     : 'Exposure',
+            iris         : 'Iris/Oculus',
+            jadeaddons   : 'Jade Addons',
+            jade         : 'Jade',
+            vista        : 'Vista',
+            sodiumextras : 'Sodium Extras',
+            sodium       : 'Sodium/Embeddium',
+            pmweather    : 'PMWeather',
+            backpacks    : 'Backpacks for Dummies',
+            flywheel     : 'Flywheel',
+            create       : 'Create'
+    ]
+    def match = knownDependencies.find { key, ignored ->
+        entry == key || entry.startsWith("compatibility.${key}.") || entry.contains(".${key}.")
+    }
+    if (match != null) {
+        return match.value
+    }
+    configId == 'common' ? 'Minecraft' : 'NeoForge'
+}
+
+def escapeCell = { value ->
+    String text = value == null || value.toString().isBlank() ? '-' : value.toString()
+    text.replace('|', '\\|').replace('\r', ' ').replace('\n', '<br>')
+}
+
+tasks.register('generateMixinBackportMatrix') {
+    group = 'forge backport'
+    description = 'Mechanically inventories upstream Mixins and writes the curated Forge common config.'
+
+    inputs.files(inventoryConfigs.collect { it.file })
+    inputs.files(inventoryConfigs.collect { fileTree(it.sourceRoot) { include '**/*.java' } })
+    outputs.file(rootProject.file('MIXIN_BACKPORT_MATRIX.md'))
+    outputs.file(project.file('src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        def rows = []
+        def parsedConfigs = [:]
+
+        inventoryConfigs.each { config ->
+            def parsed = new JsonSlurper().parse(config.file)
+            parsedConfigs[config.id] = parsed
+
+            ['client', 'mixins'].each { side ->
+                (parsed[side] ?: []).each { entryValue ->
+                    String entry = entryValue as String
+                    String fqcn = "${parsed.package}.${entry}"
+                    File sourceFile = new File(config.sourceRoot, fqcn.replace('.', '/') + '.java')
+                    String source = sourceFile.isFile() ? sourceFile.getText('UTF-8') : ''
+                    def classification = classifyMixin(config.id, side, entry)
+
+                    String mixinAnnotation = ''
+                    def annotationMatch = source =~ /(?s)@Mixin\s*\((.*?)\)/
+                    if (annotationMatch.find()) {
+                        mixinAnnotation = annotationMatch.group(1)
+                    }
+
+                    def targets = [] as LinkedHashSet
+                    def classTargets = mixinAnnotation =~ /([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.class/
+                    while (classTargets.find()) {
+                        targets.add(classTargets.group(1))
+                    }
+                    def stringTargets = mixinAnnotation =~ /"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)"/
+                    while (stringTargets.find()) {
+                        targets.add(stringTargets.group(1))
+                    }
+
+                    def methods = [] as LinkedHashSet
+                    def methodTargets = source =~ /method\s*=\s*(?:\{\s*)?"([^"]+)"/
+                    while (methodTargets.find()) {
+                        methods.add(methodTargets.group(1))
+                    }
+                    def accessors = source =~ /@(Accessor|Invoker)\s*\(\s*"([^"]+)"/
+                    while (accessors.find()) {
+                        methods.add("${accessors.group(1).toLowerCase()}:${accessors.group(2)}")
+                    }
+
+                    rows.add([
+                            mixin     : fqcn,
+                            target    : targets.join('<br>'),
+                            methods   : methods.join('<br>'),
+                            config    : "${config.file.name}:${side}",
+                            packageName: fqcn.substring(0, fqcn.lastIndexOf('.')),
+                            dependency: dependencyFor(config.id, entry),
+                            category  : classification.category,
+                            action    : classification.action
+                    ])
+                }
+            }
+        }
+
+        def categoryOrder = [
+                'CORE_MINECRAFT', 'CORE_CLIENT', 'CREATE_CORE', 'CREATE_CLIENT',
+                'OPTIONAL_COMPAT', 'LOADER_SPECIFIC', 'DEBUG_TEST_UI', 'UNKNOWN'
+        ]
+        def actionOrder = ['KEEP', 'PORT', 'DEFER', 'EXCLUDE_FROM_FORGE_TARGET', 'INVESTIGATE']
+        def categoryCounts = categoryOrder.collectEntries { category ->
+            [(category): rows.count { it.category == category }]
+        }
+        def actionCounts = actionOrder.collectEntries { action ->
+            [(action): rows.count { it.action == action }]
+        }
+        def physicalExclusions = rows.findAll { row ->
+            row.config.startsWith('sable.mixins.json:') &&
+                    row.category in ['OPTIONAL_COMPAT', 'DEBUG_TEST_UI']
+        }
+
+        def markdown = new StringBuilder()
+        markdown << '# Sable Mixin Backport Matrix\n\n'
+        markdown << 'Generated mechanically by `:forge:generateMixinBackportMatrix`. '
+        markdown << 'Upstream configs remain authoritative and unmodified.\n\n'
+        markdown << '## Summary\n\n'
+        markdown << "Total Mixins: ${rows.size()}\n\n"
+        markdown << '| Category | Count |\n|---|---:|\n'
+        categoryCounts.each { category, count -> markdown << "| ${category} | ${count} |\n" }
+        markdown << '\n| Initial action | Count |\n|---|---:|\n'
+        actionCounts.each { action, count -> markdown << "| ${action} | ${count} |\n" }
+        markdown << '\n## Forge Source Selection\n\n'
+        markdown << 'The curated Forge common config contains 193 entries: 124 `CORE_MINECRAFT` and 69 `CORE_CLIENT`. '
+        markdown << 'The Forge Java source set physically excludes 22 common classes so optional/debug targets never reach the annotation processor: '
+        markdown << "${physicalExclusions.count { it.category == 'OPTIONAL_COMPAT' }} `OPTIONAL_COMPAT` and "
+        markdown << "${physicalExclusions.count { it.category == 'DEBUG_TEST_UI' }} `DEBUG_TEST_UI`.\n\n"
+        markdown << 'The narrow source globs are `compatibility/**`, `sublevel_render/impl/sodium/**`, '
+        markdown << '`debug_render/**`, `loaded_chunk_debug/**`, and `game_test/**`. '
+        markdown << 'NeoForge sources remain outside the Forge source set; no upstream source or config is deleted or modified.\n'
+        markdown << '\n## Inventory\n\n'
+        markdown << '| Mixin class | Target class | Target methods | Source config | Package | Dependency/mod | Category | Initial action |\n'
+        markdown << '|---|---|---|---|---|---|---|---|\n'
+        rows.each { row ->
+            markdown << '| ' + [
+                    row.mixin, row.target, row.methods, row.config, row.packageName,
+                    row.dependency, row.category, row.action
+            ].collect(escapeCell).join(' | ') + ' |\n'
+        }
+        rootProject.file('MIXIN_BACKPORT_MATRIX.md').setText(markdown.toString(), 'UTF-8')
+
+        def common = parsedConfigs.common
+        def curated = [
+                required          : true,
+                package           : common.package,
+                compatibilityLevel: 'JAVA_17',
+                minVersion        : '0.8',
+                refmap            : 'sable.refmap.json',
+                mixinextras       : [minVersion: '0.5.0'],
+                client            : common.client.findAll { entry ->
+                    classifyMixin('common', 'client', entry as String).category == 'CORE_CLIENT'
+                },
+                mixins            : common.mixins.findAll { entry ->
+                    classifyMixin('common', 'mixins', entry as String).category == 'CORE_MINECRAFT'
+                },
+                injectors         : [defaultRequire: 1]
+        ]
+        project.file('src/main/resources/sable-common-forge.mixins.json').setText(
+                JsonOutput.prettyPrint(JsonOutput.toJson(curated)) + System.lineSeparator(),
+                'UTF-8'
+        )
+
+        logger.lifecycle("Inventoried ${rows.size()} Mixins: ${categoryCounts}")
+        logger.lifecycle("Initial actions: ${actionCounts}")
+    }
+}

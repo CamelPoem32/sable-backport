@@ -1,9 +1,18 @@
+import groovy.json.JsonSlurper
+
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.jar.JarFile
+
 plugins {
     id 'java-library'
     id 'maven-publish'
     id 'net.minecraftforge.gradle'
     id 'checkstyle'
 }
+
+apply plugin: 'org.spongepowered.mixin'
 
 base {
     archivesName = "${mod_id}-forge-${forge_minecraft_version}"
@@ -17,30 +26,6 @@ java {
 minecraft {
     mappings channel: 'official', version: forge_minecraft_version
     accessTransformer = rootProject.file('common/src/main/resources/META-INF/accesstransformer.cfg')
-
-    runs {
-        client {
-            workingDirectory project.file('run')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'debug'
-            mods {
-                sable {
-                    source sourceSets.main
-                }
-            }
-        }
-
-        server {
-            workingDirectory project.file('run-server')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'debug'
-            mods {
-                sable {
-                    source sourceSets.main
-                }
-            }
-        }
-    }
 }
 
 sourceSets {
@@ -48,44 +33,187 @@ sourceSets {
         java {
             srcDir rootProject.file('common/src/main/java')
             srcDir 'src/main/java'
+            exclude 'dev/ryanhcode/sable/mixin/compatibility/**'
+            exclude 'dev/ryanhcode/sable/mixin/sublevel_render/impl/sodium/**'
+            exclude 'dev/ryanhcode/sable/mixin/debug_render/**'
+            exclude 'dev/ryanhcode/sable/mixin/loaded_chunk_debug/**'
+            exclude 'dev/ryanhcode/sable/mixin/game_test/**'
         }
         resources {
             srcDir rootProject.file('common/src/main/resources')
             srcDir 'src/main/resources'
             exclude 'architectury.common.json'
             exclude 'sable.accesswidener'
+            exclude 'sable.mixins.json'
         }
     }
 }
 
+mixin {
+    add sourceSets.main, 'sable.refmap.json'
+    config 'sable-common-forge.mixins.json'
+    config 'sable-forge.mixins.json'
+}
+
+def mixinRefmapWorkFile = layout.buildDirectory.file('tmp/compileJava/compileJava-refmap.json')
+def mixinRefmapOutputFile = layout.buildDirectory.file('classes/java/main/sable.refmap.json')
+
+def syncMixinRefmap = tasks.register('syncMixinRefmap') {
+    group = 'forge backport'
+    description = 'Publishes MixinGradle output even when compileJava stops at the source backport frontier.'
+    inputs.file(mixinRefmapWorkFile).optional()
+    outputs.file(mixinRefmapOutputFile)
+    onlyIf { mixinRefmapWorkFile.get().asFile.isFile() }
+
+    doLast {
+        File source = mixinRefmapWorkFile.get().asFile
+        File destination = mixinRefmapOutputFile.get().asFile
+        Files.createDirectories(destination.parentFile.toPath())
+        Files.copy(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+    }
+}
+
+apply from: rootProject.file('gradle/mixin-backport-inventory.gradle')
+
 repositories {
+    mavenLocal()
     mavenCentral()
     maven { url = 'https://maven.minecraftforge.net' }
-    maven { url = 'https://repo.spongepowered.org/repository/maven-public' }
+    maven { url = 'https://repo.spongepowered.org/maven' }
     maven { url = 'https://maven.parchmentmc.org/' }
     maven { url = 'https://maven.blamejared.com' }
     maven { url = 'https://maven.createmod.net' }
     maven { url = 'https://maven.tterrag.com' }
     maven { url = 'https://maven.ryanhcode.dev/releases' }
     maven { url = 'https://maven.ryanhcode.dev/snapshots' }
+
+    flatDir {
+        dirs layout.buildDirectory.dir('targetModpackRepository')
+    }
 }
 
 def targetModpackModsDir = rootProject.file('../target_modpack/mods')
 def targetCreateJar = new File(targetModpackModsDir, "create-${forge_minecraft_version}-${forge_create_version}.jar")
-def targetCreateJarJarDir = layout.buildDirectory.dir('targetCreateJarJar').get().asFile
+def targetModpackRepository = layout.buildDirectory.dir('targetModpackRepository')
 
-tasks.register('extractTargetCreateJarJar', Copy) {
-    onlyIf { targetCreateJar.exists() }
-    from({ zipTree(targetCreateJar) }) {
-        include 'META-INF/jarjar/*.jar'
-        eachFile { details -> details.path = details.name }
-        includeEmptyDirs = false
+def expectedTargetArtifacts = [
+        create    : [
+                group  : 'local.target',
+                artifact: "create-${forge_minecraft_version}",
+                version: forge_create_version,
+                file   : "create-${forge_minecraft_version}-${forge_create_version}.jar",
+                sha256 : 'A18763BE04F6A7921D2E3BC5E9150B0BB5BC89B5EF45A607E93939972021F932'
+        ],
+        flywheel : [
+                group  : 'com.jozufozu.flywheel',
+                artifact: "flywheel-forge-${forge_minecraft_version}",
+                version: forge_flywheel_version,
+                file   : "flywheel-forge-${forge_minecraft_version}-${forge_flywheel_version}.jar",
+                sha256 : 'FD71EF28C2FC2694E661366A254CE1519791A39E7EC660A87A07212173AFF178'
+        ],
+        registrate: [
+                group  : 'com.tterrag.registrate',
+                artifact: 'Registrate',
+                version: forge_registrate_version,
+                file   : "Registrate-${forge_registrate_version}.jar",
+                sha256 : '226862D4638B77273F4627FBAC871AA0B3AF584DDE377F4CE2CB0C7CC228CF00'
+        ]
+]
+
+def sha256 = { File file ->
+    MessageDigest digest = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[8192]
+        int read
+        while ((read = input.read(buffer)) >= 0) {
+            if (read > 0) {
+                digest.update(buffer, 0, read)
+            }
+        }
     }
-    into targetCreateJarJarDir
+    digest.digest().collect { String.format('%02X', it & 0xFF) }.join()
 }
 
-tasks.named('compileJava') {
-    dependsOn tasks.named('extractTargetCreateJarJar')
+def prepareTargetModpackDependencies = tasks.register('prepareTargetModpackDependencies') {
+    group = 'forge backport'
+    description = 'Validates and stages the exact Create, Flywheel, and Registrate target-modpack jars.'
+
+    inputs.file(targetCreateJar)
+    outputs.dir(targetModpackRepository)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create jar: ${targetCreateJar}")
+        }
+
+        def createSpec = expectedTargetArtifacts.create
+        if (sha256(targetCreateJar) != createSpec.sha256) {
+            throw new GradleException("Unexpected SHA-256 for ${targetCreateJar.name}")
+        }
+
+        File repositoryDir = targetModpackRepository.get().asFile
+        project.delete(repositoryDir)
+        if (!repositoryDir.mkdirs() && !repositoryDir.isDirectory()) {
+            throw new GradleException("Unable to create target dependency repository: ${repositoryDir}")
+        }
+
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            String implementationVersion = createJar.manifest?.mainAttributes?.getValue('Implementation-Version')
+            if (implementationVersion != createSpec.version) {
+                throw new GradleException("Expected Create ${createSpec.version}, found ${implementationVersion}")
+            }
+
+            Files.copy(
+                    targetCreateJar.toPath(),
+                    new File(repositoryDir, createSpec.file).toPath(),
+                    StandardCopyOption.REPLACE_EXISTING
+            )
+
+            def metadataEntry = createJar.getJarEntry('META-INF/jarjar/metadata.json')
+            if (metadataEntry == null) {
+                throw new GradleException('Create jar does not contain META-INF/jarjar/metadata.json')
+            }
+
+            def metadata
+            createJar.getInputStream(metadataEntry).withCloseable { input ->
+                metadata = new JsonSlurper().parse(input)
+            }
+
+            expectedTargetArtifacts.findAll { key, ignored -> key != 'create' }.each { key, spec ->
+                def embedded = metadata.jars.find { jar ->
+                    jar.identifier.group == spec.group && jar.identifier.artifact == spec.artifact
+                }
+                if (embedded == null) {
+                    throw new GradleException("Create jar does not contain ${spec.group}:${spec.artifact}")
+                }
+                if (embedded.version.artifactVersion != spec.version) {
+                    throw new GradleException(
+                            "Expected ${spec.artifact} ${spec.version}, found ${embedded.version.artifactVersion}"
+                    )
+                }
+
+                def embeddedEntry = createJar.getJarEntry(embedded.path as String)
+                if (embeddedEntry == null) {
+                    throw new GradleException("Missing embedded jar entry: ${embedded.path}")
+                }
+
+                File stagedJar = new File(repositoryDir, spec.file)
+                createJar.getInputStream(embeddedEntry).withCloseable { input ->
+                    Files.copy(input, stagedJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+                if (sha256(stagedJar) != spec.sha256) {
+                    throw new GradleException("Unexpected SHA-256 for embedded ${spec.file}")
+                }
+            }
+        } finally {
+            createJar.close()
+        }
+
+        expectedTargetArtifacts.each { key, spec ->
+            logger.lifecycle("Staged ${spec.group}:${spec.artifact}:${spec.version} (${spec.sha256})")
+        }
+    }
 }
 
 dependencies {
@@ -93,13 +221,51 @@ dependencies {
 
     compileOnly 'org.spongepowered:mixin:0.8.5'
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
-    compileOnly 'io.github.llamalad7:mixinextras-common:0.4.1'
-    annotationProcessor 'io.github.llamalad7:mixinextras-common:0.4.1'
+    compileOnly 'io.github.llamalad7:mixinextras-common:0.5.3'
+    annotationProcessor 'io.github.llamalad7:mixinextras-common:0.5.3'
 
     implementation 'org.apache.maven:maven-artifact:3.8.5'
 
-    compileOnly fg.deobf(files(targetCreateJar))
-    compileOnly fg.deobf(fileTree(dir: targetCreateJarJarDir, include: ['*.jar']))
+    compileOnly fg.deobf("local.target:create-${forge_minecraft_version}:${forge_create_version}")
+    compileOnly fg.deobf("local.target:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
+    compileOnly fg.deobf("local.target:Registrate:${forge_registrate_version}")
+}
+
+tasks.named('compileJava') {
+    dependsOn prepareTargetModpackDependencies
+    finalizedBy syncMixinRefmap
+}
+
+tasks.register('verifyTargetModpackDependencies') {
+    group = 'verification'
+    description = 'Confirms that all exact local target dependencies resolve through ForgeGradle mappings.'
+    dependsOn prepareTargetModpackDependencies
+
+    doLast {
+        File repositoryDir = targetModpackRepository.get().asFile.canonicalFile
+        def expectedModules = expectedTargetArtifacts.values().collect { it.artifact } as Set
+        def resolved = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
+            artifact.moduleVersion.id.group == 'local.target'
+        }
+
+        if ((resolved.collect { it.name } as Set) != expectedModules) {
+            throw new GradleException(
+                    "Expected mapped local modules ${expectedModules}, resolved ${resolved.collect { it.name }}"
+            )
+        }
+
+        resolved.each { artifact ->
+            String version = artifact.moduleVersion.id.version
+            File file = artifact.file.canonicalFile
+            if (!version.contains("_mapped_official_${forge_minecraft_version}")) {
+                throw new GradleException("Local dependency was not deobfuscated: ${artifact.moduleVersion.id}")
+            }
+            if (file.toPath().startsWith(repositoryDir.toPath())) {
+                throw new GradleException("Compile classpath still uses raw staged jar: ${file}")
+            }
+            logger.lifecycle("Mapped ${artifact.moduleVersion.id} -> ${file}")
+        }
+    }
 }
 
 processResources {
