@@ -40,7 +40,7 @@ public class PersistentEntitySectionManagerMixin {
 
                 if (inPlot && (entity.getRemovalReason() == null || entity.getRemovalReason().shouldSave())) {
                     if (entity.isVehicle() && entity.hasExactlyOnePlayerPassenger()) {
-                        entity.getPassengers().getFirst().removeVehicle();
+                        entity.getPassengers().get(0).removeVehicle();
                     }
                 }
             }

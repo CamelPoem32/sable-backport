@@ -1,21 +1,16 @@
 package dev.ryanhcode.sable.sublevel.render.vanilla;
 
 import com.mojang.blaze3d.shaders.Uniform;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
-import dev.ryanhcode.sable.compatibility.SableIrisCompat;
 import dev.ryanhcode.sable.mixin.sublevel_render.RenderSectionAccessor;
 import dev.ryanhcode.sable.mixinterface.sublevel_render.vanilla.RenderSectionExtension;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
-import dev.ryanhcode.sable.sublevel.water_occlusion.WaterOcclusionContainer;
-import dev.ryanhcode.sable.sublevel.water_occlusion.WaterOcclusionRegion;
-import foundry.veil.api.compat.IrisCompat;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectList;
 import net.minecraft.client.Camera;
@@ -289,29 +284,6 @@ public class VanillaChunkedSubLevelRenderData implements SubLevelRenderData {
         final Quaterniondc renderRot = renderPose.orientation();
         final Vector3d renderCOR = renderRot.transform(new Vector3d(renderPose.rotationPoint()).sub(this.origin));
 
-        float[] oldFogColor = null;
-
-        if (shader.FOG_COLOR != null) {
-            final WaterOcclusionContainer<?> container = WaterOcclusionContainer.getContainer(this.subLevel.getLevel());
-
-            final Camera camera = Minecraft.getInstance().gameRenderer.getMainCamera();
-            final WaterOcclusionRegion occludingRegion = container.getOccludingRegion(camera.getPosition());
-
-            // TODO: Redo to swap to main fog instead of just getting rid of it
-            if (occludingRegion != null && Sable.HELPER.getContaining(this.subLevel.getLevel(), occludingRegion.getVolume().getMinBlockPos()) == this.subLevel) {
-                oldFogColor = RenderSystem.getShaderFogColor();
-                shader.FOG_COLOR.set(0.0f, 0.0f, 0.0f, 0.0f);
-                shader.FOG_COLOR.upload();
-            }
-        }
-
-        final Uniform sableSkyLightScale = shader.getUniform("SableSkyLightScale");
-        if (sableSkyLightScale != null) {
-            final int skyLight = this.subLevel.getLatestSkyLightScale();
-            sableSkyLightScale.set(skyLight / 15.0f);
-            sableSkyLightScale.upload();
-        }
-
         renderPos.sub(renderCOR);
 
         final Matrix4f transform = TRANSFORM.identity();
@@ -325,10 +297,6 @@ public class VanillaChunkedSubLevelRenderData implements SubLevelRenderData {
         if (shader.MODEL_VIEW_MATRIX != null) {
             shader.MODEL_VIEW_MATRIX.set(modelView.mul(transform, MODEL_MATRIX));
             shader.MODEL_VIEW_MATRIX.upload();
-
-            if (IrisCompat.isLoaded()) {
-                SableIrisCompat.refreshModelMatrices(shader);
-            }
         }
 
         // TODO: sorting
@@ -355,9 +323,6 @@ public class VanillaChunkedSubLevelRenderData implements SubLevelRenderData {
             chunkOffsetUniform.set(0f, 0f, 0f);
         }
 
-        if (oldFogColor != null) {
-            shader.FOG_COLOR.set(oldFogColor[0], oldFogColor[1], oldFogColor[2], oldFogColor[3]);
-        }
     }
 
     @Override

@@ -119,7 +119,7 @@ public class SubLevelSelector {
                 if (subLevels.isEmpty()) {
                     yield Collections.emptySet();
                 }
-                yield Collections.singleton(subLevels.getLast());
+                yield Collections.singleton(subLevels.get(subLevels.size() - 1));
             }
         };
 

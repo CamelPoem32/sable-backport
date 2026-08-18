@@ -4,7 +4,6 @@ import com.mojang.logging.LogUtils;
 import dev.ryanhcode.sable.annotation.MixinModVersionConstraint;
 import dev.ryanhcode.sable.platform.SableLoaderPlatform;
 import foundry.veil.Veil;
-import foundry.veil.api.compat.SodiumCompat;
 import it.unimi.dsi.fastutil.objects.Object2BooleanMap;
 import it.unimi.dsi.fastutil.objects.Object2BooleanOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
@@ -32,7 +31,7 @@ public abstract class AbstractSableMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public void onLoad(final String mixinPackage) {
-        this.sodiumPresent = SodiumCompat.isLoaded();
+        this.sodiumPresent = Veil.platform().isSodiumLoaded();
 
         LOGGER.info("Using {} renderer mixins", this.sodiumPresent ? "Sodium" : "Vanilla");
     }

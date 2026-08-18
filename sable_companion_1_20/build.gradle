@@ -1,0 +1,96 @@
+import java.util.jar.JarFile
+
+plugins {
+    id 'java-library'
+    id 'net.minecraftforge.gradle'
+}
+
+group = 'dev.ryanhcode.sable-companion'
+version = sable_companion_version
+
+base {
+    archivesName = "sable-companion-common-${forge_minecraft_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(forge_java_version)
+    withSourcesJar()
+}
+
+minecraft {
+    mappings channel: 'official', version: forge_minecraft_version
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.minecraftforge.net' }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${forge_minecraft_version}-${forge_version}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = forge_java_version as int
+}
+
+jar {
+    from('LICENSE') {
+        into 'META-INF'
+        rename { 'LICENSE_sable_companion' }
+    }
+}
+
+tasks.register('verifySableCompanionBackport') {
+    group = 'verification'
+    description = 'Verifies the Java 17 common-library shape of the local Sable Companion backport.'
+    dependsOn tasks.named('jar')
+
+    doLast {
+        def sourceFiles = fileTree('src/main/java') { include '**/*.java' }.files
+        if (sourceFiles.size() != 12) {
+            throw new GradleException("Expected 12 Companion source files, found ${sourceFiles.size()}")
+        }
+
+        File output = tasks.named('jar').get().archiveFile.get().asFile
+        JarFile companionJar = new JarFile(output)
+        try {
+            String servicePath = 'META-INF/services/dev.ryanhcode.sable.companion.SableCompanion'
+            def serviceEntry = companionJar.getJarEntry(servicePath)
+            if (serviceEntry == null) {
+                throw new GradleException("Missing ${servicePath}")
+            }
+            String provider = companionJar.getInputStream(serviceEntry).getText('UTF-8').trim()
+            if (provider != 'dev.ryanhcode.sable.companion.impl.DefaultSableCompanion') {
+                throw new GradleException("Unexpected default Companion provider: ${provider}")
+            }
+
+            if (companionJar.getJarEntry('META-INF/LICENSE_sable_companion') == null) {
+                throw new GradleException('Companion MIT license is missing from the library jar')
+            }
+            if (companionJar.getJarEntry('META-INF/mods.toml') != null ||
+                    companionJar.getJarEntry('META-INF/neoforge.mods.toml') != null) {
+                throw new GradleException('Companion library must not contain standalone mod metadata')
+            }
+
+            def classEntry = companionJar.getJarEntry('dev/ryanhcode/sable/companion/SableCompanion.class')
+            if (classEntry == null) {
+                throw new GradleException('Missing SableCompanion.class')
+            }
+            byte[] header = new byte[8]
+            companionJar.getInputStream(classEntry).withCloseable { input ->
+                if (input.read(header) != header.length) {
+                    throw new GradleException('Unable to read Companion class header')
+                }
+            }
+            int majorVersion = ((header[6] & 0xFF) << 8) | (header[7] & 0xFF)
+            if (majorVersion != 61) {
+                throw new GradleException("Expected Java 17 class major 61, found ${majorVersion}")
+            }
+        } finally {
+            companionJar.close()
+        }
+
+        logger.lifecycle("Verified ${output.name}: 12 sources, Java 17, common ServiceLoader library, no mod metadata")
+    }
+}

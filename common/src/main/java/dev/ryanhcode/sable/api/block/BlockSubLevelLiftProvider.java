@@ -59,7 +59,7 @@ public interface BlockSubLevelLiftProvider {
             toVisit.add(positions.iterator().next());
 
             while (!toVisit.isEmpty()) {
-                final BlockPos pos = toVisit.removeLast();
+                final BlockPos pos = toVisit.remove(toVisit.size() - 1);
 
                 if (groupBlocks.contains(pos)) {
                     continue;

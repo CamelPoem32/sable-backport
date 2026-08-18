@@ -1,15 +1,11 @@
 package dev.ryanhcode.sable.sublevel.render.dispatcher;
 
 import com.mojang.blaze3d.shaders.FogShape;
-import com.mojang.blaze3d.shaders.Uniform;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.index.SableTags;
 import dev.ryanhcode.sable.mixinterface.BlockEntityRenderDispatcherExtension;
-import dev.ryanhcode.sable.mixinterface.dynamic_directional_shading.ModelBlockRendererCacheExtension;
-import dev.ryanhcode.sable.render.sky_light_shadow.SableDynamicSkyLightShadowPreProcessor;
-import dev.ryanhcode.sable.render.sky_light_shadow.SableSkyLightShadows;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
 import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaChunkedSubLevelRenderData;
@@ -17,17 +13,15 @@ import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaSingleSubLevelRenderDa
 import foundry.veil.api.client.render.CullFrustum;
 import foundry.veil.api.client.render.MatrixStack;
 import foundry.veil.api.client.render.VeilRenderBridge;
-import foundry.veil.api.client.render.profiler.RenderProfilerCounter;
-import foundry.veil.api.client.render.profiler.VeilRenderProfiler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.PrioritizeChunkUpdates;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.ShaderInstance;
-import net.minecraft.client.renderer.block.ModelBlockRenderer;
 import net.minecraft.client.renderer.chunk.RenderRegionCache;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -39,43 +33,15 @@ import org.joml.Vector3f;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.SequencedSet;
+import java.util.Set;
 import java.util.function.Consumer;
 
 public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher {
 
-    private final SequencedSet<RenderType> singleBlockLayers;
+    private final Set<RenderType> singleBlockLayers;
 
     public VanillaSubLevelRenderDispatcher() {
         this.singleBlockLayers = new LinkedHashSet<>();
-    }
-
-    public static void setupDynamicEffects(final ShaderInstance shader, final boolean onSubLevel, final boolean upload) {
-        final Uniform sableEnableNormalLighting = shader.getUniform("SableEnableNormalLighting");
-        final Uniform sableEnableSkyLightShadows = shader.getUniform(SableDynamicSkyLightShadowPreProcessor.ENABLE_UNIFORM);
-
-        if (sableEnableNormalLighting != null) {
-            sableEnableNormalLighting.set(onSubLevel ? 1.0F : 0.0F);
-            if (upload) {
-                sableEnableNormalLighting.upload();
-            }
-        }
-
-        if (sableEnableSkyLightShadows != null) {
-            sableEnableSkyLightShadows.set(onSubLevel || !SableSkyLightShadows.isEnabled() ? 0.0F : 1.0F);
-            if (upload) {
-                sableEnableSkyLightShadows.upload();
-            }
-        }
-
-        final Uniform sableSkyLightScale = shader.getUniform("SableSkyLightScale");
-
-        if (sableSkyLightScale != null) {
-            sableSkyLightScale.set(1.0f);
-            if (upload) {
-                sableSkyLightScale.upload();
-            }
-        }
     }
 
     /**
@@ -141,16 +107,14 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
             shader.FOG_SHAPE.upload();
         }
 
-        VanillaSubLevelRenderDispatcher.setupDynamicEffects(shader, true, true);
-
-        final VeilRenderProfiler profiler = VeilRenderProfiler.get();
-        profiler.push("sublevel_render", RenderProfilerCounter.STANDARD_GEOMETRY);
+        final ProfilerFiller profiler = Minecraft.getInstance().getProfiler();
+        profiler.push("sublevel_render");
         for (final ClientSubLevel sublevel : sublevels) {
             final SubLevelRenderData data = sublevel.getRenderData();
 
             // We'll render the single block sub-levels in a pass afterward
             if (!(data instanceof final VanillaChunkedSubLevelRenderData chunkedRenderData)) {
-                this.singleBlockLayers.addLast(renderType);
+                this.singleBlockLayers.add(renderType);
                 continue;
             }
 
@@ -161,8 +125,6 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
         if (shader.FOG_SHAPE != null && fogShape != FogShape.SPHERE) {
             shader.FOG_SHAPE.set(fogShape.getIndex());
         }
-
-        VanillaSubLevelRenderDispatcher.setupDynamicEffects(shader, false, false);
     }
 
     @Override
@@ -171,11 +133,8 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
             return;
         }
 
-        final ModelBlockRendererCacheExtension ext = (ModelBlockRendererCacheExtension) ModelBlockRenderer.CACHE.get();
-        ext.sable$setOnSubLevel(true);
-
-        final VeilRenderProfiler profiler = VeilRenderProfiler.get();
-        profiler.push("sublevel_render_single", RenderProfilerCounter.STANDARD_GEOMETRY);
+        final ProfilerFiller profiler = Minecraft.getInstance().getProfiler();
+        profiler.push("sublevel_render_single");
         for (final RenderType layer : this.singleBlockLayers) {
             final BufferBuilder consumer = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK);
 
@@ -197,20 +156,16 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
                 final ShaderInstance shader = Objects.requireNonNull(RenderSystem.getShader());
                 shader.setDefaultUniforms(VertexFormat.Mode.QUADS, modelView, projection, Minecraft.getInstance().getWindow());
                 shader.apply();
-                setupDynamicEffects(shader, true, true);
 
                 layer.draw(meshData);
 
                 // Match every setup with a clear
                 layer.clearRenderState();
 
-                setupDynamicEffects(shader, false, false);
                 shader.clear();
             }
         }
         profiler.pop();
-
-        ext.sable$setOnSubLevel(false);
 
         this.singleBlockLayers.clear();
     }

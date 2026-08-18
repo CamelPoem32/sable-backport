@@ -28,11 +28,11 @@ public class ClientLevelMixin implements LevelPoseProviderExtension {
 
     @Override
     public void sable$popPoseSupplier() {
-        this.sable$poseSupplierStack.removeLast();
+        this.sable$poseSupplierStack.remove(this.sable$poseSupplierStack.size() - 1);
     }
 
     @Override
     public Pose3dc sable$getPose(final SubLevel subLevel) {
-        return this.sable$poseSupplierStack.getLast().apply(subLevel);
+        return this.sable$poseSupplierStack.get(this.sable$poseSupplierStack.size() - 1).apply(subLevel);
     }
 }

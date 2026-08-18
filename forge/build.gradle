@@ -1,4 +1,5 @@
 import groovy.json.JsonSlurper
+import org.gradle.api.attributes.LibraryElements
 
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -28,16 +29,65 @@ minecraft {
     accessTransformer = rootProject.file('common/src/main/resources/META-INF/accesstransformer.cfg')
 }
 
+def forgeBackportSourceExclusions = [
+        // M0-M2 optional integrations and debug/test Mixins.
+        'dev/ryanhcode/sable/mixin/compatibility/**',
+        'dev/ryanhcode/sable/mixin/sublevel_render/impl/sodium/**',
+        'dev/ryanhcode/sable/mixin/debug_render/**',
+        'dev/ryanhcode/sable/mixin/loaded_chunk_debug/**',
+        'dev/ryanhcode/sable/mixin/game_test/**',
+
+        // M3 advanced rendering, editor/debug UI, and optional renderer support.
+        'dev/ryanhcode/sable/compatibility/SableIrisCompat.java',
+        'dev/ryanhcode/sable/debug/**',
+        'dev/ryanhcode/sable/mixin/config/GameRendererAccessor.java',
+        'dev/ryanhcode/sable/mixin/dynamic_directional_shading/**',
+        'dev/ryanhcode/sable/mixin/particle/SuspendedParticleMixin.java',
+        'dev/ryanhcode/sable/mixin/sky_light_shadow/**',
+        'dev/ryanhcode/sable/mixin/sublevel_render/fancy/**',
+        'dev/ryanhcode/sable/mixin/sublevel_render/impl/vanilla/LevelRendererMixin.java',
+        'dev/ryanhcode/sable/mixin/sublevel_render/impl/vanilla/water_occlusion/**',
+        'dev/ryanhcode/sable/mixin/water_occlusion/**',
+        'dev/ryanhcode/sable/mixinterface/compatibility/iris/**',
+        'dev/ryanhcode/sable/mixinterface/dynamic_directional_shading/**',
+        'dev/ryanhcode/sable/mixinterface/water_occlusion/**',
+        'dev/ryanhcode/sable/network/packets/tcp/ClientboundEnterGizmoPacket.java',
+        'dev/ryanhcode/sable/network/packets/tcp/ServerboundGizmoMoveSubLevelPacket.java',
+        'dev/ryanhcode/sable/render/dynamic_shade/**',
+        'dev/ryanhcode/sable/render/region/**',
+        'dev/ryanhcode/sable/render/sky_light_shadow/**',
+        'dev/ryanhcode/sable/render/water_occlusion/**',
+        'dev/ryanhcode/sable/sublevel/render/dispatcher/FancySubLevelRenderDispatcher.java',
+        'dev/ryanhcode/sable/sublevel/render/dispatcher/ReachAroundSubLevelRenderDispatcher.java',
+        'dev/ryanhcode/sable/sublevel/render/dispatcher/SubLevelTextureCache.java',
+        'dev/ryanhcode/sable/sublevel/render/fancy/**',
+        'dev/ryanhcode/sable/sublevel/render/staging/**',
+        'dev/ryanhcode/sable/sublevel/storage/debug/**',
+        'dev/ryanhcode/sable/sublevel/water_occlusion/**'
+]
+def forgeCommonReplacementFiles = [
+        'dev/ryanhcode/sable/SableConfig.java',
+        'dev/ryanhcode/sable/SableClientConfig.java'
+] as Set
+def commonJavaRootPath = rootProject.file('common/src/main/java').toPath().toAbsolutePath().normalize()
+
+ext.forgeBackportSourceExclusions = forgeBackportSourceExclusions
+ext.forgeCommonReplacementFiles = forgeCommonReplacementFiles
+
 sourceSets {
     main {
         java {
             srcDir rootProject.file('common/src/main/java')
             srcDir 'src/main/java'
-            exclude 'dev/ryanhcode/sable/mixin/compatibility/**'
-            exclude 'dev/ryanhcode/sable/mixin/sublevel_render/impl/sodium/**'
-            exclude 'dev/ryanhcode/sable/mixin/debug_render/**'
-            exclude 'dev/ryanhcode/sable/mixin/loaded_chunk_debug/**'
-            exclude 'dev/ryanhcode/sable/mixin/game_test/**'
+            exclude forgeBackportSourceExclusions
+            exclude { element ->
+                def absolute = element.file.toPath().toAbsolutePath().normalize()
+                if (!absolute.startsWith(commonJavaRootPath)) {
+                    return false
+                }
+                String relative = commonJavaRootPath.relativize(absolute).toString().replace('\\', '/')
+                forgeCommonReplacementFiles.contains(relative)
+            }
         }
         resources {
             srcDir rootProject.file('common/src/main/resources')
@@ -89,6 +139,22 @@ repositories {
 
     flatDir {
         dirs layout.buildDirectory.dir('targetModpackRepository')
+    }
+}
+
+configurations {
+    compileClasspath {
+        attributes {
+            attribute(
+                    LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+                    objects.named(LibraryElements, LibraryElements.JAR)
+            )
+        }
+    }
+    veilRaw {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
     }
 }
 
@@ -219,6 +285,15 @@ def prepareTargetModpackDependencies = tasks.register('prepareTargetModpackDepen
 dependencies {
     minecraft "net.minecraftforge:forge:${forge_minecraft_version}-${forge_version}"
 
+    api(project(':sable_companion_1_20')) {
+        attributes {
+            attribute(
+                    LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+                    objects.named(LibraryElements, LibraryElements.JAR)
+            )
+        }
+    }
+
     compileOnly 'org.spongepowered:mixin:0.8.5'
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
     compileOnly 'io.github.llamalad7:mixinextras-common:0.5.3'
@@ -229,6 +304,11 @@ dependencies {
     compileOnly fg.deobf("local.target:create-${forge_minecraft_version}:${forge_create_version}")
     compileOnly fg.deobf("local.target:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
     compileOnly fg.deobf("local.target:Registrate:${forge_registrate_version}")
+
+    implementation fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}")
+    veilRaw("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}") {
+        transitive = false
+    }
 }
 
 tasks.named('compileJava') {
@@ -268,6 +348,67 @@ tasks.register('verifyTargetModpackDependencies') {
     }
 }
 
+tasks.register('verifyVeilDependency') {
+    group = 'verification'
+    description = 'Confirms ForgeGradle compiles against mapped Veil 1.20 rather than its raw production jar.'
+
+    doLast {
+        def rawFiles = configurations.veilRaw.resolve()
+        if (rawFiles.size() != 1) {
+            throw new GradleException("Expected one raw Veil artifact, resolved ${rawFiles}")
+        }
+        File rawVeil = rawFiles.first().canonicalFile
+
+        def veilArtifacts = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
+            artifact.name == "Veil-forge-${forge_minecraft_version}"
+        }
+        if (veilArtifacts.size() != 1) {
+            throw new GradleException("Expected one compile Veil artifact, resolved ${veilArtifacts*.moduleVersion*.id}")
+        }
+
+        def mappedArtifact = veilArtifacts.first()
+        File mappedVeil = mappedArtifact.file.canonicalFile
+        if (mappedVeil == rawVeil) {
+            throw new GradleException("Compile classpath uses the raw Veil artifact: ${rawVeil}")
+        }
+        if (sha256(mappedVeil) == sha256(rawVeil)) {
+            throw new GradleException('Mapped and raw Veil artifacts have identical SHA-256 hashes')
+        }
+        if (configurations.compileClasspath.files.any { it.canonicalFile == rawVeil }) {
+            throw new GradleException("Raw Veil jar leaked onto compileClasspath: ${rawVeil}")
+        }
+
+        String canaryPath = 'foundry/veil/api/client/render/VeilRenderSystem.class'
+        def readCanary = { File file ->
+            JarFile jarFile = new JarFile(file)
+            try {
+                def entry = jarFile.getJarEntry(canaryPath)
+                if (entry == null) {
+                    throw new GradleException("${file.name} does not contain ${canaryPath}")
+                }
+                jarFile.getInputStream(entry).withCloseable { input ->
+                    new String(input.readAllBytes(), java.nio.charset.StandardCharsets.ISO_8859_1)
+                }
+            } finally {
+                jarFile.close()
+            }
+        }
+
+        String rawCanary = readCanary(rawVeil)
+        String mappedCanary = readCanary(mappedVeil)
+        if (!rawCanary.contains('m_91087_')) {
+            throw new GradleException('Raw Veil canary does not contain the expected production SRG Minecraft call')
+        }
+        if (!mappedCanary.contains('getInstance')) {
+            throw new GradleException('Mapped Veil canary does not contain the official-mapping Minecraft call')
+        }
+
+        logger.lifecycle("Verified mapped Veil ${mappedArtifact.moduleVersion.id}")
+        logger.lifecycle("  raw:    ${rawVeil} (${sha256(rawVeil)})")
+        logger.lifecycle("  mapped: ${mappedVeil} (${sha256(mappedVeil)})")
+    }
+}
+
 processResources {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
@@ -280,6 +421,7 @@ processResources {
             'forge_loader_version_range': forge_loader_version_range,
             'create_version_range'      : forge_create_version_range,
             'flywheel_version_range'    : forge_flywheel_version_range,
+            'veil_version_range'        : forge_veil_version_range,
             'mod_name'                  : mod_name,
             'mod_author'                : mod_author,
             'mod_id'                    : mod_id,

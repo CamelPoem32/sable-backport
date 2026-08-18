@@ -50,6 +50,7 @@ def forgeBackportMode = providers.gradleProperty('sableForgeBackport')
 
 if (forgeBackportMode) {
     include('forge')
+    include('sable_companion_1_20')
 } else {
     include('common')
     include('fabric')

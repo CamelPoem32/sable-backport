@@ -11,20 +11,17 @@ import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.ticket.SubLevelLoadingTicketType;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
-import dev.ryanhcode.sable.network.packets.tcp.ClientboundEnterGizmoPacket;
 import dev.ryanhcode.sable.network.packets.udp.SableUDPEchoPacket;
 import dev.ryanhcode.sable.network.udp.SableUDPServer;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.storage.holding.GlobalSavedSubLevelPointer;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
-import foundry.veil.api.network.VeilPacketManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.*;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Unit;
 import org.joml.Quaterniondc;
 import org.joml.Vector3d;
@@ -65,9 +62,6 @@ public class SableCommand {
                 );
 
         sableBuilder
-                .then(Commands.literal("engage_gizmo")
-                        .executes(SableCommand::executeEnableGizmoCommand))
-
                 .then(Commands.literal("paused")
                         .executes(SableCommand::executeTogglePhysicsPausedCommand)
                         .then(Commands.argument("paused", BoolArgumentType.bool())
@@ -160,16 +154,6 @@ public class SableCommand {
 
         dispatcher.register(sableBuilder);
 
-    }
-
-    private static int executeEnableGizmoCommand(final CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
-        final CommandSourceStack source = ctx.getSource();
-        final ServerPlayer player = source.getPlayerOrException();
-
-        SableCommandHelper.requireSubLevelPhysicsSystem(ctx).setPaused(true);
-
-        VeilPacketManager.player(player).sendPacket(new ClientboundEnterGizmoPacket());
-        return 1;
     }
 
     private static int executeTogglePhysicsPausedCommand(final CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {

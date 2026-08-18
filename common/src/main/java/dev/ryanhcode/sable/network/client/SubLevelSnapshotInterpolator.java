@@ -80,7 +80,7 @@ public class SubLevelSnapshotInterpolator {
 
     public void receiveSnapshot(final int gameTick, final Pose3dc data) {
         synchronized (this.buffer) {
-            if (this.buffer.isEmpty() || this.buffer.getLast().gameTick != gameTick)
+            if (this.buffer.isEmpty() || this.buffer.get(this.buffer.size() - 1).gameTick != gameTick)
                 this.buffer.add(new Snapshot(gameTick, data));
         }
 
@@ -102,7 +102,7 @@ public class SubLevelSnapshotInterpolator {
 
     public void splitFrom(final SubLevelSnapshotInterpolator other, @NotNull final Pose3dc pose) {
         for (final Snapshot otherSnapshot : other.buffer) {
-            if (otherSnapshot.gameTick >= this.buffer.getFirst().gameTick) continue;
+            if (otherSnapshot.gameTick >= this.buffer.get(0).gameTick) continue;
             final Pose3dc containingPose = otherSnapshot.pose;
             final Pose3d madeUpPastPose = new Pose3d(pose);
 
@@ -122,8 +122,8 @@ public class SubLevelSnapshotInterpolator {
     public void tick(final double backTick) {
         // Remove old snapshots
         final int bufferStartTime = (int) (backTick - 6);
-        while (!this.buffer.isEmpty() && this.buffer.getFirst().gameTick < bufferStartTime) {
-            this.buffer.removeFirst();
+        while (!this.buffer.isEmpty() && this.buffer.get(0).gameTick < bufferStartTime) {
+            this.buffer.remove(0);
         }
 
         // If we have no snapshots, we can't interpolate

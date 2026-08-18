@@ -276,7 +276,7 @@ public class SableAssembleCommands {
         final BoundingBox boundingBox = BoundingBox.fromCorners(BlockPosArgument.getLoadedBlockPos(ctx, "from"), BlockPosArgument.getLoadedBlockPos(ctx, "to"));
 
         final List<BlockPos> blocks = BlockPos.betweenClosedStream(boundingBox).map(BlockPos::immutable).toList();
-        final BlockPos anchor = blocks.getFirst();
+        final BlockPos anchor = blocks.get(0);
 
         final BoundingBox3i bounds = new BoundingBox3i(boundingBox);
         bounds.set(
@@ -304,7 +304,7 @@ public class SableAssembleCommands {
         final BoundingBox boundingBox = BoundingBox.fromCorners(origin.offset(-range, -range, -range), origin.offset(range, range, range));
 
         final List<BlockPos> blocks = BlockPos.betweenClosedStream(boundingBox).map(BlockPos::immutable).toList();
-        final BlockPos anchor = blocks.getFirst();
+        final BlockPos anchor = blocks.get(0);
 
         final BoundingBox3i bounds = new BoundingBox3i(boundingBox);
         bounds.set(

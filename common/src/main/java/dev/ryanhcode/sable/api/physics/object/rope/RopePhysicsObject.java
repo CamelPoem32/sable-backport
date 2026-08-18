@@ -42,7 +42,7 @@ public class RopePhysicsObject implements ArbitraryPhysicsObject {
      */
     @Override
     public void getBoundingBox(final BoundingBox3d dest) {
-        final Vector3d first = this.points.getFirst();
+        final Vector3d first = this.points.get(0);
         dest.set(first.x, first.y, first.z, first.x, first.y, first.z);
         for (final Vector3d point : this.points) {
             dest.expandTo(point.x - this.collisionRadius, point.y - this.collisionRadius, point.z - this.collisionRadius);
@@ -79,7 +79,7 @@ public class RopePhysicsObject implements ArbitraryPhysicsObject {
      * Removes the point at the beginning of the rope
      */
     public void removeFirstPoint() {
-        this.points.removeFirst();
+        this.points.remove(0);
 
         if (this.isActive()) {
             this.handle.removeFirstPoint();
@@ -94,7 +94,7 @@ public class RopePhysicsObject implements ArbitraryPhysicsObject {
      * Adds a point to the beginning of the rope
      */
     public void addPoint(final Vector3dc position) {
-        this.points.addFirst(new Vector3d(position));
+        this.points.add(0, new Vector3d(position));
 
         if (this.isActive()) {
             this.handle.addPoint(position);

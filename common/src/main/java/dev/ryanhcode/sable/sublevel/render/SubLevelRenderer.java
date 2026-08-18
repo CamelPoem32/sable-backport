@@ -3,10 +3,8 @@ package dev.ryanhcode.sable.sublevel.render;
 import dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer;
 import dev.ryanhcode.sable.mixinterface.plot.SubLevelContainerHolder;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
-import dev.ryanhcode.sable.sublevel.render.dispatcher.ReachAroundSubLevelRenderDispatcher;
 import dev.ryanhcode.sable.sublevel.render.dispatcher.SubLevelRenderDispatcher;
 import dev.ryanhcode.sable.sublevel.render.dispatcher.VanillaSubLevelRenderDispatcher;
-import foundry.veil.api.compat.SodiumCompat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 
@@ -78,7 +76,7 @@ public final class SubLevelRenderer {
         VANILLA {
             @Override
             public boolean isSupported() {
-                return !SodiumCompat.isLoaded();
+                return true;
             }
 
             @Override
@@ -89,12 +87,12 @@ public final class SubLevelRenderer {
         SODIUM_REACHAROUND {
             @Override
             public boolean isSupported() {
-                return SodiumCompat.isLoaded();
+                return false;
             }
 
             @Override
             public SubLevelRenderDispatcher create() {
-                return new ReachAroundSubLevelRenderDispatcher();
+                throw new UnsupportedOperationException("Sodium reach-around rendering is deferred on Forge 1.20.1");
             }
         };
 

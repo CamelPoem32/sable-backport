@@ -35,6 +35,11 @@ set APP_HOME=%DIRNAME%
 @rem Resolve any "." and ".." in APP_HOME to make it shorter.
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
+@rem ForgeGradle workers on Windows cannot reliably round-trip non-ASCII paths.
+@rem Use the existing NTFS short aliases while Gradle runs, then restore the caller's directory.
+for %%i in ("%APP_HOME%") do set APP_HOME=%%~fsi
+for %%i in (".") do set GRADLE_START_DIR=%%~fsi
+
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 
@@ -73,16 +78,19 @@ goto fail
 
 
 @rem Execute Gradle
+pushd "%GRADLE_START_DIR%" >NUL
 "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %*
+set EXIT_CODE=%ERRORLEVEL%
+popd >NUL
 
 :end
 @rem End local scope for the variables with windows NT shell
-if %ERRORLEVEL% equ 0 goto mainEnd
+if %EXIT_CODE% equ 0 goto mainEnd
 
 :fail
 rem Set variable GRADLE_EXIT_CONSOLE if you need the _script_ return code instead of
 rem the _cmd.exe /c_ return code!
-set EXIT_CODE=%ERRORLEVEL%
+if not defined EXIT_CODE set EXIT_CODE=%ERRORLEVEL%
 if %EXIT_CODE% equ 0 set EXIT_CODE=1
 if not ""=="%GRADLE_EXIT_CONSOLE%" exit %EXIT_CODE%
 exit /b %EXIT_CODE%

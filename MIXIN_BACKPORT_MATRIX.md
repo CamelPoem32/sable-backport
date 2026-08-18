@@ -21,15 +21,15 @@ Total Mixins: 373
 |---|---:|
 | KEEP | 0 |
 | PORT | 0 |
-| DEFER | 155 |
+| DEFER | 170 |
 | EXCLUDE_FROM_FORGE_TARGET | 18 |
-| INVESTIGATE | 200 |
+| INVESTIGATE | 185 |
 
 ## Forge Source Selection
 
-The curated Forge common config contains 193 entries: 124 `CORE_MINECRAFT` and 69 `CORE_CLIENT`. The Forge Java source set physically excludes 22 common classes so optional/debug targets never reach the annotation processor: 12 `OPTIONAL_COMPAT` and 10 `DEBUG_TEST_UI`.
+The curated Forge common config contains 178 entries. The Forge Java source set physically excludes 76 common classes: 22 optional/debug M0-M2 Mixins and 54 M3 advanced visual/debug sources. Two common config classes are separately replaced by Forge-specific implementations and are not counted as deferred.
 
-The narrow source globs are `compatibility/**`, `sublevel_render/impl/sodium/**`, `debug_render/**`, `loaded_chunk_debug/**`, and `game_test/**`. NeoForge sources remain outside the Forge source set; no upstream source or config is deleted or modified.
+M3 defers shader preprocessing, water occlusion, fancy rendering, Iris/Sodium bridges, editor/gizmo UI, and their support Mixins while retaining the basic vanilla sub-level renderer. NeoForge sources remain outside the Forge source set; no deferred implementation source or upstream Mixin config is deleted.
 
 ## Inventory
 
@@ -47,13 +47,13 @@ The narrow source globs are `compatibility/**`, `sublevel_render/impl/sodium/**`
 | dev.ryanhcode.sable.mixin.clip_overwrite.ClientLevelMixin | ClientLevel | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.clip_overwrite | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.clip_overwrite.GameRendererMixin | GameRenderer | filterHitResult<br>pick(Lnet/minecraft/world/entity/Entity;DDF)Lnet/minecraft/world/phys/HitResult;<br>renderLevel | sable.mixins.json:client | dev.ryanhcode.sable.mixin.clip_overwrite | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.compatibility.iris.ExtendedShaderMixin | ExtendedShader | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.compatibility.iris | Iris/Oculus | OPTIONAL_COMPAT | EXCLUDE_FROM_FORGE_TARGET |
-| dev.ryanhcode.sable.mixin.config.GameRendererAccessor | GameRenderer | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.config | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.config.GameRendererAccessor | GameRenderer | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.config | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.debug_render.DebugRendererMixin | DebugRenderer | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.debug_render | Minecraft | DEBUG_TEST_UI | DEFER |
 | dev.ryanhcode.sable.mixin.debug_render.DebugScreenOverlayMixin | DebugScreenOverlay | getSystemInformation | sable.mixins.json:client | dev.ryanhcode.sable.mixin.debug_render | Minecraft | DEBUG_TEST_UI | DEFER |
 | dev.ryanhcode.sable.mixin.debug_render.LevelRendererMixin | LevelRenderer | renderLevel | sable.mixins.json:client | dev.ryanhcode.sable.mixin.debug_render | Minecraft | DEBUG_TEST_UI | DEFER |
-| dev.ryanhcode.sable.mixin.dynamic_directional_shading.AmbientOcclusionFaceMixin | ModelBlockRenderer.AmbientOcclusionFace | calculate | sable.mixins.json:client | dev.ryanhcode.sable.mixin.dynamic_directional_shading | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.dynamic_directional_shading.ModelBlockRendererCacheMixin | ModelBlockRenderer.Cache | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.dynamic_directional_shading | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.dynamic_directional_shading.ModelBlockRendererMixin | ModelBlockRenderer | putQuadData<br>renderModelFaceFlat | sable.mixins.json:client | dev.ryanhcode.sable.mixin.dynamic_directional_shading | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.dynamic_directional_shading.AmbientOcclusionFaceMixin | ModelBlockRenderer.AmbientOcclusionFace | calculate | sable.mixins.json:client | dev.ryanhcode.sable.mixin.dynamic_directional_shading | Minecraft | CORE_CLIENT | DEFER |
+| dev.ryanhcode.sable.mixin.dynamic_directional_shading.ModelBlockRendererCacheMixin | ModelBlockRenderer.Cache | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.dynamic_directional_shading | Minecraft | CORE_CLIENT | DEFER |
+| dev.ryanhcode.sable.mixin.dynamic_directional_shading.ModelBlockRendererMixin | ModelBlockRenderer | putQuadData<br>renderModelFaceFlat | sable.mixins.json:client | dev.ryanhcode.sable.mixin.dynamic_directional_shading | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.entity.entities_stick_sublevels.ClientPacketListenerMixin | ClientPacketListener | handleTeleportEntity<br>handleMoveEntity | sable.mixins.json:client | dev.ryanhcode.sable.mixin.entity.entities_stick_sublevels | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.entity.entities_stick_sublevels.EntityRenderDispatcherMixin | EntityRenderDispatcher | renderHitbox | sable.mixins.json:client | dev.ryanhcode.sable.mixin.entity.entities_stick_sublevels | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.entity.entities_stick_sublevels.effects.LocalPlayerMixin | LocalPlayer | playSound | sable.mixins.json:client | dev.ryanhcode.sable.mixin.entity.entities_stick_sublevels.effects | Minecraft | CORE_CLIENT | INVESTIGATE |
@@ -82,7 +82,7 @@ The narrow source globs are `compatibility/**`, `sublevel_render/impl/sodium/**`
 | dev.ryanhcode.sable.mixin.particle.LevelRendererMixin | LevelRenderer | addParticleInternal(Lnet/minecraft/core/particles/ParticleOptions;ZZDDDDDD)Lnet/minecraft/client/particle/Particle; | sable.mixins.json:client | dev.ryanhcode.sable.mixin.particle | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.particle.ParticleEngineMixin | ParticleEngine | add<br>*<br>crack | sable.mixins.json:client | dev.ryanhcode.sable.mixin.particle | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.particle.ParticleMixin | Particle | Lnet/minecraft/client/particle/Particle;<init>(Lnet/minecraft/client/multiplayer/ClientLevel;DDDDDD)V<br>move<br>getLightColor | sable.mixins.json:client | dev.ryanhcode.sable.mixin.particle | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.particle.SuspendedParticleMixin | SuspendedParticle | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.particle | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.particle.SuspendedParticleMixin | SuspendedParticle | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.particle | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.particle.TerrainParticleMixin | TerrainParticle | getLightColor | sable.mixins.json:client | dev.ryanhcode.sable.mixin.particle | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.player_freezing.LocalPlayerMixin | LocalPlayer | tick | sable.mixins.json:client | dev.ryanhcode.sable.mixin.player_freezing | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.player_standup.PlayerMixin | Player | canPlayerFitWithinBlocksAndEntitiesWhen | sable.mixins.json:client | dev.ryanhcode.sable.mixin.player_standup | Minecraft | CORE_CLIENT | INVESTIGATE |
@@ -93,27 +93,27 @@ The narrow source globs are `compatibility/**`, `sublevel_render/impl/sodium/**`
 | dev.ryanhcode.sable.mixin.punching.MinecraftMixin | Minecraft | startAttack | sable.mixins.json:client | dev.ryanhcode.sable.mixin.punching | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.punching.MultiPlayerGameModeMixin | MultiPlayerGameMode | startDestroyBlock | sable.mixins.json:client | dev.ryanhcode.sable.mixin.punching | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.respawn_point.sleeping.LivingEntityRendererMixin | LivingEntityRenderer | render(Lnet/minecraft/world/entity/LivingEntity;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V | sable.mixins.json:client | dev.ryanhcode.sable.mixin.respawn_point.sleeping | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.sky_light_shadow.LevelRendererMixin | LevelRenderer | renderSectionLayer<br>renderLevel | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sky_light_shadow | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.sky_light_shadow.LevelRendererMixin | LevelRenderer | renderSectionLayer<br>renderLevel | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sky_light_shadow | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.stop_rain.LevelRenderMixin | LevelRenderer | renderSnowAndRain<br>tickRain | sable.mixins.json:client | dev.ryanhcode.sable.mixin.stop_rain | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.sublevel_render.BlockEntityRenderDispatcherMixin | BlockEntityRenderDispatcher | setupAndRender<br>render | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.sublevel_render.LevelRendererMixin | LevelRenderer | allChanged<br>renderLevel | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.sublevel_render.RenderSectionAccessor | SectionRenderDispatcher.RenderSection | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.sublevel_render.RenderSectionMixin | SectionRenderDispatcher.RenderSection | setDirty | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.sublevel_render.block_entity_render.LevelRendererMixin | LevelRenderer | <init><br>renderLevel | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.block_entity_render | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.sublevel_render.fancy.ProgramMixin | Program | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.fancy | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.sublevel_render.fancy.ProgramMixin | Program | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.fancy | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.sublevel_render.impl.sodium.LevelRendererMixin | LevelRenderer | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.impl.sodium | Sodium/Embeddium | OPTIONAL_COMPAT | EXCLUDE_FROM_FORGE_TARGET |
 | dev.ryanhcode.sable.mixin.sublevel_render.impl.sodium.SodiumWorldRendererMixin | SodiumWorldRenderer | getVisibleChunkCount<br>setupTerrain<br>scheduleRebuildForChunk(IIIZ)V<br>drawChunkLayer | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.impl.sodium | Sodium/Embeddium | OPTIONAL_COMPAT | EXCLUDE_FROM_FORGE_TARGET |
-| dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla.LevelRendererMixin | LevelRenderer | compileSections<br>setupRender<br>isSectionCompiled<br>renderSectionLayer | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla.LevelRendererMixin | LevelRenderer | compileSections<br>setupRender<br>isSectionCompiled<br>renderSectionLayer | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla.ViewAreaMixin | ViewArea | setDirty | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla.water_occlusion.LevelRendererMixin | LevelRenderer | renderLevel<br>renderSectionLayer | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla.water_occlusion | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla.water_occlusion.LevelRendererMixin | LevelRenderer | renderLevel<br>renderSectionLayer | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla.water_occlusion | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.sublevel_sounds.AbstractSoundInstanceMixin | AbstractSoundInstance | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_sounds | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.sublevel_sounds.ChannelAccessor | Channel | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_sounds | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.sublevel_sounds.ClientLevelMixin | ClientLevel | playSound | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_sounds | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.sublevel_sounds.SoundEngineMixin | SoundEngine | play<br>stop(Lnet/minecraft/client/resources/sounds/SoundInstance;)V<br>tickNonPaused | sable.mixins.json:client | dev.ryanhcode.sable.mixin.sublevel_sounds | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.toast.IntegratedServerMixin | IntegratedServer | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.toast | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.water_occlusion.CameraMixin | Camera | getFluidInCamera | sable.mixins.json:client | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.water_occlusion.FogRendererMixin | FogRenderer | * | sable.mixins.json:client | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.water_occlusion.GameRendererMixin | GameRenderer | render | sable.mixins.json:client | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.water_occlusion.CameraMixin | Camera | getFluidInCamera | sable.mixins.json:client | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_CLIENT | DEFER |
+| dev.ryanhcode.sable.mixin.water_occlusion.FogRendererMixin | FogRenderer | * | sable.mixins.json:client | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_CLIENT | DEFER |
+| dev.ryanhcode.sable.mixin.water_occlusion.GameRendererMixin | GameRenderer | render | sable.mixins.json:client | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.assembly.AbstractFurnaceBlockEntityMixin | AbstractFurnaceBlockEntity | - | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.assembly | Minecraft | CORE_MINECRAFT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.block_decal_render.ServerLevelMixin | ServerLevel | destroyBlockProgress | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.block_decal_render | Minecraft | CORE_MINECRAFT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.block_placement.BlockPlaceContextMixin | BlockPlaceContext | *<br>canPlace | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.block_placement | Minecraft | CORE_MINECRAFT | INVESTIGATE |
@@ -245,9 +245,9 @@ The narrow source globs are `compatibility/**`, `sublevel_render/impl/sodium/**`
 | dev.ryanhcode.sable.mixin.voxel_shape_iteration.BitSetDiscreteVoxelShapeAccessor | BitSetDiscreteVoxelShape | - | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.voxel_shape_iteration | Minecraft | CORE_MINECRAFT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.voxel_shape_iteration.DiscreteVoxelShapeAccessor | DiscreteVoxelShape | - | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.voxel_shape_iteration | Minecraft | CORE_MINECRAFT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.voxel_shape_iteration.VoxelShapeMixin | VoxelShape | - | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.voxel_shape_iteration | Minecraft | CORE_MINECRAFT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.water_occlusion.EntityMixin | Entity | updateFluidHeightAndDoFluidPushing<br>updateSwimming<br>updateFluidOnEyes | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_MINECRAFT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.water_occlusion.LevelsMixin | ServerLevel<br>ClientLevel | - | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_MINECRAFT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.water_occlusion.WaterFluidMixin | WaterFluid | animateTick | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_MINECRAFT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.water_occlusion.EntityMixin | Entity | updateFluidHeightAndDoFluidPushing<br>updateSwimming<br>updateFluidOnEyes | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_MINECRAFT | DEFER |
+| dev.ryanhcode.sable.mixin.water_occlusion.LevelsMixin | ServerLevel<br>ClientLevel | - | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_MINECRAFT | DEFER |
+| dev.ryanhcode.sable.mixin.water_occlusion.WaterFluidMixin | WaterFluid | animateTick | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.water_occlusion | Minecraft | CORE_MINECRAFT | DEFER |
 | dev.ryanhcode.sable.mixin.world_border.LevelMixin | Level | <init> | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.world_border | Minecraft | CORE_MINECRAFT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.world_border.WorldBorderMixin | WorldBorder | isWithinBounds(DDD)Z<br>clampToBounds(DDD)Lnet/minecraft/core/BlockPos;<br>isInsideCloseToBorder | sable.mixins.json:mixins | dev.ryanhcode.sable.mixin.world_border | Minecraft | CORE_MINECRAFT | INVESTIGATE |
 | dev.ryanhcode.sable.neoforge.mixin.block_entity_visible.LevelRendererMixin | LevelRenderer | renderLevel | sable-neoforge.mixins.json:client | dev.ryanhcode.sable.neoforge.mixin.block_entity_visible | NeoForge | LOADER_SPECIFIC | INVESTIGATE |

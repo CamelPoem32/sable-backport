@@ -4,7 +4,6 @@ import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundFloatingBlockMaterialPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundPhysicsPropertyPacket;
-import dev.ryanhcode.sable.physics.chunk.VoxelNeighborhoodState;
 import dev.ryanhcode.sable.physics.config.FloatingBlockMaterialDataHandler;
 import dev.ryanhcode.sable.physics.config.block_properties.PhysicsBlockPropertiesDefinitionLoader;
 import dev.ryanhcode.sable.physics.floating_block.FloatingBlockController;
@@ -13,7 +12,6 @@ import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.plot.LevelPlot;
 import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
 import dev.ryanhcode.sable.sublevel.plot.heat.SubLevelHeatMapManager;
-import dev.ryanhcode.sable.sublevel.water_occlusion.WaterOcclusionContainer;
 import foundry.veil.api.network.VeilPacketManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -51,14 +49,6 @@ public class SableCommonEvents {
             plot.expandIfNecessary(blockPos);
 
             final SubLevel subLevel = plot.getSubLevel();
-
-            final WaterOcclusionContainer<?> waterOcclusionContainer = WaterOcclusionContainer.getContainer(level);
-
-            if (waterOcclusionContainer != null) {
-                if (VoxelNeighborhoodState.isSolid(level, blockPos, oldState) != VoxelNeighborhoodState.isSolid(level, blockPos, newState)) {
-                    waterOcclusionContainer.markDirty(blockPos);
-                }
-            }
 
             // Handle heatmap addition / removal
             if (subLevel instanceof final ServerSubLevel serverSubLevel) {
