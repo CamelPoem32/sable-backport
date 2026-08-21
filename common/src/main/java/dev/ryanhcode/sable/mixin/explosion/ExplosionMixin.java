@@ -19,7 +19,6 @@ import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.projectile.windcharge.AbstractWindCharge;
 import net.minecraft.world.level.Explosion;
 import net.minecraft.world.level.ExplosionDamageCalculator;
 import net.minecraft.world.level.Level;
@@ -120,8 +119,7 @@ public class ExplosionMixin {
                 set.add(blockpos);
             }
 
-            final boolean wind = (this.source instanceof AbstractWindCharge || this.damageCalculator == AbstractWindCharge.EXPLOSION_DAMAGE_CALCULATOR) && !blockstate.isAir();
-            if (canExplodeBefore && (f < 0.0f || wind) && explodedSet.get().add(blockpos)) {
+            if (canExplodeBefore && f < 0.0f && explodedSet.get().add(blockpos)) {
                 explodedSet.get().add(blockpos);
 
                 if (subLevel instanceof final ServerSubLevel serverSubLevel) {

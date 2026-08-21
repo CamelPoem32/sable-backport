@@ -2,6 +2,7 @@ package dev.ryanhcode.sable.sublevel.plot;
 
 import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
+import dev.ryanhcode.sable.util.SableChunkFutures;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -12,7 +13,6 @@ import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -42,9 +42,9 @@ public class PlotChunkHolder extends ChunkHolder {
 
         this.chunk = chunk;
         this.heatSections = new HeatDataChunkSection[chunk.getSectionsCount()];
-        this.tickingChunkFuture = CompletableFuture.completedFuture(ChunkResult.of(chunk));
-        this.entityTickingChunkFuture = CompletableFuture.completedFuture(ChunkResult.of(chunk));
-        this.fullChunkFuture = CompletableFuture.completedFuture(ChunkResult.of(chunk));
+        this.tickingChunkFuture = SableChunkFutures.loadedLevelChunk(chunk);
+        this.entityTickingChunkFuture = SableChunkFutures.loadedLevelChunk(chunk);
+        this.fullChunkFuture = SableChunkFutures.loadedLevelChunk(chunk);
 
         if (!this.chunk.isEmpty()) {
             this.buildBoundingBox();
@@ -138,11 +138,6 @@ public class PlotChunkHolder extends ChunkHolder {
 
     }
 
-    @Override
-    public boolean isReadyForSaving() {
-        return false;
-    }
-
     public LevelChunk getChunk() {
         return this.chunk;
     }
@@ -152,11 +147,6 @@ public class PlotChunkHolder extends ChunkHolder {
      */
     public BoundingBox3ic getBoundingBox() {
         return this.boundingBox;
-    }
-
-    @Override
-    public void rescheduleChunkTask(final ChunkMap chunkMap, @Nullable final ChunkStatus chunkStatus) {
-        // no-op, don't make generation tasks
     }
 
     /**

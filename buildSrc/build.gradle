@@ -13,4 +13,5 @@ dependencies {
     implementation('org.spongepowered:mixingradle:0.7-SNAPSHOT') {
         transitive = false
     }
+    implementation 'com.google.guava:guava:31.1-jre'
 }

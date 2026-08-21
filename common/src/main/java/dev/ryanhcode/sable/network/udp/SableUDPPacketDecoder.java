@@ -1,20 +1,23 @@
 package dev.ryanhcode.sable.network.udp;
 
-import dev.ryanhcode.sable.Sable;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;
+import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.MessageToMessageDecoder;
-import net.minecraft.network.ProtocolSwapHandler;
-import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.protocol.PacketFlow;
 
 import java.io.IOException;
 import java.util.List;
 
-public class SableUDPPacketDecoder extends MessageToMessageDecoder<DatagramPacket> implements ProtocolSwapHandler {
+public class SableUDPPacketDecoder extends MessageToMessageDecoder<DatagramPacket> {
 
-    public SableUDPPacketDecoder() {
+    private final PacketFlow flow;
+
+    public SableUDPPacketDecoder(final PacketFlow flow) {
         super(DatagramPacket.class);
+        this.flow = flow;
     }
 
     /**
@@ -38,18 +41,19 @@ public class SableUDPPacketDecoder extends MessageToMessageDecoder<DatagramPacke
             }
 
             final SableUDPPacketType packetType = SableUDPPacketType.VALUES[packetID];
+            if (packetType.flow() != this.flow) {
+                throw new IOException("Received " + packetType + " on " + this.flow + " UDP flow");
+            }
             final SableUDPPacket packet;
-
             try {
-                packet = packetType.create(new RegistryFriendlyByteBuf(byteBuf, null));
+                packet = packetType.create(new FriendlyByteBuf(byteBuf));
             } catch (final Exception e) {
-                Sable.LOGGER.error("Failed to decode UDP packet of type {} from {}", packetType, msg.sender(), e);
-                return;
+                throw new DecoderException("Failed to decode UDP packet of type " + packetType, e);
             }
 
             if (byteBuf.readableBytes() > 0) {
-                Sable.LOGGER.error("SableUDPPacket {} ({}) was larger than expected, found {} bytes extra", packetType, packet.getClass().getSimpleName(), byteBuf.readableBytes());
-                return;
+                throw new DecoderException("Sable UDP packet " + packetType + " has "
+                        + byteBuf.readableBytes() + " trailing bytes");
             }
 
             out.add(new AddressedSableUDPPacket(packet, msg.sender()));

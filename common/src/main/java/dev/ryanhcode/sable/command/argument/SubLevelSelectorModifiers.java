@@ -38,9 +38,9 @@ public class SubLevelSelectorModifiers {
             final int i = reader.getCursor();
             final MinMaxBounds.Doubles doubles = MinMaxBounds.Doubles.fromReader(reader);
             if (onlyPositive && ((
-                        doubles.min().isPresent() && doubles.min().get() < 0
+                        doubles.getMin() != null && doubles.getMin() < 0
                     ) || (
-                        doubles.max().isPresent() && doubles.max().get() < 0
+                        doubles.getMax() != null && doubles.getMax() < 0
                     ))) {
                 reader.setCursor(i);
                 throw EXPECTED_POSITIVE_RANGE.createWithContext(reader);

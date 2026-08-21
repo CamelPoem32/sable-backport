@@ -39,7 +39,7 @@ public abstract class LivingEntityMixin extends Entity {
         final LivingEntity self = (LivingEntity) (Object) this;
 
         final BlockPos defaultPos = ((EntityMovementExtension) this).sable$getInBlockStatePos();
-        final BlockState defaultState = this.getInBlockState();
+        final BlockState defaultState = this.getFeetBlockState();
 
         if (defaultState.is(BlockTags.CLIMBABLE) && SablePlatform.INSTANCE.isBlockstateLadder(defaultState, level, defaultPos, self)) {
             return defaultPos;
@@ -62,7 +62,7 @@ public abstract class LivingEntityMixin extends Entity {
     }
 
 
-    @WrapOperation(method = "onClimbable", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;getInBlockState()Lnet/minecraft/world/level/block/state/BlockState;"))
+    @WrapOperation(method = "onClimbable", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;getFeetBlockState()Lnet/minecraft/world/level/block/state/BlockState;"))
     private BlockState getInBlockState(final LivingEntity instance, final Operation<BlockState> original, @Share("subLevelBlockState") final LocalRef<BlockState> subLevelBlockState) {
         final BlockState state = subLevelBlockState.get();
         return state != null ? state :  original.call(instance);

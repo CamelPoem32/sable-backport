@@ -6,11 +6,18 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.handler.codec.EncoderException;
 import io.netty.handler.codec.MessageToMessageEncoder;
-import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.protocol.PacketFlow;
 
 import java.util.List;
 
 public class SableUDPPacketEncoder extends MessageToMessageEncoder<AddressedSableUDPPacket> {
+
+    private final PacketFlow flow;
+
+    public SableUDPPacketEncoder(final PacketFlow flow) {
+        this.flow = flow;
+    }
 
     @Override
     protected void encode(final ChannelHandlerContext ctx, final AddressedSableUDPPacket envelope, final List<Object> out) throws Exception {
@@ -18,9 +25,12 @@ public class SableUDPPacketEncoder extends MessageToMessageEncoder<AddressedSabl
         final SableUDPPacketType packetType = msg.getType();
 
         try {
+            if (packetType.flow() != this.flow) {
+                throw new EncoderException("Cannot encode " + packetType + " on " + this.flow + " UDP flow");
+            }
             final ByteBuf buf = ctx.alloc().ioBuffer();
             buf.writeByte(packetType.ordinal());
-            packetType.write(new RegistryFriendlyByteBuf(buf, null), msg);
+            packetType.write(new FriendlyByteBuf(buf), msg);
 
 //            out.add(new DefaultAddressedEnvelope<ByteBuf, SocketAddress>(buf, envelope.address()));
             out.add(new DatagramPacket(buf, envelope.address()));

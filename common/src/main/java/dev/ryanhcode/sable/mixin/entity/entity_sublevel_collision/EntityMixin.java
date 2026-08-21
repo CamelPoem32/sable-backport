@@ -65,7 +65,7 @@ public abstract class EntityMixin implements EntityMovementExtension {
     private Vec3 position;
     @Shadow
     @Nullable
-    private BlockState inBlockState;
+    private BlockState feetBlockState;
     @Shadow
     private BlockPos blockPosition;
     @Unique
@@ -89,7 +89,7 @@ public abstract class EntityMixin implements EntityMovementExtension {
     @Shadow
     public abstract Level level();
 
-    @WrapOperation(method = "move(Lnet/minecraft/world/entity/MoverType;Lnet/minecraft/world/phys/Vec3;)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;setOnGroundWithMovement(ZLnet/minecraft/world/phys/Vec3;)V"))
+    @WrapOperation(method = "move(Lnet/minecraft/world/entity/MoverType;Lnet/minecraft/world/phys/Vec3;)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;setOnGroundWithKnownMovement(ZLnet/minecraft/world/phys/Vec3;)V"))
     public void sable$moveInject(final Entity instance, final boolean bl, final Vec3 arg, final Operation<Void> original) {
         this.horizontalCollision = this.sable$collisionInfo.horizontalCollision;
         this.verticalCollision = this.sable$collisionInfo.verticalCollision;
@@ -261,25 +261,25 @@ public abstract class EntityMixin implements EntityMovementExtension {
      * @reason Take into account sub-levels
      */
     @Overwrite
-    public BlockState getInBlockState() {
+    public BlockState getFeetBlockState() {
         final Level level = this.level();
 
-        if (this.inBlockState == null || this.sable$trackingSubLevel != null) {
-            this.inBlockState = level.getBlockState(this.blockPosition);
+        if (this.feetBlockState == null || this.sable$trackingSubLevel != null) {
+            this.feetBlockState = level.getBlockState(this.blockPosition);
             this.sable$inBlockStatePos = this.blockPosition;
 
             final Iterable<SubLevel> intersecting = Sable.HELPER.getAllIntersecting(this.level, new BoundingBox3d(this.blockPosition));
 
             final Iterator<SubLevel> iter = intersecting.iterator();
-            while (this.inBlockState.isAir() && iter.hasNext()) {
+            while (this.feetBlockState.isAir() && iter.hasNext()) {
                 final SubLevel subLevel = iter.next();
                 final BlockPos localBlockPos = BlockPos.containing(subLevel.logicalPose().transformPositionInverse(this.position.add(0.0, 0.001, 0.0)));
-                this.inBlockState = level.getBlockState(localBlockPos);
+                this.feetBlockState = level.getBlockState(localBlockPos);
                 this.sable$inBlockStatePos = localBlockPos;
             }
         }
 
-        return this.inBlockState;
+        return this.feetBlockState;
     }
 
     /**

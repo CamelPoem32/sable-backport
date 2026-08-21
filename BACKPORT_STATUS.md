@@ -12,7 +12,7 @@
 - Upstream commit: `b7226222caf4eace63a708bdcd73ef36c971137d`
 - Backport branch: `backport/forge-1.20.1-sable-2.0.0`
 
-The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 adds a real local Companion common library, consumes official Veil 1.20, rewrites selected Java 21 collection calls for Java 17, and narrows the Forge source graph without beginning Minecraft, Create, Flywheel, Simulated, or Aeronautics semantic porting.
+The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 added the Java 17/1.20.1 Companion library, official Veil 1.20, selected Java 17 rewrites, and the minimal Forge source graph. M4 replaced the missing modern Veil/Minecraft packet surface with a tested Forge 47 transport. M5 ports the selected Minecraft core/Mixins, adds the Forge bootstrap and eight platform providers, and produces a statically verified Forge package. Deferred advanced rendering, behavior-heavy gameplay, Create/Flywheel integration, Simulated, and Aeronautics remain unported.
 
 ## Canonical Workflow
 
@@ -70,7 +70,7 @@ The compiler now reports:
 - mappings loaded from `forge/build/createMcpToSrg/output.tsrg`.
 - refmap written and published to `forge/build/classes/java/main/sable.refmap.json` even when Java compilation stops at the intentional source frontier.
 
-The current partial M3 refmap is 120,048 bytes and contains mappings for 134 Mixin classes. Confirmed former false-negative canaries still map correctly:
+The current M5 refmap is 99,596 bytes and contains mappings for 112 selected Mixin classes. Confirmed former false-negative canaries still map correctly:
 
 | Development target | Confirmed SRG mapping |
 |---|---|
@@ -87,10 +87,10 @@ These were not trustworthy incompatibilities before AP/FG mappings were connecte
 
 The upstream configs are unchanged. Forge `mods.toml` references the generated `sable-common-forge.mixins.json` plus `sable-forge.mixins.json`.
 
-- Curated common config: 178 entries (`121` common and `57` client entries).
+- Curated common config: 144 entries (`103` common and `41` client entries).
 - Forge-specific config: intentionally empty except normal metadata/refmap.
 - Missing upstream Forge `SableMixinPlugin`: not referenced; a future Forge loader implementation remains unresolved.
-- Physically deferred/excluded common sources: 76 classes (`22` M0-M2 optional/debug Mixins plus `54` M3 advanced visual/debug sources). Two upstream config classes are separately replaced by Forge-specific implementations.
+- Physically deferred/excluded common sources: 117 classes/pattern matches. Three upstream classes (`SableConfig`, `SableClientConfig`, and `SableAttributes`) are separately replaced by Forge-specific implementations.
 - Optional/debug compiler and refmap matches after exclusion: zero for ComputerCraft, Exposure, Vista, Iris, Sodium, Embeddium, Oculus, ImGui, Jade, Jade Addons, `game_test`, `debug_render`, and `loaded_chunk_debug`.
 - NeoForge sources remain outside the Forge source set.
 
@@ -107,21 +107,23 @@ The upstream configs are unchanged. Forge `mods.toml` references the generated `
 | `DEBUG_TEST_UI` | 10 |
 | `UNKNOWN` | 0 |
 
-Actions are `185 INVESTIGATE`, `170 DEFER`, and `18 EXCLUDE_FROM_FORGE_TARGET`. Thus 188 entries are deferred/excluded by action, 195 entries are absent from the curated common runtime config, and 76 common Java classes are physically outside this compiler target. The category totals remain unchanged because M3 changes action/selection, not the mechanical upstream classification.
+Actions are `151 INVESTIGATE`, `204 DEFER`, and `18 EXCLUDE_FROM_FORGE_TARGET`. Thus 222 entries are deferred/excluded by action and 229 entries are absent from the curated common runtime config. The category totals remain unchanged because M5 changes action/selection, not the mechanical upstream classification.
 
 ## Compiler Frontier
 
-Consecutive final M3 `:forge:compileJava` invocations reach javac and Mixin AP and intentionally stop at javac's 100-error cap with 46 warnings. Companion packages resolve, supported Veil 1.20 APIs resolve, the curated refmap is generated, and no deferred advanced visual/debug source appears in compiler or AP diagnostics. On the immediate repeat, dependency preparation, Companion compilation/jar, SRG extraction, and MCP-to-SRG generation are up to date. The Java task itself must rerun after failure because Gradle cannot publish a successful class snapshot.
+M5a was gated before platform work. After the Forge-specific AT was correctly translated from official names to ForgeGradle 6 SRG names, the compiler moved from `39 errors / 2 warnings`, to `1 error / 2 warnings`, then to `0 errors / 2 warnings`. Its required second invocation reported `:forge:compileJava UP-TO-DATE`. M5b then compiled the Forge bootstrap and all eight providers at `0 errors / 3 deprecation warnings`.
 
-Remaining failures are grouped as follows:
+The final refmap is `99,596` bytes and contains mappings for 112 selected Mixin classes. The three Forge reach calls use `remap = false` because they are Forge-added methods with stable runtime names; their exact call sites were verified in mapped `ServerGamePacketListenerImpl` bytecode rather than globally suppressing target validation.
 
-1. **Veil networking absent from Veil 1.20.** `VeilPacketManager` and `PacketContext` remain unresolved by design. Their 23 upstream imports are the narrow M4 transport boundary.
-2. **Minecraft 1.21 packet/codec APIs.** `RegistryFriendlyByteBuf`, `StreamCodec`, `ByteBufCodecs`, common/custom payload packets, `CommonListenerCookie`, `DisconnectionDetails`, and `BandwidthDebugMonitor` require a coordinated 1.20.1 packet port, not mechanical renames.
-3. **Minecraft 1.21 classes/packages and renderer structure.** Examples include `PathfindingContext`, `Leashable`, `DeltaTracker`, the moved `ChunkStatus`, `OptionsSubScreen`, `SystemToastId`, `TickRateManager`, wind-charge classes, and `SectionRenderDispatcher.RenderSection`.
-4. **Genuine Mixin descriptors/control flow.** Confirmed failures include `canInteractWithEntity`, `ClientChunkCache#getChunk`, `Connection#disconnect`, two `@Overwrite` mappings, targetless 1.21 classes, and interface-injector behavior in `VibrationSystemTickerMixin`.
-5. **Later Create 6/Flywheel 1.0 incompatibilities.** Exact Create 0.5.1.j and Flywheel 0.6.11-13 are mapped and available, but semantic compatibility work remains deliberately outside M3 and may appear beyond the current 100-error cap.
+There is no remaining compile-time error frontier in the selected Forge core graph. The next trustworthy frontier is runtime and deferred-feature integration:
 
-No runtime or `runClient` attempt has been made.
+1. **Runtime smoke validation:** config/event timing, ServiceLoader discovery in FML, world load, plot capability persistence, and the selected Mixins still require `runClient`/world validation in a later milestone.
+2. **Create 0.5.1.j:** only wrapped-level detection is implemented. Create 6 contraption/logistics integrations remain deferred and absent from the Forge Mixin config.
+3. **Flywheel 0.6:** visual registration is deliberately a no-op; Flywheel 1.0 render integration remains deferred.
+4. **Advanced rendering/gameplay:** chunked rendering, shader/water/Iris/Sodium bridges, Leashable/pathfinding, projectile dispenser, vibration, toast/settings, and other listed clusters remain intact but excluded.
+5. **Packaging:** Companion is verified as a separate Java 17 common library project and is intentionally not yet JarJar-bundled into the Forge jar.
+
+No `runClient` attempt has been made.
 
 ## Sable Companion Assessment
 
@@ -156,7 +158,7 @@ M3 uses official `foundry.veil:Veil-forge-1.20.1:1.0.0.296` through `implementat
 - Mapped SHA-256: `05C17DCE2C8466A93DB7FCB96930665D2AC1097642014224AA027E39564FFC27`.
 - Canonical paths and hashes differ, the raw jar is absent from `compileClasspath`, raw `VeilRenderSystem.class` contains `m_91087_`, and the mapped class contains `getInstance`.
 
-Registry/platform and basic client renderer APIs are reused directly. Render profiling uses vanilla `ProfilerFiller`; Sodium detection uses `Veil.platform().isSodiumLoaded()`. The modern Veil packet APIs have no practical 1.20 equivalent and remain visible for M4. Advanced shader/framebuffer/editor integrations are deferred. See `VEIL_1_20_API_MATRIX.md` for the occurrence-counted 82-import decision matrix.
+Registry/platform and basic client renderer APIs are reused directly. Render profiling uses vanilla `ProfilerFiller`; Sodium detection uses `Veil.platform().isSodiumLoaded()`. M4 replaces the modern Veil packet APIs, which have no practical Veil 1.20 equivalent, with the Sable-owned Forge transport documented in `NETWORK_BACKPORT_MATRIX.md`. Advanced shader/framebuffer/editor integrations remain deferred. See `VEIL_1_20_API_MATRIX.md` for the occurrence-counted 82-import decision matrix.
 
 ## M0-M2 Acceptance Report (Historical)
 
@@ -187,6 +189,33 @@ Registry/platform and basic client renderer APIs are reused directly. Render pro
 8. **Build files and documentation:** `settings.gradle`, `gradle.properties`, `gradlew.bat`, `forge/build.gradle`, Forge `mods.toml`, curated Mixin config/generator, selected common bridge/Java 17 sources, new Forge config replacements, new Companion module, `MIXIN_BACKPORT_MATRIX.md`, `VEIL_1_20_API_MATRIX.md`, and this status file.
 9. **Compiler result:** `:forge:compileJava` intentionally fails at the next trustworthy 100-error frontier with 46 warnings while still publishing `forge/build/classes/java/main/sable.refmap.json`. Companion and supported Veil symbols are absent from the error set; only missing Veil networking remains.
 10. **Recommended M4:** replace only the missing `VeilPacketManager`/`PacketContext` surface and the coupled Minecraft 1.20.1 packet codec/payload types with a Forge 47 transport. Preserve packet behavior and ordering; leave renderer Mixins, Create 6, Flywheel 1.0, Simulated, and Aeronautics untouched.
+
+## M4 Acceptance Report
+
+1. **Common abstraction:** added `SablePacketCodec`, direction/context/definition/registration/sink/transport contracts, a pure 0-13 packet catalog, and marker-only `SableTCPPacket`. DFU payloads use `FriendlyByteBuf.readWithCodec`/`writeWithCodec` and `NbtOps`; no fake 1.21 or Veil networking API was introduced.
+2. **Forge transport:** `ForgeSablePacketTransport` is discovered through `META-INF/services`, owns `sable:main` protocol `1`, registers direction-bound `SimpleChannel` messages, uses `NetworkEvent.Context.enqueueWork`, rejects direction mismatches, requires a server sender, creates client state through a Dist-safe helper, and centralizes the typed vanilla-packet cast.
+3. **Packet behavior:** handler bodies were moved without semantic changes into side-specific handler classes. All send sites use the transport facade. Full-sync order remains Start, optional RecentlySplit, vanilla chunks/lights, Finalize; snapshot fallback remains SnapshotInfo then Snapshot; synchronization sinks preserve iteration order.
+4. **UDP:** ordinals 0-5 and flows are explicit. Encoder and decoder use `FriendlyByteBuf` and reject invalid IDs, wrong direction, malformed payloads, and trailing bytes. `ProtocolSwapHandler`, `BandwidthDebugMonitor`, and `MonitorFrameDecoder` were removed; the 1.20.1 no-argument frame decoder is used.
+5. **Physics DFU compatibility:** the absent 1.21 `Codec.dispatchedMap` helper was backported with an equivalent dynamic-map codec that still delegates each property value to `PhysicsBlockPropertyTypes`. The public physics definition and floating-material DFU codecs remain the packet source of truth.
+6. **Independent tests:** `:forge:networkTest` compiles the production protocol slice independently and passes 12 tests covering all 14 TCP and 6 UDP payloads, golden order, unread-byte checks, ID/flow uniqueness, gizmo absence, Forge scheduling/context behavior, and Netty malformed/direction rejection.
+7. **Dependency checks:** `verifyTargetModpackDependencies` and `verifyVeilDependency` pass. Create, Flywheel, Registrate, and Veil resolve to ForgeGradle-mapped artifacts; Veil verification still uses path/hash/class-content evidence rather than accepting a cache filename alone.
+8. **Compiler result:** two consecutive canonical compiles reach the stable `84 errors, 46 warnings` Minecraft/Mixin/renderer frontier. Selected networking sources contain none of the removed Veil or Minecraft 1.21 packet symbols. `forge/build/classes/java/main/sable.refmap.json` exists at 120,048 bytes with 134 mapped Mixin classes.
+9. **Deferred lifecycle:** `DisconnectionDetails` and `CommonListenerCookie` remain for descriptor/control-flow porting. M4 validates the UDP protocol and transport but does not claim runtime UDP startup or disconnect cleanup. No `runClient` attempt was made.
+10. **Recommended M5:** port the non-render Minecraft 1.20.1 type/package differences and validate core Mixin descriptors, including the two UDP lifecycle Mixins, while keeping Create/Flywheel and renderer implementation work out of scope. Re-run `networkTest` as a regression gate and use the resulting compiler frontier to split later renderer and Create milestones.
+
+## M5 Acceptance Report
+
+1. **M5a gate:** selected Minecraft 1.20.1 source and Mixin ports were completed before adding any platform code. Chunk futures use `SableChunkFutures` around 1.20's `Either`; moved/renamed block-entity and chunk types are mapped directly; wind-charge-only behavior was removed without changing other projectile behavior; respawn, collision, reach, disconnect, and player-login hooks target inspected 1.20.1 descriptors and control flow.
+2. **Tick semantics:** upstream `ServerLevelMixin` skipped Sable plot ticks when 1.21's level tick manager was frozen; server tracking and client interpolation used its tick interval. Mapped 1.20.1 bytecode shows `IntegratedServer.tickServer` does not call `MinecraftServer.tickServer` while paused, and `MinecraftServer.tickChildren` is the path that invokes `ServerLevel.tick`. Therefore ticking the plot exactly once per actual `ServerLevel.tick` invocation preserves the upstream freeze invariant without emulating `TickRateManager`. Tracking and interpolation use the fixed vanilla 20 TPS / 50 ms interval.
+3. **M5 deferrals:** files remain intact but the selected graph excludes chunked sublevel rendering and block-entity/chunk renderer helpers; Leashable/pathfinding/tamed teleport/entity-shadow clusters; settings/toasts/new-camera UI; projectile-dispenser, vibration, recoil, portal/stand-up/sleeping behavior; and their curated Mixin entries. Multi-block render-data creation throws an explicit unsupported exception rather than returning placeholder data. Basic single-block rendering remains compiled.
+4. **M5a compiler snapshots:** M4 baseline was `84 errors / 46 warnings`. After direct source ports and the corrected SRG AT, checkpoints were `39/2`, `1/2`, then `0/2`; the required repeat was `UP-TO-DATE`. The temporary 100-error snapshot was diagnosed as an invalid official-name AT input to ForgeGradle and is not a source frontier.
+5. **Forge bootstrap:** `dev.ryanhcode.sable.forge.SableForge` is the Forge 47 `@Mod` entrypoint. It initializes common/client Sable state, packet registration, commands, reload listeners, attributes, common/client config, datapack synchronization, logout cleanup, client reloads, and crash-report metadata using Forge event buses and lifecycle events.
+6. **Platform providers:** ServiceLoader descriptors and Forge implementations exist for all eight common interfaces: assembly snapshot capture, chunk events, event subscription/publication, loader version lookup, generic platform hooks, plot persistence, and basic sublevel rendering. Plot attachment persistence uses Forge `LevelChunk.writeCapsToNBT/readCapsFromNBT`. Auxiliary light is a documented no-op because it is a NeoForge attachment used by deferred advanced visuals; Flywheel visual registration is likewise deferred while vanilla single-block rendering remains available.
+7. **Create boundary:** `verifyForgeAccessTransformer` inspects the mapped Create `0.5.1.j` artifact and confirms `com/simibubi/create/foundation/utility/worldWrappers/WrappedServerWorld.class`. `SablePlatform.isWrappedLevel` checks that Create is loaded, then isolates the `instanceof` in a nested optional helper. No broader Create adapter was introduced.
+8. **Access transformers:** the upstream common AT is unchanged. The curated Forge AT contains 35 entries using exact SRG names required by ForgeGradle 6. `ACCESS_TRANSFORMER_BACKPORT_MATRIX.md` records every upstream target, dependent source, purpose, exact 1.20 mapping or deferral proof, and final action. `verifyForgeAccessTransformer` parses the transformed class files and rejects missing classes/members/descriptors, non-public retained entries, retained finals, missing provenance rows, and a missing Create wrapped-world canary.
+9. **Static packaging:** `verifyForgePackaging` confirms the `@Mod` class, nine ServiceLoader descriptors (eight platform plus networking), provider classes, Forge `mods.toml`, two curated Mixin configs, `sable.refmap.json`, curated `FMLAT`, and absence of representative deferred class prefixes. It separately confirms Companion classes, provider descriptor, MIT license, Java-library packaging, and absence of mod metadata; Companion is intentionally not bundled before the JarJar milestone.
+10. **Final compile/package state:** M5b compiles with `0 errors / 3 deprecation warnings`, and the required repeat compile is `UP-TO-DATE`. The final refmap is 99,596 bytes with 112 mapped selected Mixins. Companion, network (12 tests), target dependency, Veil, Forge AT, static packaging, Checkstyle, Spotless, reobfuscation, and `:forge:build` validation all pass.
+11. **Recommended M6:** perform a narrow Forge runtime smoke milestone: launch to main menu, create/load a disposable world, validate provider discovery/config/event ordering, verify a basic single-block sublevel and capability persistence, and capture runtime Mixin failures. Keep Create/Flywheel semantic integration and advanced rendering out of that milestone unless a runtime blocker proves one is unavoidable.
 
 ## Known Target Modpack Issue
 

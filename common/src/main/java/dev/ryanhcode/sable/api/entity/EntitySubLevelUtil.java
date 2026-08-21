@@ -57,7 +57,7 @@ public class EntitySubLevelUtil {
      */
     public static void kickEntity(final SubLevel subLevel, final Entity entity) {
         final Vector3d subLevelGainedVelo = new Vector3d();
-        if (entity instanceof final AbstractHurtingProjectile ahp && ahp.accelerationPower == 0) {
+        if (entity instanceof final AbstractHurtingProjectile ahp && ahp.xPower == 0 && ahp.yPower == 0 && ahp.zPower == 0) {
             Sable.HELPER.getVelocity(entity.level(), JOMLConversion.toJOML(entity.position()), subLevelGainedVelo);
         }
 

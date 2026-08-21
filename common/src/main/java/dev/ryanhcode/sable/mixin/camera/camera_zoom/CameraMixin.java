@@ -84,7 +84,7 @@ public abstract class CameraMixin implements CameraZoomExtension {
     private float sable$clampZoom(final float maxZoom, final SubLevel ignoredSubLevel) {
         float zoom = maxZoom;
 
-        final float partialTick = Minecraft.getInstance().getTimer().getGameTimeDeltaPartialTick(false);
+        final float partialTick = Minecraft.getInstance().getFrameTime();
 
         final Level level = this.entity.level();
         final LevelPoseProviderExtension extension = ((LevelPoseProviderExtension) this.level);
@@ -132,7 +132,7 @@ public abstract class CameraMixin implements CameraZoomExtension {
                 final SubLevel subLevel = Sable.HELPER.getContaining(minecraft.level, vehicle.position());
 
                 if (subLevel != null) {
-                    final float partialTick = Minecraft.getInstance().getTimer().getGameTimeDeltaPartialTick(true);
+                    final float partialTick = Minecraft.getInstance().getFrameTime();
                     final float zoomAmount = Mth.lerp(partialTick, this.sable$lastInterpolatedZoom, this.sable$interpolatedZoom);
 
                     final BoundingBox3ic boundingBox = subLevel.getPlot().getBoundingBox();
@@ -148,7 +148,7 @@ public abstract class CameraMixin implements CameraZoomExtension {
 
         final LevelPoseProviderExtension extension = ((LevelPoseProviderExtension) minecraft.level);
         assert extension != null;
-        extension.sable$pushPoseSupplier((subLevel) -> ((ClientSubLevel) subLevel).renderPose(minecraft.getTimer().getGameTimeDeltaPartialTick(false)));
+        extension.sable$pushPoseSupplier((subLevel) -> ((ClientSubLevel) subLevel).renderPose(minecraft.getFrameTime()));
         this.sable$pushed = true;
     }
 

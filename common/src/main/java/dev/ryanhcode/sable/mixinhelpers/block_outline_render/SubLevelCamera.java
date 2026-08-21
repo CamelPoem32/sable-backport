@@ -112,11 +112,6 @@ public class SubLevelCamera extends Camera {
         this.renderCamera.reset();
     }
 
-    @Override
-    public float getPartialTickTime() {
-        return this.renderCamera.getPartialTickTime();
-    }
-
     public Camera getRenderCamera() {
         return this.renderCamera;
     }

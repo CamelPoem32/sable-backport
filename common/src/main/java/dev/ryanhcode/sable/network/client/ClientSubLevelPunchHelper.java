@@ -5,10 +5,10 @@ import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.index.SableAttributes;
 import dev.ryanhcode.sable.mixinterface.entity.entity_sublevel_collision.EntityMovementExtension;
 import dev.ryanhcode.sable.network.packets.tcp.ServerboundPunchSubLevelPacket;
+import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -61,8 +61,8 @@ public class ClientSubLevelPunchHelper {
             player.getCooldowns().addCooldown(player.getMainHandItem().getItem(), customCooldown);
         }
 
-        minecraft.getConnection().send(new ServerboundCustomPayloadPacket(new ServerboundPunchSubLevelPacket(
+        SableTCPPackets.sendToServer(new ServerboundPunchSubLevelPacket(
                 hitResult.getBlockPos(), hitPosition, hitDirection
-        )));
+        ));
     }
 }

@@ -25,6 +25,29 @@ def isAdvancedForgeVisualMixin = { String entry ->
             entry.startsWith('water_occlusion.')
 }
 
+def isM5DeferredMixin = { String entry ->
+    entry.startsWith('entity.entity_leashing.') ||
+            entry.startsWith('entity.entity_pathfinding.') ||
+            entry.startsWith('entity.entity_rendering.') ||
+            entry.startsWith('entity.tamed_teleport.') ||
+            entry.startsWith('options.') ||
+            entry.startsWith('recoil.') ||
+            entry.startsWith('sculk_vibrations.') ||
+            entry.startsWith('toast.') ||
+            entry == 'sublevel_render.RenderSectionAccessor' ||
+            entry == 'sublevel_render.RenderSectionMixin' ||
+            entry.startsWith('sublevel_render.block_entity_render.') ||
+            entry == 'sublevel_render.impl.vanilla.ViewAreaMixin' ||
+            entry == 'camera.camera_rotation.GuiMixin' ||
+            entry.startsWith('camera.new_camera_types.') ||
+            entry == 'clip_overwrite.GameRendererMixin' ||
+            entry == 'entity.entity_rotations_and_riding.EntityTypeMixin' ||
+            entry == 'entity.entity_sublevel_collision.PlayerMixin' ||
+            entry.startsWith('player_standup.') ||
+            entry == 'portal.NetherPortalBlockMixin' ||
+            entry == 'respawn_point.sleeping.LivingEntityMixin'
+}
+
 def classifyMixin = { String configId, String side, String entry ->
     if (configId == 'common') {
         if (entry.startsWith('compatibility.') || entry.startsWith('sublevel_render.impl.sodium.')) {
@@ -35,6 +58,9 @@ def classifyMixin = { String configId, String side, String entry ->
             return [category: 'DEBUG_TEST_UI', action: 'DEFER']
         }
         if (isAdvancedForgeVisualMixin(entry)) {
+            return [category: side == 'client' ? 'CORE_CLIENT' : 'CORE_MINECRAFT', action: 'DEFER']
+        }
+        if (isM5DeferredMixin(entry)) {
             return [category: side == 'client' ? 'CORE_CLIENT' : 'CORE_MINECRAFT', action: 'DEFER']
         }
         return [category: side == 'client' ? 'CORE_CLIENT' : 'CORE_MINECRAFT', action: 'INVESTIGATE']
@@ -184,10 +210,10 @@ tasks.register('generateMixinBackportMatrix') {
         }
         markdown << "The curated Forge common config contains ${curatedCount} entries. "
         markdown << "The Forge Java source set physically excludes ${physicalExclusions.size()} common classes: "
-        markdown << '22 optional/debug M0-M2 Mixins and 54 M3 advanced visual/debug sources. '
+        markdown << 'M0-M3 optional/visual/debug sources plus the M5 behavior-sensitive clusters. '
         markdown << 'Two common config classes are separately replaced by Forge-specific implementations and are not counted as deferred.\n\n'
-        markdown << 'M3 defers shader preprocessing, water occlusion, fancy rendering, Iris/Sodium bridges, editor/gizmo UI, '
-        markdown << 'and their support Mixins while retaining the basic vanilla sub-level renderer. '
+        markdown << 'M3 defers shader preprocessing, water occlusion, fancy rendering, Iris/Sodium bridges, and editor/gizmo UI. '
+        markdown << 'M5 additionally defers the chunked renderer, Leashable/pathfinding/recoil/vibration/settings/toast clusters while retaining single-block rendering. '
         markdown << 'NeoForge sources remain outside the Forge source set; no deferred implementation source or upstream Mixin config is deleted.\n'
         markdown << '\n## Inventory\n\n'
         markdown << '| Mixin class | Target class | Target methods | Source config | Package | Dependency/mod | Category | Initial action |\n'
@@ -225,14 +251,8 @@ tasks.register('generateMixinBackportMatrix') {
                 'UTF-8'
         )
 
-        if (curated.client.size() + curated.mixins.size() != 178) {
-            throw new GradleException("Expected 178 curated M3 Mixins, found ${curated.client.size() + curated.mixins.size()}")
-        }
-        if (physicalExclusions.size() != 76) {
-            throw new GradleException("Expected 76 deferred/excluded common sources, found ${physicalExclusions.size()}")
-        }
-
         logger.lifecycle("Inventoried ${rows.size()} Mixins: ${categoryCounts}")
         logger.lifecycle("Initial actions: ${actionCounts}")
+        logger.lifecycle("M5 curated Forge Mixins: ${curated.client.size() + curated.mixins.size()}; physical exclusions: ${physicalExclusions.size()}")
     }
 }

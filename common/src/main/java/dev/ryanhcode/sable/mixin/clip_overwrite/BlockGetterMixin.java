@@ -20,6 +20,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.EntityCollisionContext;
 import org.jetbrains.annotations.NotNull;
 import org.joml.Vector3dc;
 import org.spongepowered.asm.mixin.Mixin;
@@ -71,7 +72,7 @@ public interface BlockGetterMixin {
             }
 
             final Vector3dc from = pose.transformPosition(JOMLConversion.toJOML(clipContext.getFrom()));
-            clipContext = new ClipContext(JOMLConversion.toMojang(from), clipContext.getTo(), clipContext.block, clipContext.fluid, clipContext.collisionContext);
+            clipContext = sable$copyContext(clipContext, JOMLConversion.toMojang(from), clipContext.getTo());
         }
 
         final SubLevel toSubLevel = helper.getContaining(level, clipContext.getTo());
@@ -83,7 +84,7 @@ public interface BlockGetterMixin {
             }
 
             final Vector3dc to = pose.transformPosition(JOMLConversion.toJOML(clipContext.getTo()));
-            clipContext = new ClipContext(clipContext.getFrom(), JOMLConversion.toMojang(to), clipContext.block, clipContext.fluid, clipContext.collisionContext);
+            clipContext = sable$copyContext(clipContext, clipContext.getFrom(), JOMLConversion.toMojang(to));
         }
 
         BlockHitResult minResult;
@@ -120,7 +121,8 @@ public interface BlockGetterMixin {
                 continue; // we projected the ray inward, but the start is not in the plot. something is weird.
 
 
-            final ClipContext subClipContext = new ClipContext(JOMLConversion.toMojang(from), JOMLConversion.toMojang(to), clipContext.block, clipContext.fluid, clipContext.collisionContext);
+            final ClipContext subClipContext = sable$copyContext(
+                    clipContext, JOMLConversion.toMojang(from), JOMLConversion.toMojang(to));
             final BlockHitResult subResult = originalClip(subLevel.getLevel(), subClipContext);
             final double distance = subResult.getLocation().distanceTo(subClipContext.getFrom());
 
@@ -151,6 +153,14 @@ public interface BlockGetterMixin {
             final Vec3 vec3 = clipContextx.getFrom().subtract(clipContextx.getTo());
             return BlockHitResult.miss(clipContextx.getTo(), Direction.getNearest(vec3.x, vec3.y, vec3.z), BlockPos.containing(clipContextx.getTo()));
         });
+    }
+
+    @Unique
+    private static ClipContext sable$copyContext(final ClipContext source, final Vec3 from, final Vec3 to) {
+        final net.minecraft.world.entity.Entity entity = source.collisionContext instanceof EntityCollisionContext entityContext
+                ? entityContext.getEntity()
+                : null;
+        return new ClipContext(from, to, source.block, source.fluid, entity);
     }
 
 

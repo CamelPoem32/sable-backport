@@ -4,6 +4,7 @@ import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.SableClient;
 import dev.ryanhcode.sable.mixinterface.udp.ConnectionExtension;
 import dev.ryanhcode.sable.network.udp.AddressedSableUDPPacket;
+import dev.ryanhcode.sable.network.udp.SableUDPClientPacketHandlers;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -47,7 +48,7 @@ public class SableUDPChannelHandlerClient extends SimpleChannelInboundHandler<Ad
         final Minecraft client = Minecraft.getInstance();
 
         SableClient.NETWORK_EVENT_LOOP.tell(() -> {
-            msg.packet().handleClient(client.level);
+            SableUDPClientPacketHandlers.handle(msg.packet(), client.level);
         });
     }
 }

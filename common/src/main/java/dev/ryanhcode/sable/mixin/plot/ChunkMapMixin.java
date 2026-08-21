@@ -56,17 +56,6 @@ public class ChunkMapMixin {
         return !updatingChunkMap.values().stream().anyMatch(chunkHolder -> !(chunkHolder instanceof PlotChunkHolder));
     }
 
-    @Inject(method = "isChunkTracked", at = @At(value = "HEAD"), cancellable = true)
-    private void sable$isChunkTracked(final ServerPlayer serverPlayer, final int i, final int j, final CallbackInfoReturnable<Boolean> cir) {
-        final SubLevelContainer container = SubLevelContainer.getContainer(this.level);
-
-        final LevelPlot plot = container.getPlot(new ChunkPos(i, j));
-        if (plot != null) {
-            final ServerSubLevel subLevel = (ServerSubLevel) plot.getSubLevel();
-            cir.setReturnValue(subLevel.getTrackingPlayers().contains(serverPlayer.getGameProfile().getId()));
-        }
-    }
-
     @Inject(method = "anyPlayerCloseEnoughForSpawning", at = @At("HEAD"), cancellable = true)
     private void sable$anyPlayerCloseEnoughForSpawning(final ChunkPos chunkPos, final CallbackInfoReturnable<Boolean> cir) {
         final SubLevelContainer container = SubLevelContainer.getContainer(this.level);

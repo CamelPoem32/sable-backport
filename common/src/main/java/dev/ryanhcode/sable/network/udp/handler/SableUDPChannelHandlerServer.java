@@ -3,6 +3,7 @@ package dev.ryanhcode.sable.network.udp.handler;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.mixinterface.udp.ServerConnectionListenerExtension;
 import dev.ryanhcode.sable.network.udp.AddressedSableUDPPacket;
+import dev.ryanhcode.sable.network.udp.SableUDPServerPacketHandlers;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import net.minecraft.server.MinecraftServer;
@@ -34,6 +35,6 @@ public class SableUDPChannelHandlerServer extends SimpleChannelInboundHandler<Ad
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final AddressedSableUDPPacket msg) throws Exception {
-        msg.packet().handleServer(this.server, msg.address());
+        SableUDPServerPacketHandlers.handle(msg.packet(), this.server, msg.address());
     }
 }

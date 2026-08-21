@@ -19,6 +19,8 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.Pose3d;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundChangeSubLevelNamePacket;
+import dev.ryanhcode.sable.network.tcp.SablePacketSink;
+import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
 import dev.ryanhcode.sable.physics.ReactionWheelManager;
 import dev.ryanhcode.sable.physics.config.dimension_physics.DimensionPhysicsData;
 import dev.ryanhcode.sable.physics.floating_block.FloatingBlockController;
@@ -28,7 +30,6 @@ import dev.ryanhcode.sable.sublevel.plot.heat.SubLevelHeatMapManager;
 import dev.ryanhcode.sable.sublevel.storage.holding.GlobalSavedSubLevelPointer;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import dev.ryanhcode.sable.util.LevelAccelerator;
-import foundry.veil.api.network.VeilPacketManager;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectCollection;
@@ -155,12 +156,12 @@ public class ServerSubLevel extends SubLevel implements PhysicsPipelineBody {
     /**
      * @return packet sink for all players currently tracking this sub-level
      */
-    public VeilPacketManager.PacketSink playerSink() {
+    public SablePacketSink playerSink() {
         return packet -> {
             for (final UUID uuid : this.trackingPlayers) {
                 final ServerPlayer player = (ServerPlayer) this.getLevel().getPlayerByUUID(uuid);
                 if (player instanceof ServerPlayer) {
-                    player.connection.send(packet);
+                    SableTCPPackets.sendToPlayer(player, packet);
                 }
             }
         };

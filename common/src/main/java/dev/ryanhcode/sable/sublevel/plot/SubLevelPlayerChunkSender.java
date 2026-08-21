@@ -16,7 +16,7 @@ public class SubLevelPlayerChunkSender {
     /**
      * A version of {@link net.minecraft.server.network.PlayerChunkSender} that uses the plots light engine
      */
-    public static void sendChunk(final Consumer<Packet<? super ClientGamePacketListener>> listener, final LevelLightEngine lightEngine, final LevelChunk chunk) {
+    public static void sendChunk(final Consumer<Packet<ClientGamePacketListener>> listener, final LevelLightEngine lightEngine, final LevelChunk chunk) {
         listener.accept(new ClientboundLevelChunkWithLightPacket(chunk, lightEngine, null, null));
     }
 

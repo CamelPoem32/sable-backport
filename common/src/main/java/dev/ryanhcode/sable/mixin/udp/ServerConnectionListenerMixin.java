@@ -70,7 +70,7 @@ public class ServerConnectionListenerMixin implements ServerConnectionListenerEx
                     .handler(new ChannelInitializer<>() {
                         @Override
                         protected void initChannel(final Channel channel) {
-                            SableUDPPacket.configureSerialization(channel.pipeline(), PacketFlow.SERVERBOUND, false, null);
+                            SableUDPPacket.configureSerialization(channel.pipeline(), PacketFlow.SERVERBOUND, false);
                             ServerConnectionListenerMixin.this.sable$setupChannel(channel);
                         }
                     })

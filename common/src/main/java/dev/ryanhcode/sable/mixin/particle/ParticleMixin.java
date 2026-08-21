@@ -251,7 +251,7 @@ public abstract class ParticleMixin implements ParticleExtension {
                         JOMLConversion.toMojang(localRayEnd),
                         ClipContext.Block.COLLIDER,
                         ClipContext.Fluid.NONE,
-                        CollisionContext.empty());
+                        null);
                 ((ClipContextExtension) clipContext).sable$setDoNotProject(true);
                 final BlockHitResult result = this.level.clip(clipContext);
 
@@ -277,7 +277,7 @@ public abstract class ParticleMixin implements ParticleExtension {
                         JOMLConversion.toMojang(localRayEnd),
                         ClipContext.Block.COLLIDER,
                         ClipContext.Fluid.NONE,
-                        CollisionContext.empty());
+                        null);
                 ((ClipContextExtension) clipContext).sable$setDoNotProject(true);
                 final BlockHitResult result = this.level.clip(clipContext);
 

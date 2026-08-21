@@ -121,7 +121,7 @@ public class DimensionPhysicsData {
                         Sable.LOGGER.error(String.valueOf(dataResult.error().get()));
                     }
 
-                    final DimensionPhysics dimensionPhysics = dataResult.getOrThrow();
+                    final DimensionPhysics dimensionPhysics = dataResult.getOrThrow(false, Sable.LOGGER::error);
                     final ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, dimensionPhysics.dimension());
 
                     addKeyWithPriority(DIMENSION_PHYSICS_DATA, dimension, dimensionPhysics);

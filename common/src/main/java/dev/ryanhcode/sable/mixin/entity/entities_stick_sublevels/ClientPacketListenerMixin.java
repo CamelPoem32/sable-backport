@@ -29,7 +29,7 @@ public abstract class ClientPacketListenerMixin {
     @Shadow
     private ClientLevel level;
 
-    @WrapOperation(method = "handleTeleportEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;lerpTo(DDDFFI)V"))
+    @WrapOperation(method = "handleTeleportEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;lerpTo(DDDFFIZ)V"))
     private void sable$handleTeleportEntity(final Entity instance,
                                             final double x,
                                             final double y,
@@ -37,12 +37,13 @@ public abstract class ClientPacketListenerMixin {
                                             final float yRot,
                                             final float xRot,
                                             final int lerpSteps,
+                                            final boolean teleport,
                                             final Operation<Void> original,
                                             @Local(argsOnly = true) final ClientboundTeleportEntityPacket packet) {
         this.sable$lerp(instance, x, y, z, yRot, xRot, lerpSteps, true, packet instanceof final PacketActuallyInSubLevelExtension extension && extension.sable$isActuallyInSubLevel());
     }
 
-    @WrapOperation(method = "handleMoveEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;lerpTo(DDDFFI)V", ordinal = 0))
+    @WrapOperation(method = "handleMoveEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;lerpTo(DDDFFIZ)V", ordinal = 0))
     private void sable$handleMoveEntity(final Entity instance,
                                         final double x,
                                         final double y,
@@ -50,6 +51,7 @@ public abstract class ClientPacketListenerMixin {
                                         final float yRot,
                                         final float xRot,
                                         final int lerpSteps,
+                                        final boolean teleport,
                                         final Operation<Void> original,
                                         @Local(argsOnly = true) final ClientboundMoveEntityPacket packet) {
         this.sable$lerp(instance, x, y, z, yRot, xRot, lerpSteps, false, packet instanceof final PacketActuallyInSubLevelExtension extension && extension.sable$isActuallyInSubLevel());
@@ -79,7 +81,7 @@ public abstract class ClientPacketListenerMixin {
         if (subLevel != null && !actuallyInSubLevel) {
             if (!(entity instanceof LivingEntity)) {
                 pos = subLevel.logicalPose().transformPosition(pos);
-                entity.lerpTo(pos.x, pos.y, pos.z, pYRot, pXRot, pLerpSteps);
+                entity.lerpTo(pos.x, pos.y, pos.z, pYRot, pXRot, pLerpSteps, false);
                 return;
             }
 
@@ -95,7 +97,7 @@ public abstract class ClientPacketListenerMixin {
             }
 
             // The X/Y/Z are unused in the instance lerpTo call. This makes sure the entity rotation is lerped
-            entity.lerpTo(pX, pY, pZ, pYRot, pXRot, pLerpSteps);
+            entity.lerpTo(pX, pY, pZ, pYRot, pXRot, pLerpSteps, false);
 
             // This does a custom position lerp
             extension.sable$plotLerpTo(pos, pLerpSteps);
@@ -108,7 +110,7 @@ public abstract class ClientPacketListenerMixin {
                 entity.setPos(existingSubLevel.logicalPose().transformPosition(entity.position()));
             }
 
-            entity.lerpTo(pX, pY, pZ, pYRot, pXRot, pLerpSteps);
+            entity.lerpTo(pX, pY, pZ, pYRot, pXRot, pLerpSteps, false);
             extension.sable$setPlotPosition(null);
         }
     }

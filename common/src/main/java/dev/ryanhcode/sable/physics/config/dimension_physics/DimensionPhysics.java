@@ -22,11 +22,11 @@ public record DimensionPhysics(ResourceLocation dimension, int priority, Optiona
     public static final Codec<DimensionPhysics> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             ResourceLocation.CODEC.fieldOf("dimension").forGetter(DimensionPhysics::dimension),
             Codec.intRange(0, Integer.MAX_VALUE).optionalFieldOf("priority", 1000).forGetter(DimensionPhysics::priority),
-            Codec.optionalField("universal_drag", Codec.FLOAT, false).forGetter(DimensionPhysics::universalDrag),
-            Codec.optionalField("base_gravity", ExtraCodecs.VECTOR3F, false).forGetter(DimensionPhysics::baseGravity),
-            Codec.optionalField("base_pressure", Codec.DOUBLE, false).forGetter(DimensionPhysics::basePressure),
-            Codec.optionalField("pressure_function", BezierResourceFunction.CODEC, false).forGetter(DimensionPhysics::pressureFunction),
-            Codec.optionalField("magnetic_north", ExtraCodecs.VECTOR3F, false).forGetter(DimensionPhysics::magneticNorth),
+            Codec.FLOAT.optionalFieldOf("universal_drag").forGetter(DimensionPhysics::universalDrag),
+            ExtraCodecs.VECTOR3F.optionalFieldOf("base_gravity").forGetter(DimensionPhysics::baseGravity),
+            Codec.DOUBLE.optionalFieldOf("base_pressure").forGetter(DimensionPhysics::basePressure),
+            BezierResourceFunction.CODEC.optionalFieldOf("pressure_function").forGetter(DimensionPhysics::pressureFunction),
+            ExtraCodecs.VECTOR3F.optionalFieldOf("magnetic_north").forGetter(DimensionPhysics::magneticNorth),
             Codec.BOOL.optionalFieldOf("ignore_chunks", false).forGetter(DimensionPhysics::ignoreChunks)
     ).apply(Applicative.unbox(instance), DimensionPhysics::new));
 

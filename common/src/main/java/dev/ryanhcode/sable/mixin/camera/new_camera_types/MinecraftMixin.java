@@ -72,7 +72,7 @@ public class MinecraftMixin {
         final CameraType cameraType = this.options.getCameraType();
 
         if (cameraType == SableCameraTypes.SUB_LEVEL_VIEW) {
-            this.player.displayClientMessage(Component.translatable("camera_type.sub_level_view").withColor(0xffaaaaaa), true);
+            this.player.displayClientMessage(Component.translatable("camera_type.sub_level_view").withStyle(style -> style.withColor(0xaaaaaa)), true);
         } else if (cameraType == SableCameraTypes.SUB_LEVEL_VIEW_UNLOCKED) {
             final SubLevel subLevel = Sable.HELPER.getVehicleSubLevel(this.cameraEntity);
 
@@ -82,7 +82,7 @@ public class MinecraftMixin {
                 this.player.lookAt(EntityAnchorArgument.Anchor.FEET, this.player.position().add(globalLookDir));
             }
 
-            this.player.displayClientMessage(Component.translatable("camera_type.sub_level_view_unlocked").withColor(0xffaaaaaa), true);
+            this.player.displayClientMessage(Component.translatable("camera_type.sub_level_view_unlocked").withStyle(style -> style.withColor(0xaaaaaa)), true);
         }
     }
 }

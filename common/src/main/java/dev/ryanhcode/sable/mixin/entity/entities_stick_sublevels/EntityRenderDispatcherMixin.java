@@ -57,12 +57,12 @@ public class EntityRenderDispatcherMixin {
                 final Vec3 projectedPos = subLevel.renderPose().transformPosition(plotPosition);
 
                 poseStack.popPose();
-                final AABB aABB = entity.getType().getSpawnAABB(projectedPos.x - cam.x, projectedPos.y - cam.y, projectedPos.z - cam.z);
+                final AABB aABB = entity.getType().getDimensions().makeBoundingBox(projectedPos.x - cam.x, projectedPos.y - cam.y, projectedPos.z - cam.z);
                 LevelRenderer.renderLineBox(poseStack, vertexConsumer, aABB, 0.0F, 1.0F, 0.0F, 0.2F);
 
                 if (entity instanceof final LivingEntityStickExtension livingDuck) {
                     final Vec3 serverProjectedPos = subLevel.renderPose().transformPosition(livingDuck.sable$getLerpTarget());
-                    final AABB aABB3 = entity.getType().getSpawnAABB(serverProjectedPos.x - cam.x, serverProjectedPos.y - cam.y, serverProjectedPos.z - cam.z);
+                    final AABB aABB3 = entity.getType().getDimensions().makeBoundingBox(serverProjectedPos.x - cam.x, serverProjectedPos.y - cam.y, serverProjectedPos.z - cam.z);
                     LevelRenderer.renderLineBox(poseStack, vertexConsumer, aABB3, 1.0F, 0.0F, 1.0F, 0.2F);
                 }
 

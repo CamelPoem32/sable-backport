@@ -26,7 +26,7 @@ java {
 
 minecraft {
     mappings channel: 'official', version: forge_minecraft_version
-    accessTransformer = rootProject.file('common/src/main/resources/META-INF/accesstransformer.cfg')
+    accessTransformer = project.file('src/main/resources/META-INF/accesstransformer-forge.cfg')
 }
 
 def forgeBackportSourceExclusions = [
@@ -35,6 +35,7 @@ def forgeBackportSourceExclusions = [
         'dev/ryanhcode/sable/mixin/sublevel_render/impl/sodium/**',
         'dev/ryanhcode/sable/mixin/debug_render/**',
         'dev/ryanhcode/sable/mixin/loaded_chunk_debug/**',
+        'dev/ryanhcode/sable/mixinhelpers/loaded_chunk_debug/**',
         'dev/ryanhcode/sable/mixin/game_test/**',
 
         // M3 advanced rendering, editor/debug UI, and optional renderer support.
@@ -63,11 +64,40 @@ def forgeBackportSourceExclusions = [
         'dev/ryanhcode/sable/sublevel/render/fancy/**',
         'dev/ryanhcode/sable/sublevel/render/staging/**',
         'dev/ryanhcode/sable/sublevel/storage/debug/**',
-        'dev/ryanhcode/sable/sublevel/water_occlusion/**'
+        'dev/ryanhcode/sable/sublevel/water_occlusion/**',
+
+        // M5 advanced or behavior-sensitive Minecraft 1.21 features.
+        'dev/ryanhcode/sable/mixin/entity/entity_leashing/**',
+        'dev/ryanhcode/sable/mixin/entity/entity_pathfinding/**',
+        'dev/ryanhcode/sable/mixin/entity/entity_rendering/**',
+        'dev/ryanhcode/sable/mixinhelpers/entity/entity_rendering/**',
+        'dev/ryanhcode/sable/mixin/entity/tamed_teleport/**',
+        'dev/ryanhcode/sable/mixin/options/**',
+        'dev/ryanhcode/sable/mixin/recoil/**',
+        'dev/ryanhcode/sable/mixin/sculk_vibrations/**',
+        'dev/ryanhcode/sable/mixin/toast/**',
+        'dev/ryanhcode/sable/config/SubLevelSettingsScreen.java',
+        'dev/ryanhcode/sable/index/SableToasts.java',
+        'dev/ryanhcode/sable/mixin/sublevel_render/RenderSectionAccessor.java',
+        'dev/ryanhcode/sable/mixin/sublevel_render/RenderSectionMixin.java',
+        'dev/ryanhcode/sable/mixin/sublevel_render/block_entity_render/**',
+        'dev/ryanhcode/sable/mixinhelpers/sublevel_render/vanilla/VanillaSubLevelBlockEntityRenderer.java',
+        'dev/ryanhcode/sable/mixin/sublevel_render/impl/vanilla/ViewAreaMixin.java',
+        'dev/ryanhcode/sable/mixinterface/sublevel_render/vanilla/RenderSectionExtension.java',
+        'dev/ryanhcode/sable/sublevel/render/vanilla/VanillaChunkedSubLevelRenderData.java',
+        'dev/ryanhcode/sable/mixin/camera/camera_rotation/GuiMixin.java',
+        'dev/ryanhcode/sable/mixin/camera/new_camera_types/**',
+        'dev/ryanhcode/sable/mixin/clip_overwrite/GameRendererMixin.java',
+        'dev/ryanhcode/sable/mixin/entity/entity_rotations_and_riding/EntityTypeMixin.java',
+        'dev/ryanhcode/sable/mixin/entity/entity_sublevel_collision/PlayerMixin.java',
+        'dev/ryanhcode/sable/mixin/player_standup/**',
+        'dev/ryanhcode/sable/mixin/portal/NetherPortalBlockMixin.java',
+        'dev/ryanhcode/sable/mixin/respawn_point/sleeping/LivingEntityMixin.java'
 ]
 def forgeCommonReplacementFiles = [
         'dev/ryanhcode/sable/SableConfig.java',
-        'dev/ryanhcode/sable/SableClientConfig.java'
+        'dev/ryanhcode/sable/SableClientConfig.java',
+        'dev/ryanhcode/sable/index/SableAttributes.java'
 ] as Set
 def commonJavaRootPath = rootProject.file('common/src/main/java').toPath().toAbsolutePath().normalize()
 
@@ -96,6 +126,46 @@ sourceSets {
             exclude 'sable.accesswidener'
             exclude 'sable.mixins.json'
         }
+    }
+
+    networkProtocol {
+        java {
+            srcDir rootProject.file('common/src/main/java')
+            srcDir 'src/main/java'
+            include 'dev/ryanhcode/sable/network/SablePacketCodec.java'
+            include 'dev/ryanhcode/sable/network/packets/ClientboundSableSnapshotDualPacket.java'
+            include 'dev/ryanhcode/sable/network/packets/ClientboundSableSnapshotInfoDualPacket.java'
+            include 'dev/ryanhcode/sable/network/packets/tcp/*.java'
+            exclude 'dev/ryanhcode/sable/network/packets/tcp/ClientboundEnterGizmoPacket.java'
+            exclude 'dev/ryanhcode/sable/network/packets/tcp/ServerboundGizmoMoveSubLevelPacket.java'
+            include 'dev/ryanhcode/sable/network/packets/udp/*.java'
+            include 'dev/ryanhcode/sable/network/tcp/SablePacketContext.java'
+            include 'dev/ryanhcode/sable/network/tcp/SablePacketDefinition.java'
+            include 'dev/ryanhcode/sable/network/tcp/SablePacketDirection.java'
+            include 'dev/ryanhcode/sable/network/tcp/SablePacketRegistration.java'
+            include 'dev/ryanhcode/sable/network/tcp/SableTCPPacket.java'
+            include 'dev/ryanhcode/sable/network/tcp/SableTCPPacketCatalog.java'
+            include 'dev/ryanhcode/sable/network/udp/AddressedSableUDPPacket.java'
+            include 'dev/ryanhcode/sable/network/udp/SableUDPPacket.java'
+            include 'dev/ryanhcode/sable/network/udp/SableUDPPacketDecoder.java'
+            include 'dev/ryanhcode/sable/network/udp/SableUDPPacketEncoder.java'
+            include 'dev/ryanhcode/sable/network/udp/SableUDPPacketType.java'
+            include 'dev/ryanhcode/sable/physics/config/block_properties/BlockStateConditionSet.java'
+            include 'dev/ryanhcode/sable/physics/config/block_properties/PhysicsBlockPropertiesDefinition.java'
+            include 'dev/ryanhcode/sable/physics/config/block_properties/PhysicsBlockPropertyTypes.java'
+            include 'dev/ryanhcode/sable/physics/floating_block/FloatingBlockMaterial.java'
+            include 'dev/ryanhcode/sable/util/SableBufferUtils.java'
+            include 'dev/ryanhcode/sable/forge/network/ForgeSablePacketDispatcher.java'
+        }
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath += output + compileClasspath
+    }
+
+    networkTest {
+        java.srcDir 'src/networkTest/java'
+        resources.srcDir 'src/networkTest/resources'
+        compileClasspath += sourceSets.networkProtocol.output + sourceSets.networkProtocol.compileClasspath
+        runtimeClasspath += output + compileClasspath
     }
 }
 
@@ -309,6 +379,24 @@ dependencies {
     veilRaw("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}") {
         transitive = false
     }
+
+    networkTestImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    networkTestRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
+}
+
+tasks.register('networkTest', Test) {
+    group = 'verification'
+    description = 'Compiles and tests the isolated production Sable packet protocol slice.'
+    testClassesDirs = sourceSets.networkTest.output.classesDirs
+    classpath = sourceSets.networkTest.runtimeClasspath
+    dependsOn tasks.named('compileNetworkProtocolJava')
+    useJUnitPlatform()
+}
+
+tasks.named('compileNetworkProtocolJava') {
+    dependsOn ':sable_companion_1_20:compileJava'
+    options.fork = true
+    options.incremental = false
 }
 
 tasks.named('compileJava') {
@@ -409,6 +497,332 @@ tasks.register('verifyVeilDependency') {
     }
 }
 
+def readClassStructure = { InputStream rawInput ->
+    DataInputStream input = new DataInputStream(new BufferedInputStream(rawInput))
+    if (input.readInt() != 0xCAFEBABE as int) {
+        throw new GradleException('Invalid class-file magic')
+    }
+    input.readUnsignedShort()
+    input.readUnsignedShort()
+
+    int constantPoolCount = input.readUnsignedShort()
+    String[] utf8 = new String[constantPoolCount]
+    for (int index = 1; index < constantPoolCount; index++) {
+        int tag = input.readUnsignedByte()
+        switch (tag) {
+            case 1:
+                utf8[index] = input.readUTF()
+                break
+            case 3:
+            case 4:
+                input.readInt()
+                break
+            case 5:
+            case 6:
+                input.readLong()
+                index++
+                break
+            case 7:
+            case 8:
+            case 16:
+            case 19:
+            case 20:
+                input.readUnsignedShort()
+                break
+            case 9:
+            case 10:
+            case 11:
+            case 12:
+            case 17:
+            case 18:
+                input.readUnsignedShort()
+                input.readUnsignedShort()
+                break
+            case 15:
+                input.readUnsignedByte()
+                input.readUnsignedShort()
+                break
+            default:
+                throw new GradleException("Unsupported class-file constant-pool tag ${tag}")
+        }
+    }
+
+    int classAccess = input.readUnsignedShort()
+    input.readUnsignedShort()
+    input.readUnsignedShort()
+    int interfaceCount = input.readUnsignedShort()
+    interfaceCount.times { input.readUnsignedShort() }
+
+    def readMembers = {
+        int memberCount = input.readUnsignedShort()
+        def members = [:]
+        memberCount.times {
+            int access = input.readUnsignedShort()
+            String name = utf8[input.readUnsignedShort()]
+            String descriptor = utf8[input.readUnsignedShort()]
+            members["${name}${descriptor}"] = access
+            int attributeCount = input.readUnsignedShort()
+            attributeCount.times {
+                input.readUnsignedShort()
+                long length = Integer.toUnsignedLong(input.readInt())
+                input.skipNBytes(length)
+            }
+        }
+        members
+    }
+
+    [access: classAccess, fields: readMembers(), methods: readMembers()]
+}
+
+tasks.register('verifyForgeAccessTransformer') {
+    group = 'verification'
+    description = 'Validates curated Forge AT provenance and transformed 1.20.1 class members.'
+    dependsOn prepareTargetModpackDependencies
+    dependsOn tasks.named('createMcpToSrg')
+
+    doLast {
+        File upstreamAt = rootProject.file('common/src/main/resources/META-INF/accesstransformer.cfg')
+        File curatedAt = file('src/main/resources/META-INF/accesstransformer-forge.cfg')
+        File provenance = rootProject.file('ACCESS_TRANSFORMER_BACKPORT_MATRIX.md')
+        File mappingsFile = layout.buildDirectory.file('createMcpToSrg/output.tsrg').get().asFile
+
+        String provenanceText = provenance.getText('UTF-8')
+        def upstreamRows = upstreamAt.readLines('UTF-8')
+                .collect { it.trim() }
+                .findAll { it && !it.startsWith('#') }
+        def missingProvenance = upstreamRows.findAll { !provenanceText.contains("`${it}`") }
+        if (!missingProvenance.isEmpty()) {
+            throw new GradleException("AT entries missing provenance rows: ${missingProvenance}")
+        }
+
+        def mappings = [:]
+        String currentClass = null
+        mappingsFile.eachLine('UTF-8') { line ->
+            if (!line.startsWith('\t')) {
+                def parts = line.trim().split(/\s+/)
+                if (parts.length >= 2 && parts[0] != 'tsrg2') {
+                    currentClass = parts[0]
+                    mappings[currentClass] = [fields: [:], methods: [:]]
+                }
+            } else if (currentClass != null && !line.startsWith('\t\t')) {
+                def parts = line.trim().split(/\s+/)
+                if (parts.length == 2) {
+                    mappings[currentClass].fields[parts[1]] = parts[0]
+                } else if (parts.length == 3 && parts[1].startsWith('(')) {
+                    mappings[currentClass].methods["${parts[2]}${parts[1]}"] = parts[0]
+                }
+            }
+        }
+
+        def forgeArtifacts = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
+            artifact.moduleVersion.id.group == 'net.minecraftforge' && artifact.name == 'forge'
+        }
+        if (forgeArtifacts.size() != 1) {
+            throw new GradleException("Expected one mapped Forge artifact, found ${forgeArtifacts*.moduleVersion*.id}")
+        }
+
+        File mappedForge = forgeArtifacts.first().file.canonicalFile
+        JarFile forgeJar = new JarFile(mappedForge)
+        try {
+            curatedAt.readLines('UTF-8').collect { it.trim() }.findAll { it && !it.startsWith('#') }.each { row ->
+                def parts = row.split(/\s+/)
+                String modifier = parts[0]
+                String className = parts[1].replace('.', '/')
+                String member = parts.length > 2 ? parts[2] : null
+                def classEntry = forgeJar.getJarEntry("${className}.class")
+                if (classEntry == null) {
+                    throw new GradleException("AT class is absent from mapped Forge: ${className}")
+                }
+
+                def structure
+                forgeJar.getInputStream(classEntry).withCloseable { stream ->
+                    structure = readClassStructure(stream)
+                }
+                if ((structure.access & 0x0001) == 0) {
+                    throw new GradleException("AT class was not made public: ${className}")
+                }
+                if (member == null) {
+                    return
+                }
+
+                String officialName
+                String descriptor
+                Map targetMembers
+                if (member.contains('(')) {
+                    int descriptorStart = member.indexOf('(')
+                    String srgName = member.substring(0, descriptorStart)
+                    descriptor = member.substring(descriptorStart)
+                    officialName = srgName == '<init>' ? srgName : mappings[className]?.methods["${srgName}${descriptor}"]
+                    targetMembers = structure.methods
+                } else {
+                    descriptor = null
+                    officialName = mappings[className]?.fields[member]
+                    targetMembers = structure.fields
+                }
+                if (officialName == null) {
+                    throw new GradleException("AT member has no exact 1.20.1 mapping: ${row}")
+                }
+
+                def matches = targetMembers.findAll { key, ignored ->
+                    if (descriptor != null) {
+                        return key == "${officialName}${descriptor}"
+                    }
+                    if (!key.startsWith(officialName)) {
+                        return false
+                    }
+                    String fieldDescriptor = key.substring(officialName.length())
+                    fieldDescriptor ==~ /\[*([BCDFIJSZ]|L.*;)/
+                }
+                if (matches.size() != 1) {
+                    throw new GradleException("AT member does not resolve uniquely in mapped Forge: ${row} -> ${matches.keySet()}")
+                }
+                int access = matches.values().first() as int
+                if ((access & 0x0001) == 0) {
+                    throw new GradleException("AT member was not made public: ${row}")
+                }
+                if (modifier.contains('-f') && (access & 0x0010) != 0) {
+                    throw new GradleException("AT member is still final: ${row}")
+                }
+            }
+        } finally {
+            forgeJar.close()
+        }
+
+        def createArtifact = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.find { artifact ->
+            artifact.moduleVersion.id.group == 'local.target' && artifact.name == "create-${forge_minecraft_version}"
+        }
+        if (createArtifact == null) {
+            throw new GradleException('Mapped Create artifact is absent from compileClasspath')
+        }
+        JarFile createJar = new JarFile(createArtifact.file)
+        try {
+            String wrappedClass = 'com/simibubi/create/foundation/utility/worldWrappers/WrappedServerWorld.class'
+            if (createJar.getJarEntry(wrappedClass) == null) {
+                throw new GradleException("Create ${forge_create_version} lacks ${wrappedClass}")
+            }
+        } finally {
+            createJar.close()
+        }
+
+        logger.lifecycle("Verified ${curatedAt.readLines().findAll { it.trim() }.size()} Forge AT entries in ${mappedForge}")
+        logger.lifecycle('Verified Create 0.5.1.j WrappedServerWorld boundary')
+    }
+}
+
+def forgeServiceProviders = [
+        'dev.ryanhcode.sable.network.tcp.SablePacketTransport'         : 'dev.ryanhcode.sable.forge.network.ForgeSablePacketTransport',
+        'dev.ryanhcode.sable.platform.SableAssemblyPlatform'          : 'dev.ryanhcode.sable.forge.platform.SableAssemblyPlatformImpl',
+        'dev.ryanhcode.sable.platform.SableChunkEventPlatform'        : 'dev.ryanhcode.sable.forge.platform.SableChunkEventPlatformImpl',
+        'dev.ryanhcode.sable.platform.SableEventPlatform'             : 'dev.ryanhcode.sable.forge.platform.SableEventPlatformImpl',
+        'dev.ryanhcode.sable.platform.SableEventPublishPlatform'      : 'dev.ryanhcode.sable.forge.platform.SableEventPublishPlatformImpl',
+        'dev.ryanhcode.sable.platform.SableLoaderPlatform'            : 'dev.ryanhcode.sable.forge.platform.SableLoaderPlatformImpl',
+        'dev.ryanhcode.sable.platform.SablePlatform'                  : 'dev.ryanhcode.sable.forge.platform.SablePlatformImpl',
+        'dev.ryanhcode.sable.platform.SablePlotPlatform'              : 'dev.ryanhcode.sable.forge.platform.SablePlotPlatformImpl',
+        'dev.ryanhcode.sable.platform.SableSubLevelRenderPlatform'    : 'dev.ryanhcode.sable.forge.platform.SableSubLevelRenderPlatformImpl'
+]
+
+tasks.register('verifyForgePackaging') {
+    group = 'verification'
+    description = 'Statically verifies the Forge package and the separate Companion library package.'
+    dependsOn tasks.named('jar')
+    dependsOn project(':sable_companion_1_20').tasks.named('jar')
+
+    doLast {
+        File forgeArchive = tasks.named('jar').get().archiveFile.get().asFile
+        File companionArchive = project(':sable_companion_1_20').tasks.named('jar').get().archiveFile.get().asFile
+        JarFile forgeJar = new JarFile(forgeArchive)
+        try {
+            def requiredEntries = [
+                    'dev/ryanhcode/sable/forge/SableForge.class',
+                    'META-INF/mods.toml',
+                    'META-INF/accesstransformer-forge.cfg',
+                    'sable-common-forge.mixins.json',
+                    'sable-forge.mixins.json',
+                    'sable.refmap.json'
+            ]
+            requiredEntries.each { entry ->
+                if (forgeJar.getJarEntry(entry) == null) {
+                    throw new GradleException("Forge jar is missing ${entry}")
+                }
+            }
+
+            forgeServiceProviders.each { service, provider ->
+                String servicePath = "META-INF/services/${service}"
+                def entry = forgeJar.getJarEntry(servicePath)
+                if (entry == null) {
+                    throw new GradleException("Forge jar is missing ${servicePath}")
+                }
+                String content = forgeJar.getInputStream(entry).getText('UTF-8').trim()
+                if (content != provider) {
+                    throw new GradleException("Unexpected provider in ${servicePath}: ${content}")
+                }
+                String providerClass = provider.replace('.', '/') + '.class'
+                if (forgeJar.getJarEntry(providerClass) == null) {
+                    throw new GradleException("Forge jar is missing provider class ${providerClass}")
+                }
+            }
+
+            if (forgeJar.manifest.mainAttributes.getValue('FMLAT') != 'accesstransformer-forge.cfg') {
+                throw new GradleException('Forge jar manifest has no curated FMLAT')
+            }
+            if (!file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java').getText('UTF-8').contains('@Mod(Sable.MOD_ID)')) {
+                throw new GradleException('Forge bootstrap source is missing @Mod(Sable.MOD_ID)')
+            }
+
+            def deferredPrefixes = [
+                    'dev/ryanhcode/sable/debug/',
+                    'dev/ryanhcode/sable/render/dynamic_shade/',
+                    'dev/ryanhcode/sable/render/region/',
+                    'dev/ryanhcode/sable/sublevel/render/fancy/',
+                    'dev/ryanhcode/sable/mixin/entity/entity_leashing/',
+                    'dev/ryanhcode/sable/mixin/entity/entity_pathfinding/',
+                    'dev/ryanhcode/sable/mixin/sublevel_render/block_entity_render/',
+                    'dev/ryanhcode/sable/mixin/loaded_chunk_debug/'
+            ]
+            def deferredEntries = forgeJar.entries().toList().findAll { entry ->
+                deferredPrefixes.any { prefix -> entry.name.startsWith(prefix) }
+            }
+            if (!deferredEntries.isEmpty()) {
+                throw new GradleException("Deferred classes leaked into Forge jar: ${deferredEntries*.name}")
+            }
+            if (forgeJar.entries().toList().any { it.name.startsWith('dev/ryanhcode/sable/companion/') }) {
+                throw new GradleException('Companion classes were unexpectedly bundled before the JarJar milestone')
+            }
+        } finally {
+            forgeJar.close()
+        }
+
+        JarFile companionJar = new JarFile(companionArchive)
+        try {
+            [
+                    'dev/ryanhcode/sable/companion/SableCompanion.class',
+                    'META-INF/services/dev.ryanhcode.sable.companion.SableCompanion',
+                    'META-INF/LICENSE_sable_companion'
+            ].each { entry ->
+                if (companionJar.getJarEntry(entry) == null) {
+                    throw new GradleException("Companion library jar is missing ${entry}")
+                }
+            }
+            if (companionJar.getJarEntry('META-INF/mods.toml') != null) {
+                throw new GradleException('Companion common library unexpectedly contains Forge mod metadata')
+            }
+        } finally {
+            companionJar.close()
+        }
+
+        logger.lifecycle("Verified Forge package ${forgeArchive.name} and Companion library ${companionArchive.name}")
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyForgeAccessTransformer')
+    dependsOn tasks.named('verifyForgePackaging')
+}
+
+tasks.named('checkstyleMain') {
+    mustRunAfter syncMixinRefmap
+}
+
 processResources {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
@@ -440,6 +854,9 @@ processResources {
 }
 
 jar {
+    dependsOn syncMixinRefmap
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
     from(rootProject.file('LICENSE.md')) {
         rename { "${it}" }
     }
@@ -452,7 +869,12 @@ jar {
                 'Implementation-Title'  : project.name,
                 'Implementation-Version': project.jar.archiveVersion,
                 'Implementation-Vendor' : mod_author,
-                'Built-On-Minecraft'    : forge_minecraft_version
+                'Built-On-Minecraft'    : forge_minecraft_version,
+                'FMLAT'                 : 'accesstransformer-forge.cfg'
         ])
     }
+}
+
+tasks.named('sourcesJar') {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

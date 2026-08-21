@@ -4,7 +4,6 @@ import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.network.udp.SableUDPServer;
 import net.minecraft.network.Connection;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.server.players.PlayerList;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -18,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class PlayerListMixin {
 
     @Inject(method = "placeNewPlayer", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;send(Lnet/minecraft/network/protocol/Packet;)V", ordinal = 0, shift = At.Shift.AFTER))
-    private void onPlayerJoin(final Connection connection, final ServerPlayer serverPlayer, final CommonListenerCookie commonListenerCookie, final CallbackInfo ci) {
+    private void onPlayerJoin(final Connection connection, final ServerPlayer serverPlayer, final CallbackInfo ci) {
         final SableUDPServer server = SableUDPServer.getServer(serverPlayer.server);
 
         if (server == null) {

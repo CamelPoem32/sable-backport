@@ -3,7 +3,6 @@ package dev.ryanhcode.sable.util;
 import net.minecraft.Util;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -37,7 +36,7 @@ public class SchematicLoader {
 
         try (final InputStream stream = resource.open()) {
             final StructureTemplate template = new StructureTemplate();
-            final CompoundTag nbt = NbtIo.readCompressed(stream, NbtAccounter.create(0x20000000L));
+            final CompoundTag nbt = NbtIo.readCompressed(stream);
             template.load(level.holderLookup(Registries.BLOCK), nbt);
             return template;
         } catch (final IOException e) {

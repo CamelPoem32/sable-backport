@@ -17,7 +17,6 @@ import dev.ryanhcode.sable.util.SableNBTUtils;
 import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.server.level.ServerLevel;
@@ -43,11 +42,8 @@ public class SubLevelTrackingPointSavedData extends SavedData implements SubLeve
 
     public static SubLevelTrackingPointSavedData getOrLoad(final ServerLevel level) {
         return level.getDataStorage().computeIfAbsent(
-                new Factory<>(
-                        () -> new SubLevelTrackingPointSavedData(level),
-                        (tag, provider) -> SubLevelTrackingPointSavedData.load(level, tag),
-                        null
-                ),
+                tag -> SubLevelTrackingPointSavedData.load(level, tag),
+                () -> new SubLevelTrackingPointSavedData(level),
                 SubLevelTrackingPointSavedData.FILE_ID);
     }
 
@@ -62,7 +58,8 @@ public class SubLevelTrackingPointSavedData extends SavedData implements SubLeve
 
             final boolean inSubLevel = pointTag.getBoolean("InSubLevel");
             final GlobalSavedSubLevelPointer pointer = pointTag.contains("SubLevelPointer") ?
-                    GlobalSavedSubLevelPointer.CODEC.parse(NbtOps.INSTANCE, pointTag.getCompound("SubLevelPointer")).getOrThrow() :
+                    GlobalSavedSubLevelPointer.CODEC.parse(NbtOps.INSTANCE, pointTag.getCompound("SubLevelPointer"))
+                            .getOrThrow(false, Sable.LOGGER::error) :
                     null;
             final Vector3d point = SableNBTUtils.readVector3d(pointTag.getCompound("Point"));
 
@@ -86,7 +83,7 @@ public class SubLevelTrackingPointSavedData extends SavedData implements SubLeve
     }
 
     @Override
-    public @NotNull CompoundTag save(final @NotNull CompoundTag compoundTag, final HolderLookup.@NotNull Provider provider) {
+    public @NotNull CompoundTag save(final @NotNull CompoundTag compoundTag) {
         final SubLevelContainer container = SubLevelContainer.getContainer(this.level);
         assert container != null : "Sub-level container is null";
 
@@ -98,7 +95,9 @@ public class SubLevelTrackingPointSavedData extends SavedData implements SubLeve
             final TrackingPoint trackingPoint = entry.getValue();
             pointTag.putBoolean("InSubLevel", trackingPoint.inSubLevel());
             if (trackingPoint.lastSavedSubLevelPointer() != null) {
-                pointTag.put("SubLevelPointer", GlobalSavedSubLevelPointer.CODEC.encodeStart(NbtOps.INSTANCE, trackingPoint.lastSavedSubLevelPointer()).getOrThrow());
+                pointTag.put("SubLevelPointer", GlobalSavedSubLevelPointer.CODEC
+                        .encodeStart(NbtOps.INSTANCE, trackingPoint.lastSavedSubLevelPointer())
+                        .getOrThrow(false, Sable.LOGGER::error));
             }
             pointTag.put("Point", SableNBTUtils.writeVector3d(trackingPoint.point()));
 

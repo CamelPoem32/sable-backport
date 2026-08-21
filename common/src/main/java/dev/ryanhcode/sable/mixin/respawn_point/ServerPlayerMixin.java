@@ -6,6 +6,7 @@ import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.mixinterface.player_freezing.PlayerFreezeExtension;
 import dev.ryanhcode.sable.mixinterface.respawn_point.ServerPlayerRespawnExtension;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundFreezePlayerPacket;
+import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.tracking_points.SubLevelTrackingPointSavedData;
@@ -13,20 +14,19 @@ import it.unimi.dsi.fastutil.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Vector3d;
 import org.spongepowered.asm.mixin.*;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Optional;
@@ -53,11 +53,6 @@ public abstract class ServerPlayerMixin implements ServerPlayerRespawnExtension 
     private UUID sable$respawnPoint = null;
     @Unique
     private Pair<UUID, Vector3d> sable$queuedFreeze = null;
-
-    @Shadow
-    public static Optional<ServerPlayer.RespawnPosAngle> findRespawnAndUseSpawnBlock(final ServerLevel serverLevel, final BlockPos blockPos, final float f, final boolean bl, final boolean bl2) {
-        return null;
-    }
 
     @Shadow
     public abstract ServerLevel serverLevel();
@@ -116,24 +111,12 @@ public abstract class ServerPlayerMixin implements ServerPlayerRespawnExtension 
         }
     }
 
-    /**
-     * @author RyanH
-     * @reason Respawning on sub-levels
-     */
-    @Overwrite
-    public void copyRespawnPosition(final ServerPlayer serverPlayer) {
+    @Inject(method = "restoreFrom", at = @At("TAIL"))
+    private void sable$copyRespawnPosition(final ServerPlayer serverPlayer, final boolean keepEverything, final CallbackInfo ci) {
         if (serverPlayer.getRespawnPosition() != null) {
             this.sable$respawnPoint = ((ServerPlayerRespawnExtension) serverPlayer).sable$getRespawnPoint();
-            this.respawnPosition = serverPlayer.getRespawnPosition();
-            this.respawnDimension = serverPlayer.getRespawnDimension();
-            this.respawnAngle = serverPlayer.getRespawnAngle();
-            this.respawnForced = serverPlayer.isRespawnForced();
         } else {
             this.sable$respawnPoint = null;
-            this.respawnPosition = null;
-            this.respawnDimension = Level.OVERWORLD;
-            this.respawnAngle = 0.0F;
-            this.respawnForced = false;
         }
     }
 
@@ -144,7 +127,7 @@ public abstract class ServerPlayerMixin implements ServerPlayerRespawnExtension 
 
         if (queuedFreeze != null) {
             ((PlayerFreezeExtension) this).sable$freezeTo(queuedFreeze.first(), queuedFreeze.second());
-            this.connection.send(new ClientboundCustomPayloadPacket(new ClientboundFreezePlayerPacket(queuedFreeze.first(), queuedFreeze.second())));
+            SableTCPPackets.sendToPlayer((ServerPlayer) (Object) this, new ClientboundFreezePlayerPacket(queuedFreeze.first(), queuedFreeze.second()));
         }
     }
 
@@ -157,8 +140,8 @@ public abstract class ServerPlayerMixin implements ServerPlayerRespawnExtension 
      * @author RyanH
      * @reason Respawning on sub-levels
      */
-    @Redirect(method = "findRespawnPositionAndUseSpawnBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;findRespawnAndUseSpawnBlock(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/core/BlockPos;FZZ)Ljava/util/Optional;"))
-    private Optional<ServerPlayer.RespawnPosAngle> sable$findRespawnPosition(final ServerLevel level, final BlockPos blockPos, final float f1, final boolean b1, final boolean b2) {
+    @Override
+    public Optional<Vec3> sable$findRespawnPosition(final ServerLevel level, final BlockPos blockPos, final float f1, final boolean b1, final boolean b2) {
         final SubLevelTrackingPointSavedData data = SubLevelTrackingPointSavedData.getOrLoad(level);
 
         if (this.sable$respawnPoint != null) {
@@ -175,9 +158,9 @@ public abstract class ServerPlayerMixin implements ServerPlayerRespawnExtension 
                 this.sable$queuedFreeze = Pair.of(point.subLevelId(), point.localAnchor());
             }
 
-            return Optional.of(new ServerPlayer.RespawnPosAngle(JOMLConversion.toMojang(point.position()), f1));
+            return Optional.of(JOMLConversion.toMojang(point.position()));
         }
 
-        return findRespawnAndUseSpawnBlock(level, blockPos, f1, b1, b2);
+        return Player.findRespawnPositionAndUseSpawnBlock(level, blockPos, f1, b1, b2);
     }
 }

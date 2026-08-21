@@ -1,34 +1,21 @@
 package dev.ryanhcode.sable.network.packets.tcp;
 
-import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.network.SablePacketCodec;
 import dev.ryanhcode.sable.network.tcp.SableTCPPacket;
-import dev.ryanhcode.sable.physics.config.FloatingBlockMaterialDataHandler;
 import dev.ryanhcode.sable.physics.floating_block.FloatingBlockMaterial;
-import foundry.veil.api.network.handler.PacketContext;
-import io.netty.buffer.ByteBuf;
-import net.minecraft.client.Minecraft;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
 public record ClientboundFloatingBlockMaterialPacket(ResourceLocation name, FloatingBlockMaterial material) implements SableTCPPacket {
-    public static final Type<ClientboundFloatingBlockMaterialPacket> TYPE = new CustomPacketPayload.Type<>(Sable.sablePath("floating_material"));
-
-    public static final StreamCodec<ByteBuf, ClientboundFloatingBlockMaterialPacket> CODEC = StreamCodec.composite(
-            ResourceLocation.STREAM_CODEC, ClientboundFloatingBlockMaterialPacket::name,
-            FloatingBlockMaterial.STREAM_CODEC, ClientboundFloatingBlockMaterialPacket::material,
-            ClientboundFloatingBlockMaterialPacket::new
+    private static final SablePacketCodec<FloatingBlockMaterial> MATERIAL_CODEC =
+            SablePacketCodec.fromCodec(FloatingBlockMaterial.CODEC);
+    public static final SablePacketCodec<ClientboundFloatingBlockMaterialPacket> CODEC = SablePacketCodec.of(
+            (buffer, packet) -> {
+                buffer.writeResourceLocation(packet.name);
+                MATERIAL_CODEC.encode(buffer, packet.material);
+            },
+            buffer -> new ClientboundFloatingBlockMaterialPacket(
+                    buffer.readResourceLocation(),
+                    MATERIAL_CODEC.decode(buffer)
+            )
     );
-
-    @Override
-    public void handle(PacketContext context) {
-        Minecraft.getInstance().execute(() -> {
-            FloatingBlockMaterialDataHandler.addMaterial(this.name, this.material);
-        });
-    }
-
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
-    }
 }

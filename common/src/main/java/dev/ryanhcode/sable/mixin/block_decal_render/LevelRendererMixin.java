@@ -6,7 +6,6 @@ import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import net.minecraft.client.Camera;
-import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -39,7 +38,10 @@ public abstract class LevelRendererMixin {
     private ClientLevel level;
 
     @Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;last()Lcom/mojang/blaze3d/vertex/PoseStack$Pose;", shift = At.Shift.BEFORE))
-    private void sable$preRenderBlockDamage(final DeltaTracker deltaTracker, final boolean bl, final Camera camera, final GameRenderer gameRenderer, final LightTexture lightTexture, final Matrix4f matrix4f, final Matrix4f matrix4f2, final CallbackInfo ci, @Local(ordinal = 0) final PoseStack ps, @Local(ordinal = 0) final BlockPos pos) {
+    private void sable$preRenderBlockDamage(final PoseStack poseStack, final float partialTick, final long finishTimeNano,
+                                            final boolean renderBlockOutline, final Camera camera, final GameRenderer gameRenderer,
+                                            final LightTexture lightTexture, final Matrix4f projection, final CallbackInfo ci,
+                                            @Local(ordinal = 0) final PoseStack ps, @Local(ordinal = 0) final BlockPos pos) {
 
         final Vec3 plotPos = new Vec3(pos.getX(), pos.getY(), pos.getZ());
         final ClientSubLevel subLevel = (ClientSubLevel) Sable.HELPER.getContaining(this.level, plotPos);

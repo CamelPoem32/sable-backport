@@ -13,10 +13,9 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.ProgressListener;
 import net.minecraft.util.profiling.ProfilerFiller;
-import net.minecraft.world.TickRateManager;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.chunk.ChunkSource;
+import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.storage.WritableLevelData;
 import org.spongepowered.asm.mixin.Mixin;
@@ -40,10 +39,7 @@ public abstract class ServerLevelMixin extends Level {
     }
 
     @Shadow
-    public abstract TickRateManager tickRateManager();
-
-    @Shadow
-    public abstract ChunkSource getChunkSource();
+    public abstract ServerChunkCache getChunkSource();
 
     @Inject(method = "<init>", at = @At("TAIL"))
     private void sable$init(final CallbackInfo ci) {
@@ -78,15 +74,10 @@ public abstract class ServerLevelMixin extends Level {
 
     @Inject(method = "tick(Ljava/util/function/BooleanSupplier;)V", at = @At("HEAD"))
     private void sable$tickPlotContainer(final BooleanSupplier booleanSupplier, final CallbackInfo ci) {
-        final TickRateManager tickRateManager = this.tickRateManager();
-        final boolean runNormally = tickRateManager.runsNormally();
-
         final ServerSubLevelContainer plotContainer = SubLevelContainer.getContainer((ServerLevel) (Object) this);
         assert plotContainer != null : "SubLevelContainer is null when ticking";
-
-        if (runNormally) {
-            plotContainer.tick();
-        }
+        // In 1.20.1 IntegratedServer does not invoke ServerLevel.tick while paused.
+        plotContainer.tick();
     }
 
     @Inject(method = "shouldTickBlocksAt", at = @At("HEAD"), cancellable = true)

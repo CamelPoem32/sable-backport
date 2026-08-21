@@ -3,6 +3,7 @@ package dev.ryanhcode.sable.mixin.plot;
 import com.mojang.datafixers.DataFixer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
+import dev.ryanhcode.sable.util.SableChunkFutures;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.*;
@@ -10,7 +11,6 @@ import net.minecraft.server.level.progress.ChunkProgressListener;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.chunk.*;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.entity.ChunkStatusUpdateListener;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
 import net.minecraft.world.level.storage.LevelStorageSource;
@@ -69,7 +69,7 @@ public class ServerChunkCacheMixin {
     }
 
     @Inject(method = "getChunkFutureMainThread", at = @At("HEAD"), cancellable = true)
-    private void getChunkFutureMainThread(final int x, final int z, final ChunkStatus chunkStatus, final boolean bl, final CallbackInfoReturnable<CompletableFuture<ChunkResult<ChunkAccess>>> cir) {
+    private void getChunkFutureMainThread(final int x, final int z, final ChunkStatus chunkStatus, final boolean bl, final CallbackInfoReturnable<CompletableFuture<com.mojang.datafixers.util.Either<ChunkAccess, ChunkHolder.ChunkLoadingFailure>>> cir) {
         final SubLevelContainer container = this.sable$getPlotContainer();
 
         if (container.inBounds(x, z)) {
@@ -77,9 +77,9 @@ public class ServerChunkCacheMixin {
             final LevelChunk chunk = container.getChunk(chunkPos);
 
             if (chunk != null) {
-                cir.setReturnValue(CompletableFuture.completedFuture(ChunkResult.of(chunk)));
+                cir.setReturnValue(CompletableFuture.completedFuture(SableChunkFutures.loaded(chunk)));
             } else {
-                cir.setReturnValue(CompletableFuture.completedFuture(ChunkResult.of(this.sable$emptyChunk)));
+                cir.setReturnValue(CompletableFuture.completedFuture(SableChunkFutures.loaded(this.sable$emptyChunk)));
             }
         }
     }

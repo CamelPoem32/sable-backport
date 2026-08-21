@@ -64,6 +64,6 @@ public class SubLevelDataAccessor implements DataAccessor {
     @Override
     public Component getPrintSuccess(final NbtPathArgument.NbtPath nbtPath, final double d, final int i) {
         return Component.translatable(
-                "commands.data.sub_level.get", nbtPath.asString(), this.subLevel.toString(), String.format(Locale.ROOT, "%.2f", d), i
+                "commands.data.sub_level.get", nbtPath.toString(), this.subLevel.toString(), String.format(Locale.ROOT, "%.2f", d), i
         );
     }}

@@ -2,7 +2,6 @@ package dev.ryanhcode.sable.sublevel.storage.region;
 
 import dev.ryanhcode.sable.Sable;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import org.jetbrains.annotations.Nullable;
 
@@ -333,7 +332,7 @@ public class SubLevelStorageFile implements AutoCloseable {
 
         try (dataInputStream) {
             if (COMPRESS_DATA) {
-                return NbtIo.readCompressed(dataInputStream, NbtAccounter.unlimitedHeap());
+                return NbtIo.readCompressed(dataInputStream);
             } else {
                 return NbtIo.read(dataInputStream);
             }

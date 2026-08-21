@@ -64,8 +64,7 @@ public class ClientSableInterpolationState {
             return;
         }
 
-        final float rate = this.minecraft.level.tickRateManager().tickrate();
-        final float expectedMsBetween = 1000.0f / rate;
+        final float expectedMsBetween = 50.0f;
 
         if (!this.stopped) {
             this.estimatedServerTickSpeed = Mth.lerp(0.05, this.estimatedServerTickSpeed, expectedMsBetween / Math.max(1, this.serverMsFromLastUpdate));

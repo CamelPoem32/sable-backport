@@ -59,9 +59,9 @@ public class CameraTypeMixin {
         }
 
         return switch ((CameraType) (Object) this) {
-            case CameraType.FIRST_PERSON -> CameraType.THIRD_PERSON_BACK;
-            case CameraType.THIRD_PERSON_BACK -> SableCameraTypes.SUB_LEVEL_VIEW;
-            case CameraType.THIRD_PERSON_FRONT -> CameraType.FIRST_PERSON;
+            case FIRST_PERSON -> CameraType.THIRD_PERSON_BACK;
+            case THIRD_PERSON_BACK -> SableCameraTypes.SUB_LEVEL_VIEW;
+            case THIRD_PERSON_FRONT -> CameraType.FIRST_PERSON;
             default -> null;
         };
     }

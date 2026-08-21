@@ -31,7 +31,7 @@ public abstract class VoxelShapeMixin implements FastVoxelShapeIterable {
     @Override
     public Iterator<BoundingBox3dc> sable$allBoxes() {
         synchronized (this) {
-            final long id = Thread.currentThread().threadId();
+            final long id = Thread.currentThread().getId();
             FastVoxelShapeIterator iterator = this.sable$boxIterator.get(id);
 
             if (iterator == null) {

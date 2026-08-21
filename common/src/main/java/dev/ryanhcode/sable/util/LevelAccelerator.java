@@ -6,7 +6,6 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.server.level.ChunkHolder;
-import net.minecraft.server.level.ChunkResult;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -123,7 +122,7 @@ public class LevelAccelerator implements BlockGetter {
         final ChunkHolder holder = ((ServerChunkCacheAccessor) this.level.getChunkSource()).invokeGetVisibleChunkIfPresent(pos);
 
         if (holder != null) {
-            final LevelChunk res = holder.getFullChunkFuture().getNow(ChunkResult.error("No chunk at position")).orElse(null);
+            final LevelChunk res = holder.getFullChunkFuture().getNow(ChunkHolder.UNLOADED_LEVEL_CHUNK).left().orElse(null);
 
             if (res != null)
                 return res;

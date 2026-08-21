@@ -14,14 +14,12 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArraySet;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.saveddata.SavedData;
 import org.jetbrains.annotations.NotNull;
 
@@ -41,11 +39,8 @@ public class SubLevelTicketsSavedData extends SavedData {
 
     public static SubLevelTicketsSavedData getOrLoad(final ServerLevel level) {
         return level.getChunkSource().getDataStorage().computeIfAbsent(
-                new Factory<>(
-                        () -> new SubLevelTicketsSavedData(level),
-                        (tag, provider) -> SubLevelTicketsSavedData.load(level, tag),
-                        DataFixTypes.LEVEL
-                ),
+                tag -> SubLevelTicketsSavedData.load(level, tag),
+                () -> new SubLevelTicketsSavedData(level),
                 SubLevelTicketsSavedData.FILE_ID);
     }
 
@@ -75,7 +70,9 @@ public class SubLevelTicketsSavedData extends SavedData {
             GlobalSavedSubLevelPointer pointer = null;
 
             if (infoTag.contains("pointer")) {
-                pointer = GlobalSavedSubLevelPointer.CODEC.decode(NbtOps.INSTANCE, infoTag.get("pointer")).getOrThrow().getFirst();
+                pointer = GlobalSavedSubLevelPointer.CODEC.decode(NbtOps.INSTANCE, infoTag.get("pointer"))
+                        .getOrThrow(false, Sable.LOGGER::error)
+                        .getFirst();
             }
 
             if (!tickets.isEmpty()) {
@@ -124,7 +121,7 @@ public class SubLevelTicketsSavedData extends SavedData {
     }
 
     @Override
-    public @NotNull CompoundTag save(final CompoundTag compoundTag, final HolderLookup.Provider provider) {
+    public @NotNull CompoundTag save(final CompoundTag compoundTag) {
         final ServerSubLevelContainer container = SubLevelContainer.getContainer(this.level);
         assert container != null : "Sub-level container is null";
 
@@ -160,7 +157,8 @@ public class SubLevelTicketsSavedData extends SavedData {
 
             if (!entriesTag.isEmpty()) {
                 if (pointer != null) {
-                    infoTag.put("pointer", GlobalSavedSubLevelPointer.CODEC.encodeStart(NbtOps.INSTANCE, pointer).getOrThrow());
+                    infoTag.put("pointer", GlobalSavedSubLevelPointer.CODEC.encodeStart(NbtOps.INSTANCE, pointer)
+                            .getOrThrow(false, Sable.LOGGER::error));
                 } else {
                     Sable.LOGGER.error("Pointer is null for Sub-level loading ticket. This shouldn't happen- we won't be able to load the sub-level in on the next world load.");
                 }

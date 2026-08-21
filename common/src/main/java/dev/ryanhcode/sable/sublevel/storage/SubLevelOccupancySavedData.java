@@ -1,10 +1,8 @@
 package dev.ryanhcode.sable.sublevel.storage;
 
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import java.util.BitSet;
@@ -22,11 +20,8 @@ public class SubLevelOccupancySavedData extends SavedData {
 
     public static SubLevelOccupancySavedData getOrLoad(final ServerLevel level) {
         return level.getChunkSource().getDataStorage().computeIfAbsent(
-                new Factory<>(
-                        () -> new SubLevelOccupancySavedData(level),
-                        (tag, provider) -> SubLevelOccupancySavedData.load(level, tag),
-                        DataFixTypes.LEVEL
-                ),
+                tag -> SubLevelOccupancySavedData.load(level, tag),
+                () -> new SubLevelOccupancySavedData(level),
                 SubLevelOccupancySavedData.FILE_ID);
     }
 
@@ -51,7 +46,7 @@ public class SubLevelOccupancySavedData extends SavedData {
     }
 
     @Override
-    public CompoundTag save(final CompoundTag compoundTag, final HolderLookup.Provider provider) {
+    public CompoundTag save(final CompoundTag compoundTag) {
         final SubLevelContainer container = SubLevelContainer.getContainer(this.level);
         assert container != null : "Sub-level container is null";
 
