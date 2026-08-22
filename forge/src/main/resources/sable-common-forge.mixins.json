@@ -12,7 +12,6 @@
         "camera.camera_rotation.CompassItemPropertyFunctionMixin",
         "camera.camera_rotation.EntityMixin",
         "camera.camera_zoom.CameraMixin",
-        "camera.camera_zoom.MouseHandlerMixin",
         "clip_overwrite.ClientLevelMixin",
         "entity.entities_stick_sublevels.ClientPacketListenerMixin",
         "entity.entities_stick_sublevels.EntityRenderDispatcherMixin",

@@ -12,7 +12,7 @@
 - Upstream commit: `b7226222caf4eace63a708bdcd73ef36c971137d`
 - Backport branch: `backport/forge-1.20.1-sable-2.0.0`
 
-The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 added the Java 17/1.20.1 Companion library, official Veil 1.20, selected Java 17 rewrites, and the minimal Forge source graph. M4 replaced the missing modern Veil/Minecraft packet surface with a tested Forge 47 transport. M5 ports the selected Minecraft core/Mixins, adds the Forge bootstrap and eight platform providers, and produces a statically verified Forge package. Deferred advanced rendering, behavior-heavy gameplay, Create/Flywheel integration, Simulated, and Aeronautics remain unported.
+The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 added the Java 17/1.20.1 Companion library, official Veil 1.20, selected Java 17 rewrites, and the minimal Forge source graph. M4 replaced the missing modern Veil/Minecraft packet surface with a tested Forge 47 transport. M5 ported the selected Minecraft core/Mixins, added the Forge bootstrap and eight platform providers, and produced a statically verified Forge package. M6 now passes the Forge main-menu, empty-world, runtime-boundary, persistence, and stationary single-block smoke gates. Deferred advanced rendering, full physics/Sable Rapier, Create/Flywheel integration, Simulated, and Aeronautics remain unported.
 
 ## Canonical Workflow
 
@@ -70,7 +70,7 @@ The compiler now reports:
 - mappings loaded from `forge/build/createMcpToSrg/output.tsrg`.
 - refmap written and published to `forge/build/classes/java/main/sable.refmap.json` even when Java compilation stops at the intentional source frontier.
 
-The current M5 refmap is 99,596 bytes and contains mappings for 112 selected Mixin classes. Confirmed former false-negative canaries still map correctly:
+The current M6 refmap is 98,398 bytes and contains mappings for 111 selected Mixin classes. The historical final M5 refmap contained 112; M6 narrowly deferred `MouseHandlerMixin` with the already-deferred custom camera enum feature. Confirmed former false-negative canaries still map correctly:
 
 | Development target | Confirmed SRG mapping |
 |---|---|
@@ -87,10 +87,10 @@ These were not trustworthy incompatibilities before AP/FG mappings were connecte
 
 The upstream configs are unchanged. Forge `mods.toml` references the generated `sable-common-forge.mixins.json` plus `sable-forge.mixins.json`.
 
-- Curated common config: 144 entries (`103` common and `41` client entries).
+- Curated common config: 143 entries (`103` common and `40` client entries).
 - Forge-specific config: intentionally empty except normal metadata/refmap.
 - Missing upstream Forge `SableMixinPlugin`: not referenced; a future Forge loader implementation remains unresolved.
-- Physically deferred/excluded common sources: 117 classes/pattern matches. Three upstream classes (`SableConfig`, `SableClientConfig`, and `SableAttributes`) are separately replaced by Forge-specific implementations.
+- Physically deferred/excluded common sources: 120 classes/pattern matches. Three upstream classes (`SableConfig`, `SableClientConfig`, and `SableAttributes`) are separately replaced by Forge-specific implementations.
 - Optional/debug compiler and refmap matches after exclusion: zero for ComputerCraft, Exposure, Vista, Iris, Sodium, Embeddium, Oculus, ImGui, Jade, Jade Addons, `game_test`, `debug_render`, and `loaded_chunk_debug`.
 - NeoForge sources remain outside the Forge source set.
 
@@ -107,21 +107,21 @@ The upstream configs are unchanged. Forge `mods.toml` references the generated `
 | `DEBUG_TEST_UI` | 10 |
 | `UNKNOWN` | 0 |
 
-Actions are `151 INVESTIGATE`, `204 DEFER`, and `18 EXCLUDE_FROM_FORGE_TARGET`. Thus 222 entries are deferred/excluded by action and 229 entries are absent from the curated common runtime config. The category totals remain unchanged because M5 changes action/selection, not the mechanical upstream classification.
+Actions are `150 INVESTIGATE`, `205 DEFER`, and `18 EXCLUDE_FROM_FORGE_TARGET`. Thus 223 entries are deferred/excluded by action and 230 entries are absent from the curated common runtime config. The category totals remain unchanged because M6 changes action/selection, not the mechanical upstream classification.
 
 ## Compiler Frontier
 
 M5a was gated before platform work. After the Forge-specific AT was correctly translated from official names to ForgeGradle 6 SRG names, the compiler moved from `39 errors / 2 warnings`, to `1 error / 2 warnings`, then to `0 errors / 2 warnings`. Its required second invocation reported `:forge:compileJava UP-TO-DATE`. M5b then compiled the Forge bootstrap and all eight providers at `0 errors / 3 deprecation warnings`.
 
-The final refmap is `99,596` bytes and contains mappings for 112 selected Mixin classes. The three Forge reach calls use `remap = false` because they are Forge-added methods with stable runtime names; their exact call sites were verified in mapped `ServerGamePacketListenerImpl` bytecode rather than globally suppressing target validation.
+The M5 refmap was `99,596` bytes with 112 selected Mixin classes. After the M6 camera deferral, the current refmap is `98,398` bytes with 111 mapped classes. The three Forge reach calls use `remap = false` because they are Forge-added methods with stable runtime names; their exact call sites were verified in mapped `ServerGamePacketListenerImpl` bytecode rather than globally suppressing target validation.
 
-There is no remaining compile-time error frontier in the selected Forge core graph. The next trustworthy frontier is runtime and deferred-feature integration:
+There is no remaining compile-time error frontier in the selected Forge core graph. M6 moved the trustworthy frontier through the first runtime and persistence boundary:
 
-1. **Runtime smoke validation:** config/event timing, ServiceLoader discovery in FML, world load, plot capability persistence, and the selected Mixins still require `runClient`/world validation in a later milestone.
+1. **Runtime smoke validation:** main menu, empty-world ticking, ServiceLoader discovery, config/event timing, TCP/UDP lifecycle, plot persistence, and one stationary named single-block sublevel now pass. See `M6_RUNTIME_SMOKE.md`.
 2. **Create 0.5.1.j:** only wrapped-level detection is implemented. Create 6 contraption/logistics integrations remain deferred and absent from the Forge Mixin config.
 3. **Flywheel 0.6:** visual registration is deliberately a no-op; Flywheel 1.0 render integration remains deferred.
 4. **Advanced rendering/gameplay:** chunked rendering, shader/water/Iris/Sodium bridges, Leashable/pathfinding, projectile dispenser, vibration, toast/settings, and other listed clusters remain intact but excluded.
-5. **Packaging:** Companion is verified as a separate Java 17 common library project and is intentionally not yet JarJar-bundled into the Forge jar.
+5. **Packaging:** Companion works on the Gradle `runClient` project classpath and remains intentionally absent from the Forge JarJar output. Standalone modpack testing requires that packaging step.
 
 No `runClient` attempt has been made.
 
@@ -216,6 +216,19 @@ Registry/platform and basic client renderer APIs are reused directly. Render pro
 9. **Static packaging:** `verifyForgePackaging` confirms the `@Mod` class, nine ServiceLoader descriptors (eight platform plus networking), provider classes, Forge `mods.toml`, two curated Mixin configs, `sable.refmap.json`, curated `FMLAT`, and absence of representative deferred class prefixes. It separately confirms Companion classes, provider descriptor, MIT license, Java-library packaging, and absence of mod metadata; Companion is intentionally not bundled before the JarJar milestone.
 10. **Final compile/package state:** M5b compiles with `0 errors / 3 deprecation warnings`, and the required repeat compile is `UP-TO-DATE`. The final refmap is 99,596 bytes with 112 mapped selected Mixins. Companion, network (12 tests), target dependency, Veil, Forge AT, static packaging, Checkstyle, Spotless, reobfuscation, and `:forge:build` validation all pass.
 11. **Recommended M6:** perform a narrow Forge runtime smoke milestone: launch to main menu, create/load a disposable world, validate provider discovery/config/event ordering, verify a basic single-block sublevel and capability persistence, and capture runtime Mixin failures. Keep Create/Flywheel semantic integration and advanced rendering out of that milestone unless a runtime blocker proves one is unavoidable.
+
+## M6 Acceptance Report
+
+1. **Run harness:** ForgeGradle now has a Java 17 client run at `forge/run/m6-client` with verbose Mixin diagnostics and the inert-by-default `sable.runtimeSmoke` probe. `m6SableRun` combines Sable and Companion outputs only for the exploded development mod; Companion remains a common library rather than a standalone Forge mod.
+2. **Classpath boundary:** `verifyRunClientClasspath` confirms the merged Active/fallback Companion descriptor, mapped and development-patched Veil plus required runtime libraries, MixinExtras, and Forge 1.20 resource paths. Create, Flywheel, and Registrate are absent. `WrappedServerWorld` appears only in `SablePlatformImpl$CreateWrappedLevelCheck`, and both Create and Flywheel remain genuinely optional in `mods.toml`.
+3. **Deterministic Companion:** provider discovery saw Active and fallback implementations, verified effective priorities `1000` and `500`, proved Active is the unique maximum, and confirmed that `SableCompanion.INSTANCE` selected Active. Selection does not depend on classpath enumeration order.
+4. **Runtime Mixin boundary:** the current generated config has 143 entries and the current 98,398-byte refmap maps 111 classes. Retained 1.20.1 descriptor/call-site corrections were limited to selected classes and checked against mapped targets. The scroll-only `MouseHandlerMixin` is deferred with the absent custom camera enum; no global target suppression or broad `require = 0` was added.
+5. **Main menu and empty world:** Sable and Veil reach the title screen. The disposable Creative Superflat Void world `M6_Smoke_Empty` loads, ticks for more than 60 seconds, exposes `/sable`, starts local UDP, synchronizes datapack definitions, and produces no repeated chunk, tick, Mixin, or resource error.
+6. **Providers/config/network:** all eight Forge platform providers and `ForgeSablePacketTransport` resolve. Protocol `1` registers TCP IDs `0..13`; packet handlers report the expected main thread. CLIENT and COMMON configs load once, reload listeners register, all three server levels load, and player/server lifecycle ordering passes.
+7. **Resource compatibility:** processed resources map the 1.21 singular tag/structure directories to 1.20 plural paths, translate exact common-tag names to Forge tags, and make absent 1.21-only optional entries non-required. Unknown optional-mod physics selectors are skipped while missing Minecraft/Sable selectors remain errors.
+8. **Reload/persistence:** Save and Quit closes UDP, logs out the player, saves all dimensions, unloads all levels, and stops the server. The dev client exited after returning to title, so empty-world reload used a fresh client JVM; persistence passed, while a same-JVM duplicate-listener assertion was not exercised.
+9. **Single-block gate:** the verified commands `/sable spawn block minecraft:stone m6_smoke` and `/sable info @l` create exactly one stationary named sublevel. StartTracking precedes Finalize. A fresh reload restores the same name, position `-6.5 -60.0 6.5`, identity/state, mass `2.0`, and zero velocities, with occupancy, tracking, and region files present. This proves runtime, synchronization, retained single-block rendering path, and persistence boundaries only, not working physics.
+10. **Validation and next scope:** Companion verification, all 12 network tests, target dependency/Veil/AT checks, `compileJava`, `build`, and the final `runClient` shutdown pass. Companion JarJar remains the narrow prerequisite for standalone artifact testing. Advanced/chunked rendering, custom camera modes, full physics/Sable Rapier, Create/Flywheel features, Simulated, and Aeronautics remain deferred. Full evidence is in `M6_RUNTIME_SMOKE.md`.
 
 ## Known Target Modpack Issue
 

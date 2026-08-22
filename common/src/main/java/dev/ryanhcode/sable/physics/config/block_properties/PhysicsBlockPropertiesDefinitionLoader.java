@@ -97,6 +97,9 @@ public class PhysicsBlockPropertiesDefinitionLoader extends SimpleJsonResourceRe
                 // The selector is not a tag, let's just get the block
                 final Block block = BuiltInRegistries.BLOCK.get(selector.id());
                 blocks.add(block);
+            } else if (!selector.id().getNamespace().equals(ResourceLocation.DEFAULT_NAMESPACE)
+                    && !selector.id().getNamespace().equals(Sable.MOD_ID)) {
+                Sable.LOGGER.debug("Skipping physics properties for unavailable optional block: {}", selector.id());
             } else {
                 Sable.LOGGER.error("Failed to apply tag physics properties. Unknown block: {}", selector.id());
             }

@@ -1,9 +1,9 @@
 package dev.ryanhcode.sable.mixin.entity.entity_rotations_and_riding;
 
-import com.llamalad7.mixinextras.sugar.Local;
 import dev.ryanhcode.sable.api.entity.EntitySubLevelUtil;
 import dev.ryanhcode.sable.api.math.OrientedBoundingBox3d;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniondc;
@@ -16,7 +16,8 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public class BlockMixin {
 
     @Redirect(method = "updateEntityAfterFallOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/phys/Vec3;multiply(DDD)Lnet/minecraft/world/phys/Vec3;"))
-    private Vec3 sable$rotateWithEntity(final Vec3 instance, final double x, final double y, final double z, @Local(argsOnly = true) final Entity entity) {
+    private Vec3 sable$rotateWithEntity(final Vec3 instance, final double x, final double y, final double z,
+                                       final BlockGetter level, final Entity entity) {
         final Quaterniondc orientation = EntitySubLevelUtil.getCustomEntityOrientation(entity, 1.0f);
 
         if (orientation == null) {

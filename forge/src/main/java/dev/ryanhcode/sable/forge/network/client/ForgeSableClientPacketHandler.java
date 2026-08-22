@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.forge.network.client;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.forge.SableForgeRuntimeSmoke;
 import dev.ryanhcode.sable.network.tcp.SablePacketContext;
 import dev.ryanhcode.sable.network.tcp.SablePacketDirection;
 import dev.ryanhcode.sable.network.tcp.SablePacketRegistration;
@@ -28,6 +29,8 @@ public final class ForgeSableClientPacketHandler {
             Sable.LOGGER.error("Rejected clientbound Sable packet {} without an active client level", registration.packetType().getSimpleName());
             return;
         }
+
+        SableForgeRuntimeSmoke.packetThread("client", registration, minecraft.isSameThread());
 
         registration.handler().accept(
                 packet,

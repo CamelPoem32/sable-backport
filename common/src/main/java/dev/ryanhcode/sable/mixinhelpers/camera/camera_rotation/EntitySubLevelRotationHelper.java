@@ -4,10 +4,8 @@ import dev.ryanhcode.sable.ActiveSableCompanion;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.entity.EntitySubLevelUtil;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
-import dev.ryanhcode.sable.mixinhelpers.camera.new_camera_types.SableCameraTypes;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
-import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -23,9 +21,6 @@ public class EntitySubLevelRotationHelper {
 
     public enum Type {
         CAMERA, ENTITY
-    }
-    public static boolean shouldCameraRotate() {
-        return Minecraft.getInstance().options.getCameraType() != SableCameraTypes.SUB_LEVEL_VIEW_UNLOCKED;
     }
 
     /**
@@ -54,10 +49,6 @@ public class EntitySubLevelRotationHelper {
      */
 
     public static Quaterniond getSubLevelInheritedOrientation(final Entity cameraEntity, final Function<SubLevel, Pose3dc> poseProvider, final Type type) {
-        if (type == Type.CAMERA && cameraEntity instanceof final Player player &&  player.isLocalPlayer() && !shouldCameraRotate()) {
-            return null;
-        }
-
         final ActiveSableCompanion helper = Sable.HELPER;
         if (cameraEntity instanceof final LivingEntity livingEntity && livingEntity.isSleeping()) {
             final Optional<BlockPos> sleepingPos = livingEntity.getSleepingPos();

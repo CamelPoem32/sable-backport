@@ -8,6 +8,9 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 /**
  * All default physics block properties
  */
@@ -17,6 +20,7 @@ public class PhysicsBlockPropertyTypes {
             ResourceKey.createRegistryKey(sablePath("physics_block_properties"));
     private static final RegistrationProvider<PhysicsBlockPropertyType<?>> VANILLA_PROVIDER;
     private static final Registry<PhysicsBlockPropertyType<?>> REGISTRY;
+    private static final Set<ResourceLocation> REGISTERED_IDS = new LinkedHashSet<>();
 
     static {
         VANILLA_PROVIDER = RegistrationProvider.get(REGISTRY_KEY, MOD_ID);
@@ -71,19 +75,19 @@ public class PhysicsBlockPropertyTypes {
      * @return The registered property
      */
     private static <T> RegistryObject<PhysicsBlockPropertyType<T>> register(final ResourceLocation id, final Codec<T> codec, final T defaultValue) {
-        // Throw if the property is already registered
-        if (REGISTRY.containsKey(id)) {
+        if (!REGISTERED_IDS.add(id)) {
             throw new IllegalArgumentException("Duplicate physics block property: %s".formatted(id));
         }
 
-        return VANILLA_PROVIDER.register(id, () -> new PhysicsBlockPropertyType<>(REGISTRY.size(), codec, defaultValue));
+        final int propertyId = REGISTERED_IDS.size() - 1;
+        return VANILLA_PROVIDER.register(id, () -> new PhysicsBlockPropertyType<>(propertyId, codec, defaultValue));
     }
 
     /**
      * The count of registered properties
      */
     public static int count() {
-        return REGISTRY.size();
+        return REGISTERED_IDS.size();
     }
 
     /**

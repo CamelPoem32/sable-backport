@@ -15,6 +15,8 @@ plugins {
 
 apply plugin: 'org.spongepowered.mixin'
 
+evaluationDependsOn(':sable_companion_1_20')
+
 base {
     archivesName = "${mod_id}-forge-${forge_minecraft_version}"
 }
@@ -24,9 +26,39 @@ java {
     withSourcesJar()
 }
 
+sourceSets {
+    m6SableRun {
+        java.setSrcDirs([])
+        resources.setSrcDirs([sourceSets.main.output.resourcesDir])
+        output.classesDirs.setFrom(
+                sourceSets.main.output.classesDirs,
+                project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        )
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath += output + sourceSets.main.runtimeClasspath
+    }
+}
+
 minecraft {
     mappings channel: 'official', version: forge_minecraft_version
     accessTransformer = project.file('src/main/resources/META-INF/accesstransformer-forge.cfg')
+
+    runs {
+        client {
+            workingDirectory project.file('run/m6-client')
+            property 'forge.logging.console.level', 'info'
+            property 'mixin.debug.verbose', 'true'
+            property 'mixin.debug.countInjections', 'true'
+            property 'sable.runtimeSmoke', 'true'
+            property 'veil.disableImgui', 'true'
+
+            mods {
+                sable {
+                    source sourceSets.m6SableRun
+                }
+            }
+        }
+    }
 }
 
 def forgeBackportSourceExclusions = [
@@ -86,7 +118,10 @@ def forgeBackportSourceExclusions = [
         'dev/ryanhcode/sable/mixinterface/sublevel_render/vanilla/RenderSectionExtension.java',
         'dev/ryanhcode/sable/sublevel/render/vanilla/VanillaChunkedSubLevelRenderData.java',
         'dev/ryanhcode/sable/mixin/camera/camera_rotation/GuiMixin.java',
+        'dev/ryanhcode/sable/mixin/camera/camera_zoom/MouseHandlerMixin.java',
         'dev/ryanhcode/sable/mixin/camera/new_camera_types/**',
+        'dev/ryanhcode/sable/mixinhelpers/camera/new_camera_types/**',
+        'dev/ryanhcode/sable/mixinterface/camera/camera_zoom/CameraZoomExtension.java',
         'dev/ryanhcode/sable/mixin/clip_overwrite/GameRendererMixin.java',
         'dev/ryanhcode/sable/mixin/entity/entity_rotations_and_riding/EntityTypeMixin.java',
         'dev/ryanhcode/sable/mixin/entity/entity_sublevel_collision/PlayerMixin.java',
@@ -226,11 +261,23 @@ configurations {
         canBeResolved = true
         transitive = false
     }
+    veilMapped {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
+    veilRuntimeMapped {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
 }
 
 def targetModpackModsDir = rootProject.file('../target_modpack/mods')
 def targetCreateJar = new File(targetModpackModsDir, "create-${forge_minecraft_version}-${forge_create_version}.jar")
 def targetModpackRepository = layout.buildDirectory.dir('targetModpackRepository')
+def veilDevelopmentRuntime = layout.buildDirectory.file(
+        "m6Runtime/Veil-forge-${forge_minecraft_version}-${forge_veil_version}-mapped-dev.jar")
 
 def expectedTargetArtifacts = [
         create    : [
@@ -352,6 +399,26 @@ def prepareTargetModpackDependencies = tasks.register('prepareTargetModpackDepen
     }
 }
 
+def prepareVeilDevelopmentRuntime = tasks.register('prepareVeilDevelopmentRuntime') {
+    group = 'forge backport'
+    description = 'Patches Veil shadow aliases that ForgeGradle cannot reverse from the published reobfuscated jar.'
+    dependsOn tasks.named('createSrgToMcp')
+    inputs.files(configurations.veilMapped)
+    inputs.files(configurations.veilRuntimeMapped)
+    inputs.file(layout.buildDirectory.file('createSrgToMcp/output.srg'))
+    outputs.file(veilDevelopmentRuntime)
+
+    doLast {
+        File inputJar = configurations.veilRuntimeMapped.singleFile
+        File outputJar = veilDevelopmentRuntime.get().asFile
+        File mappingsFile = layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile
+        int aliasCount = VeilDevelopmentRuntimePatcher.patch(inputJar, mappingsFile, outputJar)
+        logger.lifecycle(
+                "Prepared filtered Veil development runtime with ${aliasCount} mapped shadow aliases: ${outputJar}"
+        )
+    }
+}
+
 dependencies {
     minecraft "net.minecraftforge:forge:${forge_minecraft_version}-${forge_version}"
 
@@ -368,6 +435,9 @@ dependencies {
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
     compileOnly 'io.github.llamalad7:mixinextras-common:0.5.3'
     annotationProcessor 'io.github.llamalad7:mixinextras-common:0.5.3'
+    implementation(jarJar('io.github.llamalad7:mixinextras-forge:0.5.3')) {
+        jarJar.ranged(it, '[0.5.3,)')
+    }
 
     implementation 'org.apache.maven:maven-artifact:3.8.5'
 
@@ -375,8 +445,11 @@ dependencies {
     compileOnly fg.deobf("local.target:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
     compileOnly fg.deobf("local.target:Registrate:${forge_registrate_version}")
 
-    implementation fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}")
-    veilRaw("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}") {
+    compileOnly fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}:slim")
+    runtimeOnly files(prepareVeilDevelopmentRuntime)
+    veilMapped fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}:slim")
+    veilRuntimeMapped fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}")
+    veilRaw("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}:slim") {
         transitive = false
     }
 
@@ -391,6 +464,204 @@ tasks.register('networkTest', Test) {
     classpath = sourceSets.networkTest.runtimeClasspath
     dependsOn tasks.named('compileNetworkProtocolJava')
     useJUnitPlatform()
+}
+
+tasks.named('processM6SableRunResources') {
+    dependsOn tasks.named('processResources')
+}
+
+tasks.register('verifyRunClientClasspath') {
+    group = 'verification'
+    description = 'Verifies the isolated M6 runClient classpath and optional Create/Flywheel boundary.'
+    dependsOn tasks.named('classes')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+    dependsOn prepareVeilDevelopmentRuntime
+
+    doLast {
+        Set<File> runtimeFiles = sourceSets.main.runtimeClasspath.files.collect { it.canonicalFile } as Set
+        def containsEntry = { File classpathEntry, String entry ->
+            if (classpathEntry.isDirectory()) {
+                return new File(classpathEntry, entry).isFile()
+            }
+            if (!classpathEntry.isFile() || !classpathEntry.name.endsWith('.jar')) {
+                return false
+            }
+            JarFile jar = new JarFile(classpathEntry)
+            try {
+                return jar.getJarEntry(entry) != null
+            } finally {
+                jar.close()
+            }
+        }
+
+        def requireEntry = { String entry ->
+            if (!runtimeFiles.any { containsEntry(it, entry) }) {
+                throw new GradleException("runClient runtime classpath is missing ${entry}")
+            }
+        }
+
+        requireEntry('dev/ryanhcode/sable/companion/SableCompanion.class')
+        requireEntry('dev/ryanhcode/sable/companion/impl/DefaultSableCompanion.class')
+        requireEntry('META-INF/services/dev.ryanhcode.sable.companion.SableCompanion')
+        requireEntry('dev/ryanhcode/sable/ActiveSableCompanion.class')
+        requireEntry('foundry/veil/api/client/render/VeilRenderSystem.class')
+        requireEntry('gg/moonflower/molangcompiler/api/MolangCompiler.class')
+        requireEntry('imgui/glfw/ImGuiImplGlfw.class')
+
+        String companionService = 'META-INF/services/dev.ryanhcode.sable.companion.SableCompanion'
+        Set<String> companionProviders = [] as Set
+        runtimeFiles.each { classpathEntry ->
+            if (classpathEntry.isDirectory()) {
+                File descriptor = new File(classpathEntry, companionService)
+                if (descriptor.isFile()) {
+                    companionProviders.addAll(descriptor.readLines('UTF-8').collect { it.trim() }.findAll { it })
+                }
+            } else if (classpathEntry.isFile() && classpathEntry.name.endsWith('.jar')) {
+                JarFile jar = new JarFile(classpathEntry)
+                try {
+                    def descriptor = jar.getJarEntry(companionService)
+                    if (descriptor != null) {
+                        companionProviders.addAll(jar.getInputStream(descriptor).getText('UTF-8')
+                                .readLines().collect { it.trim() }.findAll { it })
+                    }
+                } finally {
+                    jar.close()
+                }
+            }
+        }
+        Set<String> expectedCompanionProviders = [
+                'dev.ryanhcode.sable.ActiveSableCompanion',
+                'dev.ryanhcode.sable.companion.impl.DefaultSableCompanion'
+        ] as Set
+        if (companionProviders != expectedCompanionProviders) {
+            throw new GradleException("Unexpected runClient Companion providers: ${companionProviders}")
+        }
+        File forgeCompanionDescriptor = new File(sourceSets.main.output.resourcesDir, companionService)
+        Set<String> forgeCompanionProviders = forgeCompanionDescriptor.readLines('UTF-8')
+                .collect { it.trim() }.findAll { it } as Set
+        if (forgeCompanionProviders != expectedCompanionProviders) {
+            throw new GradleException(
+                    "Forge-visible Companion descriptor is not merged deterministically: ${forgeCompanionProviders}"
+            )
+        }
+
+        def artifacts = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+        def artifactIds = artifacts.collect {
+            "${it.moduleVersion.id.group}:${it.name}:${it.moduleVersion.id.version}"
+        }
+        File patchedVeil = veilDevelopmentRuntime.get().asFile.canonicalFile
+        if (!runtimeFiles.any { it.canonicalFile == patchedVeil }) {
+            throw new GradleException('Patched mapped Veil 1.20 is absent from runClient runtimeClasspath')
+        }
+        if (runtimeFiles.any { it.name.contains('Veil-forge-1.20.1') && it.canonicalFile != patchedVeil }) {
+            throw new GradleException('Unpatched Veil artifact leaked onto runClient runtimeClasspath')
+        }
+        JarFile patchedVeilJar = new JarFile(patchedVeil)
+        try {
+            if (patchedVeilJar.entries().any { it.name.startsWith('org/lwjgl/') && it.name.endsWith('.class') }) {
+                throw new GradleException('Filtered Veil development runtime still contains split-package LWJGL classes')
+            }
+        } finally {
+            patchedVeilJar.close()
+        }
+        def forbidden = artifactIds.findAll { coordinate ->
+            coordinate.contains(':create-1.20.1:') ||
+                    coordinate.contains(':flywheel-forge-1.20.1:') ||
+                    coordinate.contains(':Registrate:')
+        }
+        if (!forbidden.isEmpty()) {
+            throw new GradleException("Optional Create stack leaked into the core smoke runtime: ${forbidden}")
+        }
+
+        File classesDir = sourceSets.main.output.classesDirs.singleFile
+        String createName = 'com/simibubi/create/foundation/utility/worldWrappers/WrappedServerWorld'
+        def classReferences = { String needle ->
+            fileTree(classesDir).matching { include '**/*.class' }.files.findAll { classFile ->
+                new String(Files.readAllBytes(classFile.toPath()), java.nio.charset.StandardCharsets.ISO_8859_1)
+                        .toLowerCase(Locale.ROOT)
+                        .contains(needle.toLowerCase(Locale.ROOT))
+            }.collect { classesDir.toPath().relativize(it.toPath()).toString().replace('\\', '/') }.sort()
+        }
+        def createReferences = classReferences(createName)
+        def expectedCreateReference = [
+                'dev/ryanhcode/sable/forge/platform/SablePlatformImpl$CreateWrappedLevelCheck.class'
+        ]
+        if (createReferences != expectedCreateReference) {
+            throw new GradleException("Unexpected selected-core Create references: ${createReferences}")
+        }
+        def flywheelReferences = (classReferences('com/jozufozu/flywheel')
+                + classReferences('dev/engine_room/flywheel')).unique().sort()
+        if (!flywheelReferences.isEmpty()) {
+            throw new GradleException("Flywheel references leaked into selected core classes: ${flywheelReferences}")
+        }
+
+        File outerPlatform = new File(classesDir,
+                'dev/ryanhcode/sable/forge/platform/SablePlatformImpl.class')
+        String outerBytes = new String(Files.readAllBytes(outerPlatform.toPath()),
+                java.nio.charset.StandardCharsets.ISO_8859_1)
+        if (outerBytes.contains('WrappedServerWorld')) {
+            throw new GradleException('Create WrappedServerWorld leaked into the outer SablePlatformImpl class')
+        }
+
+        File modsToml = file('src/main/resources/META-INF/mods.toml')
+        String metadata = modsToml.getText('UTF-8')
+        ['create', 'flywheel'].each { mod ->
+            def dependencyBlock = metadata.split('\\[\\[dependencies\\.sable]]').find {
+                it.contains("modId = \"${mod}\"")
+            }
+            if (dependencyBlock == null || !dependencyBlock.contains('mandatory = false')) {
+                throw new GradleException("${mod} is not explicitly optional in Forge mods.toml")
+            }
+        }
+        def curatedMixins = new JsonSlurper().parse(file('src/main/resources/sable-common-forge.mixins.json'))
+        def selectedMixins = (curatedMixins.mixins + curatedMixins.client)*.toString()
+        def createMixins = selectedMixins.findAll { it.toLowerCase(Locale.ROOT).contains('create') }
+        if (!createMixins.isEmpty()) {
+            throw new GradleException("Create Mixins leaked into the generated Forge runtime config: ${createMixins}")
+        }
+
+        File resourcesDir = sourceSets.main.output.resourcesDir
+        [
+                'data/sable/tags/blocks/normal.json',
+                'data/sable/tags/entity_types/retain_in_sub_level.json',
+                'data/sable/tags/items/paddles.json',
+                'data/sable/structures/physicstest.gravity.nbt'
+        ].each { path ->
+            if (!new File(resourcesDir, path).isFile()) {
+                throw new GradleException("Missing remapped Minecraft 1.20.1 resource: ${path}")
+            }
+        }
+        [
+                'data/sable/tags/block',
+                'data/sable/tags/entity_type',
+                'data/sable/tags/item',
+                'data/sable/structure'
+        ].each { path ->
+            if (new File(resourcesDir, path).exists()) {
+                throw new GradleException("Minecraft 1.21 resource path leaked into Forge output: ${path}")
+            }
+        }
+        Map<String, List<String>> expectedTagLines = [
+                'super_heavy.json': ['"#forge:storage_blocks"', '"id": "minecraft:heavy_core", "required": false'],
+                'super_light.json': ['"#forge:glass_panes"', '"#forge:fence_gates"'],
+                'quarter_volume.json': ['"#forge:glass_panes"', '"#forge:fence_gates"'],
+                'light.json'      : ['"id": "#c:clusters", "required": false', '"#forge:chests/wooden"'],
+                'heavy.json'      : ['"#forge:stone"', '"#forge:cobblestone"'],
+                'normal_slabs.json': ['"id": "minecraft:tuff_slab", "required": false']
+        ]
+        expectedTagLines.each { name, expectedLines ->
+            String contents = new File(resourcesDir, "data/sable/tags/blocks/${name}").getText('UTF-8')
+            expectedLines.each { line ->
+                if (!contents.contains(line)) {
+                    throw new GradleException("Missing Forge 1.20.1 tag adaptation in ${name}: ${line}")
+                }
+            }
+        }
+
+        logger.lifecycle('Verified M6 runClient: Companion and mapped Veil present; Create/Flywheel absent and optional')
+        logger.lifecycle("Verified Create isolation: ${expectedCreateReference[0]} is the only compiled reference")
+        logger.lifecycle('Verified Minecraft 1.21 data paths and tag references are adapted for Forge 1.20.1')
+    }
 }
 
 tasks.named('compileNetworkProtocolJava') {
@@ -448,7 +719,7 @@ tasks.register('verifyVeilDependency') {
         File rawVeil = rawFiles.first().canonicalFile
 
         def veilArtifacts = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
-            artifact.name == "Veil-forge-${forge_minecraft_version}"
+            artifact.name == "Veil-forge-${forge_minecraft_version}" && artifact.classifier == 'slim'
         }
         if (veilArtifacts.size() != 1) {
             throw new GradleException("Expected one compile Veil artifact, resolved ${veilArtifacts*.moduleVersion*.id}")
@@ -776,6 +1047,9 @@ tasks.register('verifyForgePackaging') {
                     'dev/ryanhcode/sable/sublevel/render/fancy/',
                     'dev/ryanhcode/sable/mixin/entity/entity_leashing/',
                     'dev/ryanhcode/sable/mixin/entity/entity_pathfinding/',
+                    'dev/ryanhcode/sable/mixin/camera/camera_zoom/MouseHandlerMixin.class',
+                    'dev/ryanhcode/sable/mixinhelpers/camera/new_camera_types/',
+                    'dev/ryanhcode/sable/mixinterface/camera/camera_zoom/CameraZoomExtension.class',
                     'dev/ryanhcode/sable/mixin/sublevel_render/block_entity_render/',
                     'dev/ryanhcode/sable/mixin/loaded_chunk_debug/'
             ]
@@ -826,6 +1100,38 @@ tasks.named('checkstyleMain') {
 processResources {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
+    eachFile { details ->
+        String remapped = details.path
+                .replace('/tags/block/', '/tags/blocks/')
+                .replace('/tags/entity_type/', '/tags/entity_types/')
+                .replace('/tags/item/', '/tags/items/')
+                .replace('/structure/', '/structures/')
+        details.path = remapped
+    }
+    filesMatching(['data/sable/tags/block/*.json', 'data/sable/tags/blocks/*.json']) {
+        filter { line ->
+            line.replace('"#c:storage_blocks"', '"#forge:storage_blocks"')
+                    .replace('"#c:glass_panes"', '"#forge:glass_panes"')
+                    .replace('"#c:fence_gates"', '"#forge:fence_gates"')
+                    .replace('"#c:chests/wooden"', '"#forge:chests/wooden"')
+                    .replace('"#c:stones"', '"#forge:stone"')
+                    .replace('"#c:cobblestones"', '"#forge:cobblestone"')
+                    .replace('"#c:clusters"', '{ "id": "#c:clusters", "required": false }')
+                    .replace('"minecraft:heavy_core"', '{ "id": "minecraft:heavy_core", "required": false }')
+                    .replace('"minecraft:tuff_slab"', '{ "id": "minecraft:tuff_slab", "required": false }')
+        }
+    }
+    doLast {
+        [
+                'data/sable/tags/block',
+                'data/sable/tags/entity_type',
+                'data/sable/tags/item',
+                'data/sable/structure'
+        ].each { path ->
+            project.delete(new File(destinationDir, path))
+        }
+    }
+
     var expandProps = [
             'version'                   : rootProject.version,
             'group'                     : project.group,
@@ -873,6 +1179,10 @@ jar {
                 'FMLAT'                 : 'accesstransformer-forge.cfg'
         ])
     }
+}
+
+tasks.named('jarJar') {
+    dependsOn syncMixinRefmap
 }
 
 tasks.named('sourcesJar') {

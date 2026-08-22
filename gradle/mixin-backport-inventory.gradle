@@ -48,6 +48,10 @@ def isM5DeferredMixin = { String entry ->
             entry == 'respawn_point.sleeping.LivingEntityMixin'
 }
 
+def isM6DeferredMixin = { String entry ->
+    entry == 'camera.camera_zoom.MouseHandlerMixin'
+}
+
 def classifyMixin = { String configId, String side, String entry ->
     if (configId == 'common') {
         if (entry.startsWith('compatibility.') || entry.startsWith('sublevel_render.impl.sodium.')) {
@@ -61,6 +65,9 @@ def classifyMixin = { String configId, String side, String entry ->
             return [category: side == 'client' ? 'CORE_CLIENT' : 'CORE_MINECRAFT', action: 'DEFER']
         }
         if (isM5DeferredMixin(entry)) {
+            return [category: side == 'client' ? 'CORE_CLIENT' : 'CORE_MINECRAFT', action: 'DEFER']
+        }
+        if (isM6DeferredMixin(entry)) {
             return [category: side == 'client' ? 'CORE_CLIENT' : 'CORE_MINECRAFT', action: 'DEFER']
         }
         return [category: side == 'client' ? 'CORE_CLIENT' : 'CORE_MINECRAFT', action: 'INVESTIGATE']
@@ -214,6 +221,8 @@ tasks.register('generateMixinBackportMatrix') {
         markdown << 'Two common config classes are separately replaced by Forge-specific implementations and are not counted as deferred.\n\n'
         markdown << 'M3 defers shader preprocessing, water occlusion, fancy rendering, Iris/Sodium bridges, and editor/gizmo UI. '
         markdown << 'M5 additionally defers the chunked renderer, Leashable/pathfinding/recoil/vibration/settings/toast clusters while retaining single-block rendering. '
+        markdown << 'M6 defers the scroll-only custom camera zoom hook together with the already-deferred camera enum extension. '
+        markdown << 'The M6 runtime smoke passed with 143 selected entries and 111 mapped refmap classes after that deferral. '
         markdown << 'NeoForge sources remain outside the Forge source set; no deferred implementation source or upstream Mixin config is deleted.\n'
         markdown << '\n## Inventory\n\n'
         markdown << '| Mixin class | Target class | Target methods | Source config | Package | Dependency/mod | Category | Initial action |\n'
@@ -253,6 +262,6 @@ tasks.register('generateMixinBackportMatrix') {
 
         logger.lifecycle("Inventoried ${rows.size()} Mixins: ${categoryCounts}")
         logger.lifecycle("Initial actions: ${actionCounts}")
-        logger.lifecycle("M5 curated Forge Mixins: ${curated.client.size() + curated.mixins.size()}; physical exclusions: ${physicalExclusions.size()}")
+        logger.lifecycle("M6 curated Forge Mixins: ${curated.client.size() + curated.mixins.size()}; physical exclusions: ${physicalExclusions.size()}")
     }
 }

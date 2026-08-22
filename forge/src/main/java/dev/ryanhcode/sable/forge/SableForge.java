@@ -34,6 +34,7 @@ public final class SableForge {
         final IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
 
         Sable.init();
+        SableForgeRuntimeSmoke.installCommon(modBus);
         MinecraftForge.EVENT_BUS.addListener(this::registerCommand);
         MinecraftForge.EVENT_BUS.addListener(this::registerReloadListeners);
         MinecraftForge.EVENT_BUS.addListener(this::syncDataPack);
@@ -49,24 +50,30 @@ public final class SableForge {
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, SableConfig.SPEC);
         CrashReportCallables.registerCrashCallable("Sable", Sable::getCrashHeader);
 
-        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> SableForgeClient.init(modBus));
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> SableForgeClient::init);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
-        event.enqueueWork(SableAttributes::register);
+        event.enqueueWork(() -> {
+            SableAttributes.register();
+            SableForgeRuntimeSmoke.commonSetup();
+        });
     }
 
     private void registerReloadListeners(final AddReloadListenerEvent event) {
         event.addListener(PhysicsBlockPropertiesDefinitionLoader.INSTANCE);
         event.addListener(DimensionPhysicsData.ReloadListener.INSTANCE);
         event.addListener(FloatingBlockMaterialDataHandler.ReloadListener.INSTANCE);
+        SableForgeRuntimeSmoke.reloadListenersRegistered();
     }
 
     private void registerCommand(final RegisterCommandsEvent event) {
         SableCommand.register(event.getDispatcher(), event.getBuildContext());
+        SableForgeRuntimeSmoke.commandRegistered();
     }
 
     private void syncDataPack(final OnDatapackSyncEvent event) {
+        SableForgeRuntimeSmoke.dataPackSync(event.getPlayers().size());
         event.getPlayers().forEach(player ->
                 SableCommonEvents.syncDataPacket(SableTCPPackets.player(player)));
     }

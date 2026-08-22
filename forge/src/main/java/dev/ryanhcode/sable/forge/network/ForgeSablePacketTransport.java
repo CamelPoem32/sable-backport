@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.forge.network;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.forge.SableForgeRuntimeSmoke;
 import dev.ryanhcode.sable.forge.network.client.ForgeSableClientPacketHandler;
 import dev.ryanhcode.sable.network.tcp.SablePacketContext;
 import dev.ryanhcode.sable.network.tcp.SablePacketDirection;
@@ -100,10 +101,17 @@ public final class ForgeSablePacketTransport implements SablePacketTransport {
                         return null;
                     }
 
-                    return () -> registration.handler().accept(
-                            packet,
-                            SablePacketContext.of(sender.level(), sender, SablePacketDirection.SERVERBOUND)
-                    );
+                    return () -> {
+                        SableForgeRuntimeSmoke.packetThread(
+                                "server",
+                                registration,
+                                sender.getServer() != null && sender.getServer().isSameThread()
+                        );
+                        registration.handler().accept(
+                                packet,
+                                SablePacketContext.of(sender.level(), sender, SablePacketDirection.SERVERBOUND)
+                        );
+                    };
                 },
                 () -> forgeContext.setPacketHandled(true));
     }

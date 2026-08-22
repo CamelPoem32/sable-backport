@@ -2,7 +2,6 @@ package dev.ryanhcode.sable.mixin.particle;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import com.llamalad7.mixinextras.sugar.Local;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.mixinterface.particle.ParticleExtension;
@@ -12,9 +11,6 @@ import dev.ryanhcode.sable.sublevel.plot.LevelPlot;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.Particle;
 import net.minecraft.client.particle.ParticleEngine;
-import net.minecraft.client.particle.TerrainParticle;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -47,8 +43,8 @@ public abstract class ParticleEngineMixin {
         extension.sable$moveWithInheritedVelocity();
     }
 
-    @Redirect(method = "crack", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/particle/TerrainParticle;setPower(F)Lnet/minecraft/client/particle/Particle;"))
-    private Particle sable$addCrackParticle(final TerrainParticle particle, final float v, @Local(argsOnly = true) final BlockPos pos, @Local final BlockState state) {
+    @Redirect(method = "crack", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/particle/Particle;setPower(F)Lnet/minecraft/client/particle/Particle;"))
+    private Particle sable$addCrackParticle(final Particle particle, final float v) {
         final Vec3 particlePosition = new Vec3(particle.x, particle.y, particle.z);
 
         final SubLevel subLevel = Sable.HELPER.getContaining(this.level, particlePosition);

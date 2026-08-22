@@ -45,7 +45,7 @@ public interface SableCompanion {
     /**
      * The companion instance.
      */
-    SableCompanion INSTANCE = ServiceLoader.load(SableCompanion.class)
+    SableCompanion INSTANCE = ServiceLoader.load(SableCompanion.class, SableCompanion.class.getClassLoader())
             .stream().max(Comparator.comparingInt(provider -> {
                 Class<? extends SableCompanion> type = provider.type();
                 LoadPriority annotation = type.getAnnotation(LoadPriority.class);

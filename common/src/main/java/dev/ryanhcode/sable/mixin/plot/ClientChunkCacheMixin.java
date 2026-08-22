@@ -71,10 +71,10 @@ public abstract class ClientChunkCacheMixin {
     }
 
     @Inject(method = "drop", at = @At("HEAD"), cancellable = true)
-    private void drop(final ChunkPos chunkPos, final CallbackInfo ci) {
+    private void drop(final int x, final int z, final CallbackInfo ci) {
         final SubLevelContainer container = this.sable$getPlotContainer();
 
-        if (container.inBounds(chunkPos)) {
+        if (container.inBounds(x, z)) {
             ci.cancel();
             throw new UnsupportedOperationException("Cannot drop chunks in plot");
         }

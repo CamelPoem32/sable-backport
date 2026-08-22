@@ -21,15 +21,15 @@ Total Mixins: 373
 |---|---:|
 | KEEP | 0 |
 | PORT | 0 |
-| DEFER | 204 |
+| DEFER | 205 |
 | EXCLUDE_FROM_FORGE_TARGET | 18 |
-| INVESTIGATE | 151 |
+| INVESTIGATE | 150 |
 
 ## Forge Source Selection
 
-The curated Forge common config contains 144 entries. The Forge Java source set physically excludes 117 common classes: M0-M3 optional/visual/debug sources plus the M5 behavior-sensitive clusters. Two common config classes are separately replaced by Forge-specific implementations and are not counted as deferred.
+The curated Forge common config contains 143 entries. The Forge Java source set physically excludes 120 common classes: M0-M3 optional/visual/debug sources plus the M5 behavior-sensitive clusters. Two common config classes are separately replaced by Forge-specific implementations and are not counted as deferred.
 
-M3 defers shader preprocessing, water occlusion, fancy rendering, Iris/Sodium bridges, and editor/gizmo UI. M5 additionally defers the chunked renderer, Leashable/pathfinding/recoil/vibration/settings/toast clusters while retaining single-block rendering. NeoForge sources remain outside the Forge source set; no deferred implementation source or upstream Mixin config is deleted.
+M3 defers shader preprocessing, water occlusion, fancy rendering, Iris/Sodium bridges, and editor/gizmo UI. M5 additionally defers the chunked renderer, Leashable/pathfinding/recoil/vibration/settings/toast clusters while retaining single-block rendering. M6 defers the scroll-only custom camera zoom hook together with the already-deferred camera enum extension. The M6 runtime smoke passed with 143 selected entries and 111 mapped refmap classes after that deferral. NeoForge sources remain outside the Forge source set; no deferred implementation source or upstream Mixin config is deleted.
 
 ## Inventory
 
@@ -39,8 +39,8 @@ M3 defers shader preprocessing, water occlusion, fancy rendering, Iris/Sodium br
 | dev.ryanhcode.sable.mixin.camera.camera_rotation.CompassItemPropertyFunctionMixin | CompassItemPropertyFunction | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.camera_rotation | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.camera.camera_rotation.EntityMixin | Entity | calculateViewVector | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.camera_rotation | Minecraft | CORE_CLIENT | INVESTIGATE |
 | dev.ryanhcode.sable.mixin.camera.camera_rotation.GuiMixin | Gui | renderCrosshair | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.camera_rotation | Minecraft | CORE_CLIENT | DEFER |
-| dev.ryanhcode.sable.mixin.camera.camera_zoom.CameraMixin | Camera | tick<br>setup<br>getMaxZoom | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.camera_zoom | Minecraft | CORE_CLIENT | INVESTIGATE |
-| dev.ryanhcode.sable.mixin.camera.camera_zoom.MouseHandlerMixin | MouseHandler | onScroll | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.camera_zoom | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.camera.camera_zoom.CameraMixin | Camera | getMaxZoom | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.camera_zoom | Minecraft | CORE_CLIENT | INVESTIGATE |
+| dev.ryanhcode.sable.mixin.camera.camera_zoom.MouseHandlerMixin | MouseHandler | onScroll | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.camera_zoom | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.camera.new_camera_types.CameraTypeMixin | CameraType | - | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.new_camera_types | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.camera.new_camera_types.GameRendererMixin | GameRenderer | renderLevel | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.new_camera_types | Minecraft | CORE_CLIENT | DEFER |
 | dev.ryanhcode.sable.mixin.camera.new_camera_types.MinecraftMixin | Minecraft | handleKeybinds | sable.mixins.json:client | dev.ryanhcode.sable.mixin.camera.new_camera_types | Minecraft | CORE_CLIENT | DEFER |

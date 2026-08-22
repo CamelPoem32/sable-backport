@@ -14,4 +14,5 @@ dependencies {
         transitive = false
     }
     implementation 'com.google.guava:guava:31.1-jre'
+    implementation 'org.ow2.asm:asm:9.9.1'
 }

@@ -6,6 +6,7 @@ import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
+import dev.ryanhcode.sable.mixinhelpers.clip_overwrite.BlockGetterClipHelper;
 import dev.ryanhcode.sable.mixinterface.clip_overwrite.ClipContextExtension;
 import dev.ryanhcode.sable.mixinterface.clip_overwrite.LevelPoseProviderExtension;
 import dev.ryanhcode.sable.sublevel.SubLevel;
@@ -14,19 +15,12 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.VoxelShape;
-import net.minecraft.world.phys.shapes.EntityCollisionContext;
-import org.jetbrains.annotations.NotNull;
 import org.joml.Vector3dc;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
-import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.asm.mixin.Unique;
 
 import java.util.function.Predicate;
 
@@ -38,9 +32,6 @@ import java.util.function.Predicate;
 @Mixin(value = BlockGetter.class, priority = 1100)
 public interface BlockGetterMixin {
 
-    @Shadow
-    BlockState getBlockState(BlockPos blockPos);
-
     /**
      * @author RyanH
      * @reason Overwrites raycasts to take sublevels into account
@@ -51,7 +42,7 @@ public interface BlockGetterMixin {
 
         if (!(this instanceof final Level level) || (clipContext instanceof final ClipContextExtension extension && extension.sable$doNotProject())) {
             // If the level cannot have sublevels, use the original method
-            return originalClip(self, clipContext);
+            return BlockGetterClipHelper.originalClip(self, clipContext);
         }
 
         final SubLevel ignoredSubLevel = clipContext instanceof final ClipContextExtension extension ?
@@ -72,7 +63,7 @@ public interface BlockGetterMixin {
             }
 
             final Vector3dc from = pose.transformPosition(JOMLConversion.toJOML(clipContext.getFrom()));
-            clipContext = sable$copyContext(clipContext, JOMLConversion.toMojang(from), clipContext.getTo());
+            clipContext = BlockGetterClipHelper.copyContext(clipContext, JOMLConversion.toMojang(from), clipContext.getTo());
         }
 
         final SubLevel toSubLevel = helper.getContaining(level, clipContext.getTo());
@@ -84,7 +75,7 @@ public interface BlockGetterMixin {
             }
 
             final Vector3dc to = pose.transformPosition(JOMLConversion.toJOML(clipContext.getTo()));
-            clipContext = sable$copyContext(clipContext, clipContext.getFrom(), JOMLConversion.toMojang(to));
+            clipContext = BlockGetterClipHelper.copyContext(clipContext, clipContext.getFrom(), JOMLConversion.toMojang(to));
         }
 
         BlockHitResult minResult;
@@ -94,7 +85,7 @@ public interface BlockGetterMixin {
             final Vec3 diff = clipContext.getFrom().subtract(clipContext.getTo());
             minResult = BlockHitResult.miss(clipContext.getTo(), Direction.getNearest(diff.x, diff.y, diff.z), BlockPos.containing(clipContext.getTo()));
         } else {
-            minResult = originalClip(self, clipContext);
+            minResult = BlockGetterClipHelper.originalClip(self, clipContext);
             minDistance = minResult.getLocation().distanceTo(clipContext.getFrom());
         }
 
@@ -121,9 +112,9 @@ public interface BlockGetterMixin {
                 continue; // we projected the ray inward, but the start is not in the plot. something is weird.
 
 
-            final ClipContext subClipContext = sable$copyContext(
+            final ClipContext subClipContext = BlockGetterClipHelper.copyContext(
                     clipContext, JOMLConversion.toMojang(from), JOMLConversion.toMojang(to));
-            final BlockHitResult subResult = originalClip(subLevel.getLevel(), subClipContext);
+            final BlockHitResult subResult = BlockGetterClipHelper.originalClip(subLevel.getLevel(), subClipContext);
             final double distance = subResult.getLocation().distanceTo(subClipContext.getFrom());
 
             if ((distance < minDistance || minResult.getType() == HitResult.Type.MISS) && subResult.getType() != HitResult.Type.MISS) {
@@ -134,34 +125,4 @@ public interface BlockGetterMixin {
 
         return minResult;
     }
-
-    @Unique
-    private static @NotNull BlockHitResult originalClip(final BlockGetter level, final ClipContext clipContext) {
-        return BlockGetter.traverseBlocks(clipContext.getFrom(), clipContext.getTo(), clipContext, (clipContextx, blockPos) -> {
-            final BlockState blockState = level.getBlockState(blockPos);
-            final FluidState fluidState = level.getFluidState(blockPos);
-            final Vec3 vec3 = clipContextx.getFrom();
-            final Vec3 vec32 = clipContextx.getTo();
-            final VoxelShape voxelShape = clipContextx.getBlockShape(blockState, level, blockPos);
-            final BlockHitResult blockHitResult = level.clipWithInteractionOverride(vec3, vec32, blockPos, voxelShape, blockState);
-            final VoxelShape voxelShape2 = clipContextx.getFluidShape(fluidState, level, blockPos);
-            final BlockHitResult blockHitResult2 = voxelShape2.clip(vec3, vec32, blockPos);
-            final double d = blockHitResult == null ? Double.MAX_VALUE : clipContextx.getFrom().distanceToSqr(blockHitResult.getLocation());
-            final double e = blockHitResult2 == null ? Double.MAX_VALUE : clipContextx.getFrom().distanceToSqr(blockHitResult2.getLocation());
-            return d <= e ? blockHitResult : blockHitResult2;
-        }, clipContextx -> {
-            final Vec3 vec3 = clipContextx.getFrom().subtract(clipContextx.getTo());
-            return BlockHitResult.miss(clipContextx.getTo(), Direction.getNearest(vec3.x, vec3.y, vec3.z), BlockPos.containing(clipContextx.getTo()));
-        });
-    }
-
-    @Unique
-    private static ClipContext sable$copyContext(final ClipContext source, final Vec3 from, final Vec3 to) {
-        final net.minecraft.world.entity.Entity entity = source.collisionContext instanceof EntityCollisionContext entityContext
-                ? entityContext.getEntity()
-                : null;
-        return new ClipContext(from, to, source.block, source.fluid, entity);
-    }
-
-
 }
