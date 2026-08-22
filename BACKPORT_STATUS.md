@@ -12,6 +12,13 @@
 - Upstream commit: `b7226222caf4eace63a708bdcd73ef36c971137d`
 - Backport branch: `backport/forge-1.20.1-sable-2.0.0`
 
+> **Target-modpack rebaseline required:** the versions and hashes below describe
+> the old target modpack. The user is replacing it and moving Create to Create
+> 6. Before any M7 work, inventory `../target_modpack` using
+> `TARGET_REBASE_CHECKLIST.md`. Revalidate all dependency hashes, embedded-jar
+> assumptions, version ranges, Create 0.5 compatibility decisions, Flywheel
+> assumptions, and Ponder packaging. See `HANDOFF.md`.
+
 The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 added the Java 17/1.20.1 Companion library, official Veil 1.20, selected Java 17 rewrites, and the minimal Forge source graph. M4 replaced the missing modern Veil/Minecraft packet surface with a tested Forge 47 transport. M5 ported the selected Minecraft core/Mixins, added the Forge bootstrap and eight platform providers, and produced a statically verified Forge package. M6 now passes the Forge main-menu, empty-world, runtime-boundary, persistence, and stationary single-block smoke gates. Deferred advanced rendering, full physics/Sable Rapier, Create/Flywheel integration, Simulated, and Aeronautics remain unported.
 
 ## Canonical Workflow
@@ -123,7 +130,9 @@ There is no remaining compile-time error frontier in the selected Forge core gra
 4. **Advanced rendering/gameplay:** chunked rendering, shader/water/Iris/Sodium bridges, Leashable/pathfinding, projectile dispenser, vibration, toast/settings, and other listed clusters remain intact but excluded.
 5. **Packaging:** Companion works on the Gradle `runClient` project classpath and remains intentionally absent from the Forge JarJar output. Standalone modpack testing requires that packaging step.
 
-No `runClient` attempt has been made.
+M6 completed the first `runClient` smoke milestone. The remaining frontier is
+standalone packaging and deferred-feature work, subject first to the required
+target-modpack rebaseline.
 
 ## Sable Companion Assessment
 
