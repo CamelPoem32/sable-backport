@@ -1,5 +1,10 @@
 # M6 Forge Runtime Smoke Report
 
+> Historical runtime evidence: this smoke used the pre-rebaseline Create
+> `0.5.1.j` environment. The 2026-08-22 Create `6.0.8` rebaseline was static
+> only and replaced the old wrapper bytecode boundary with Ponder `1.0.91`
+> `WrappedServerLevel`. A new runtime launch is intentionally deferred.
+
 ## Result
 
 M6 passed the main-menu, empty-world, runtime-boundary, persistence, and named

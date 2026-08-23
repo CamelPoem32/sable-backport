@@ -2,6 +2,13 @@
 
 The upstream common AT remains unchanged. ForgeGradle 6 consumes SRG member names, so retained entries are mapped through `forge/build/createMcpToSrg/output.tsrg` into `forge/src/main/resources/META-INF/accesstransformer-forge.cfg`. `verifyForgeAccessTransformer` checks the mapped class file, descriptor, access flags, and this provenance inventory.
 
+Target rebaseline note (2026-08-22): all 35 retained vanilla 1.20.1 entries
+remain applicable. The external dependency canary is not an AT entry: it now
+requires mapped Ponder `1.0.91` to contain
+`net/createmod/catnip/levelWrappers/WrappedServerLevel.class` and mapped Create
+`6.0.8` not to contain the obsolete
+`com/simibubi/create/foundation/utility/worldWrappers/WrappedServerWorld.class`.
+
 | Upstream target | Dependent source | Purpose | Exact 1.20.1 mapping or deferral proof | Final action |
 |---|---|---|---|---|
 | `public net.minecraft.client.renderer.block.ModelBlockRenderer$Cache` | dynamic directional shading Mixins | Renderer cache extension | Owning Mixins are M5-deferred. | REMOVE_DEFERRED |
@@ -80,4 +87,3 @@ The upstream common AT remains unchanged. ForgeGradle 6 consumes SRG member name
 | Forge target | Dependent source | Purpose | Evidence | Final action |
 |---|---|---|---|---|
 | `public net.minecraft.server.level.DistanceManager` | `PhysicsChunkTicketManager` | Name the package-private 1.20 manager type used by `ChunkMap.getDistanceManager()` | Both top-level `DistanceManager` and nested `ChunkMap$DistanceManager` exist in the mapped Forge jar and serve distinct selected callers. | RETAIN_CLASS |
-

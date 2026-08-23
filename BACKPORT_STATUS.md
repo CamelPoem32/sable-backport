@@ -5,19 +5,19 @@
 - Minecraft: `1.20.1`
 - Forge: `47.4.20`
 - Java: `17`
-- Create: `0.5.1.j`
-- Flywheel: `0.6.11-13`
+- Create: `6.0.8`
+- Flywheel: `1.0.5`
 - Registrate: `MC1.20-1.3.3`
+- Ponder: `1.0.91`
 - Upstream Sable ref: `mc1.21.1-2.0.0-neoforge`
 - Upstream commit: `b7226222caf4eace63a708bdcd73ef36c971137d`
 - Backport branch: `backport/forge-1.20.1-sable-2.0.0`
 
-> **Target-modpack rebaseline required:** the versions and hashes below describe
-> the old target modpack. The user is replacing it and moving Create to Create
-> 6. Before any M7 work, inventory `../target_modpack` using
-> `TARGET_REBASE_CHECKLIST.md`. Revalidate all dependency hashes, embedded-jar
-> assumptions, version ranges, Create 0.5 compatibility decisions, Flywheel
-> assumptions, and Ponder packaging. See `HANDOFF.md`.
+> **Target-modpack rebaseline completed 2026-08-22:** the replacement pack was
+> inspected from its jars and nested JarJar metadata. The static suite is green
+> on the exact Create `6.0.8` / Flywheel `1.0.5` / Registrate
+> `MC1.20-1.3.3` / Ponder `1.0.91` baseline. No Minecraft process was launched;
+> the prior M6 runtime result remains historical evidence for the old target.
 
 The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 added the Java 17/1.20.1 Companion library, official Veil 1.20, selected Java 17 rewrites, and the minimal Forge source graph. M4 replaced the missing modern Veil/Minecraft packet surface with a tested Forge 47 transport. M5 ported the selected Minecraft core/Mixins, added the Forge bootstrap and eight platform providers, and produced a statically verified Forge package. M6 now passes the Forge main-menu, empty-world, runtime-boundary, persistence, and stationary single-block smoke gates. Deferred advanced rendering, full physics/Sable Rapier, Create/Flywheel integration, Simulated, and Aeronautics remain unported.
 
@@ -50,21 +50,46 @@ The final verification commands used `--offline` after the required artifacts we
 
 ## Target Modpack Dependencies
 
-`:forge:prepareTargetModpackDependencies` reads `../target_modpack/mods/create-1.20.1-0.5.1.j.jar`, validates its manifest and hash, parses `META-INF/jarjar/metadata.json`, validates the embedded module coordinates/versions, and extracts the exact nested jars. Outputs are recreated under the ignored directory `forge/build/targetModpackRepository`; no target-modpack jar is copied into a tracked source directory.
+`:forge:prepareTargetModpackDependencies` reads
+`../target_modpack/mods/create-1.20.1-6.0.8.jar`, validates its Minecraft and
+Create manifest/mod metadata plus exact SHA-256, parses
+`META-INF/jarjar/metadata.json`, requires the complete four-entry inventory,
+and validates every nested coordinate, version, range, path, obfuscation flag,
+and hash. The four mapped modules are recreated under the ignored directory
+`forge/build/targetModpackRepository`; no target-modpack jar is copied into a
+tracked source directory.
 
-| Module discovered in Create | Version | SHA-256 |
-|---|---|---|
-| `local.target:create-1.20.1` | `0.5.1.j` | `A18763BE04F6A7921D2E3BC5E9150B0BB5BC89B5EF45A607E93939972021F932` |
-| `com.jozufozu.flywheel:flywheel-forge-1.20.1` | `0.6.11-13` | `FD71EF28C2FC2694E661366A254CE1519791A39E7EC660A87A07212173AFF178` |
-| `com.tterrag.registrate:Registrate` | `MC1.20-1.3.3` | `226862D4638B77273F4627FBAC871AA0B3AF584DDE377F4CE2CB0C7CC228CF00` |
+| Module | Exact version / JarJar range | Packaging path | SHA-256 |
+|---|---|---|---|
+| `local.target:create-1.20.1` | `6.0.8` | outer `create-1.20.1-6.0.8.jar` | `6FBB910C367DBCE8E4FC7E5BF64B6EDD4DE980906ED00AF8E47E4AF843C0D9B0` |
+| `dev.engine-room.flywheel:flywheel-forge-1.20.1` | `1.0.5`; `[1.0,2.0)` | `META-INF/jarjar/flywheel-forge-1.20.1-1.0.5.jar` | `316CA250F19244956B5F0CD75329309EA65A77B4B8DA854389B6A9222E7F427C` |
+| `com.tterrag.registrate:Registrate` | `MC1.20-1.3.3`; `[MC1.20-1.3.3,)` | `META-INF/jarjar/Registrate-MC1.20-1.3.3.jar` | `226862D4638B77273F4627FBAC871AA0B3AF584DDE377F4CE2CB0C7CC228CF00` |
+| `net.createmod.ponder:Ponder-Forge-1.20.1` | `1.0.91`; `[1.0.91,)` | `META-INF/jarjar/Ponder-Forge-1.20.1-1.0.91.jar` | `86E6B64372ABA6D9C56F2C35725EA26D8FEBF2C75EED9950566E7F2849443B34` |
+| `io.github.llamalad7:mixinextras-forge` | `0.4.1`; `[0.4.1,)` | `META-INF/jarjar/mixinextras-forge-0.4.1.jar` | `9D48CB0A40299D283248FDAD8B02C6D175C45B27F9BEC48EF63D7EE8A4EE3066` |
+| MixinExtras internal payload | `0.4.1` | `META-INF/jars/MixinExtras-0.4.1.jar` inside the preceding jar | `D13C480D4E84128E76E8F509346F8137CEAA195091B3CFEAF4EBBA584CA68374` |
 
-The staging directory is a `flatDir` repository, but dependencies are declared with module coordinates through `compileOnly fg.deobf(...)`; no `files(...)` dependency remains. `:forge:verifyTargetModpackDependencies` resolves `compileClasspath` and confirmed:
+All four Create JarJar entries declare `isObfuscated: false`. MixinExtras
+`0.4.1` and its internal common payload are validated as part of Create's
+runtime packaging, but are not exposed as a fifth mapped local module because
+Sable already owns MixinExtras Forge `0.5.3`. The staging directory is a
+`flatDir` repository, but dependencies are declared with module coordinates
+through `compileOnly fg.deobf(...)`; no `files(...)` dependency remains.
+`:forge:verifyTargetModpackDependencies` resolves `compileClasspath` and
+confirmed:
 
-- `local.target:create-1.20.1:0.5.1.j_mapped_official_1.20.1`
-- `local.target:flywheel-forge-1.20.1:0.6.11-13_mapped_official_1.20.1`
+- `local.target:create-1.20.1:6.0.8_mapped_official_1.20.1`
+- `local.target:flywheel-forge-1.20.1:1.0.5_mapped_official_1.20.1`
 - `local.target:Registrate:MC1.20-1.3.3_mapped_official_1.20.1`
+- `local.target:Ponder-Forge-1.20.1:1.0.91_mapped_official_1.20.1`
 
-All three resolve from `~/.gradle/caches/forge_gradle/deobf_dependencies`, not from the raw staging directory. The previous ForgeGradle warning about undeobfuscated file dependencies is gone. Create, Flywheel, and Registrate classes now resolve using official development mappings.
+All four resolve from ForgeGradle's `deobf_dependencies` cache, not from the
+raw staging directory. Create and Flywheel remain optional and are constrained
+to `[6.0.8]` and `[1.0.5]` in Sable's `mods.toml`. Ponder has no independent
+Sable dependency block: Create owns it as a mandatory dependency, while
+Sable's only Ponder linkage is isolated behind the optional Create-loaded
+boundary. The replacement target contains neither Veil nor Companion. Veil
+`1.0.0.296` remains Sable's required external runtime dependency; Companion
+packaging remains deferred.
 
 ## Mixin Annotation Processing
 
@@ -125,14 +150,14 @@ The M5 refmap was `99,596` bytes with 112 selected Mixin classes. After the M6 c
 There is no remaining compile-time error frontier in the selected Forge core graph. M6 moved the trustworthy frontier through the first runtime and persistence boundary:
 
 1. **Runtime smoke validation:** main menu, empty-world ticking, ServiceLoader discovery, config/event timing, TCP/UDP lifecycle, plot persistence, and one stationary named single-block sublevel now pass. See `M6_RUNTIME_SMOKE.md`.
-2. **Create 0.5.1.j:** only wrapped-level detection is implemented. Create 6 contraption/logistics integrations remain deferred and absent from the Forge Mixin config.
-3. **Flywheel 0.6:** visual registration is deliberately a no-op; Flywheel 1.0 render integration remains deferred.
+2. **Create 6.0.8:** only Ponder wrapped-level detection is implemented. Create contraption/logistics integrations remain deferred and absent from the Forge Mixin config.
+3. **Flywheel 1.0.5:** visual registration remains deliberately a no-op; Flywheel render integration is still deferred and must be re-audited against its new `dev.engine_room.flywheel` API.
 4. **Advanced rendering/gameplay:** chunked rendering, shader/water/Iris/Sodium bridges, Leashable/pathfinding, projectile dispenser, vibration, toast/settings, and other listed clusters remain intact but excluded.
 5. **Packaging:** Companion works on the Gradle `runClient` project classpath and remains intentionally absent from the Forge JarJar output. Standalone modpack testing requires that packaging step.
 
 M6 completed the first `runClient` smoke milestone. The remaining frontier is
-standalone packaging and deferred-feature work, subject first to the required
-target-modpack rebaseline.
+standalone packaging, a separate minimal-launch runtime check of the new
+dependency baseline, and deferred-feature work.
 
 ## Sable Companion Assessment
 
@@ -161,10 +186,13 @@ Mechanical inventory found 51 common source files containing 82 Veil imports:
 | `GENERIC_UTILITY` / platform | 1 |
 | `OTHER` | 7 |
 
-M3 uses official `foundry.veil:Veil-forge-1.20.1:1.0.0.296` through `implementation fg.deobf(...)` and declares Veil in Forge `mods.toml`. `verifyVeilDependency` compares the raw and compile artifacts without depending on a cache filename:
+M3 uses official `foundry.veil:Veil-forge-1.20.1:1.0.0.296` through
+`compileOnly fg.deobf(...)`, supplies the filtered mapped development runtime,
+and declares Veil in Forge `mods.toml`. `verifyVeilDependency` compares the raw
+and compile artifacts without depending on a cache filename:
 
-- Raw SHA-256: `605CE124B12841EC4E0603CD7E2B48CA84DE92772E8FD768A23A3F142A4EACBD`.
-- Mapped SHA-256: `05C17DCE2C8466A93DB7FCB96930665D2AC1097642014224AA027E39564FFC27`.
+- Raw slim SHA-256 observed by the current gate: `296C693C659A81B9BAA0C778D29A5AB89C56BBB46B5245A3BC2213BD0485F492`.
+- ForgeGradle-mapped slim SHA-256 observed by the current gate: `C3C4EE5C2277D6006B2DE4BEC4A50C0CE422985DA1177434B1C3AE33030714B0`.
 - Canonical paths and hashes differ, the raw jar is absent from `compileClasspath`, raw `VeilRenderSystem.class` contains `m_91087_`, and the mapped class contains `getInstance`.
 
 Registry/platform and basic client renderer APIs are reused directly. Render profiling uses vanilla `ProfilerFiller`; Sodium detection uses `Veil.platform().isSodiumLoaded()`. M4 replaces the modern Veil packet APIs, which have no practical Veil 1.20 equivalent, with the Sable-owned Forge transport documented in `NETWORK_BACKPORT_MATRIX.md`. Advanced shader/framebuffer/editor integrations remain deferred. See `VEIL_1_20_API_MATRIX.md` for the occurrence-counted 82-import decision matrix.
@@ -229,7 +257,7 @@ Registry/platform and basic client renderer APIs are reused directly. Render pro
 ## M6 Acceptance Report
 
 1. **Run harness:** ForgeGradle now has a Java 17 client run at `forge/run/m6-client` with verbose Mixin diagnostics and the inert-by-default `sable.runtimeSmoke` probe. `m6SableRun` combines Sable and Companion outputs only for the exploded development mod; Companion remains a common library rather than a standalone Forge mod.
-2. **Classpath boundary:** `verifyRunClientClasspath` confirms the merged Active/fallback Companion descriptor, mapped and development-patched Veil plus required runtime libraries, MixinExtras, and Forge 1.20 resource paths. Create, Flywheel, and Registrate are absent. `WrappedServerWorld` appears only in `SablePlatformImpl$CreateWrappedLevelCheck`, and both Create and Flywheel remain genuinely optional in `mods.toml`.
+2. **Classpath boundary:** `verifyRunClientClasspath` confirms the merged Active/fallback Companion descriptor, mapped and development-patched Veil plus required runtime libraries, MixinExtras, and Forge 1.20 resource paths. Create, Flywheel, Registrate, and Ponder are absent. `WrappedServerLevel` appears only in `SablePlatformImpl$PonderWrappedLevelCheck`, the outer provider has no Ponder bytecode reference, and Create/Flywheel remain genuinely optional in `mods.toml`.
 3. **Deterministic Companion:** provider discovery saw Active and fallback implementations, verified effective priorities `1000` and `500`, proved Active is the unique maximum, and confirmed that `SableCompanion.INSTANCE` selected Active. Selection does not depend on classpath enumeration order.
 4. **Runtime Mixin boundary:** the current generated config has 143 entries and the current 98,398-byte refmap maps 111 classes. Retained 1.20.1 descriptor/call-site corrections were limited to selected classes and checked against mapped targets. The scroll-only `MouseHandlerMixin` is deferred with the absent custom camera enum; no global target suppression or broad `require = 0` was added.
 5. **Main menu and empty world:** Sable and Veil reach the title screen. The disposable Creative Superflat Void world `M6_Smoke_Empty` loads, ticks for more than 60 seconds, exposes `/sable`, starts local UDP, synchronizes datapack definitions, and produces no repeated chunk, tick, Mixin, or resource error.
@@ -238,6 +266,436 @@ Registry/platform and basic client renderer APIs are reused directly. Render pro
 8. **Reload/persistence:** Save and Quit closes UDP, logs out the player, saves all dimensions, unloads all levels, and stops the server. The dev client exited after returning to title, so empty-world reload used a fresh client JVM; persistence passed, while a same-JVM duplicate-listener assertion was not exercised.
 9. **Single-block gate:** the verified commands `/sable spawn block minecraft:stone m6_smoke` and `/sable info @l` create exactly one stationary named sublevel. StartTracking precedes Finalize. A fresh reload restores the same name, position `-6.5 -60.0 6.5`, identity/state, mass `2.0`, and zero velocities, with occupancy, tracking, and region files present. This proves runtime, synchronization, retained single-block rendering path, and persistence boundaries only, not working physics.
 10. **Validation and next scope:** Companion verification, all 12 network tests, target dependency/Veil/AT checks, `compileJava`, `build`, and the final `runClient` shutdown pass. Companion JarJar remains the narrow prerequisite for standalone artifact testing. Advanced/chunked rendering, custom camera modes, full physics/Sable Rapier, Create/Flywheel features, Simulated, and Aeronautics remain deferred. Full evidence is in `M6_RUNTIME_SMOKE.md`.
+
+## Target Rebaseline Acceptance Report (2026-08-22)
+
+The replacement `../target_modpack` contains 308 valid unique jars. Its Create
+jar is the authority for the directly relevant nested stack:
+
+| Component | Old target | Replacement target | Upstream Sable 2.0.0 | Packaging / action |
+|---|---|---|---|---|
+| Minecraft | `1.20.1` | `1.20.1` | `1.21.1` | unchanged Forge backport baseline |
+| Loader | Forge `47.4.20` | no replacement profile metadata; retain proven Forge `47.4.20` | NeoForge `21.1.228` | unchanged project baseline |
+| Java | `17` | target classes are at most major 61; retain `17` | `21` | unchanged Java 17 ports |
+| Create | `0.5.1.j` | `6.0.8` | `6.0.10-280` | outer target jar; exact `[6.0.8]` optional Sable range |
+| Flywheel | `0.6.11-13`, `com.jozufozu.flywheel` | `1.0.5`, `dev.engine-room.flywheel` | `1.0.6` | Create JarJar; exact `[1.0.5]` optional Sable range |
+| Registrate | `MC1.20-1.3.3` | `MC1.20-1.3.3` | `MC1.21-1.3.0+67` | Create JarJar; mapped local module retained |
+| Ponder | absent from old staging | `1.0.91` | `1.0.82` | Create JarJar; new fourth mapped local module |
+| MixinExtras in Create | old packaging assumption | Forge `0.4.1` with internal common `0.4.1` | Sable owns Forge `0.5.3` | validate both nested hashes; do not map or downgrade |
+| Veil | external `1.0.0.296` | absent from replacement pack | `4.1.4` | retain proven Forge 1.20 integration; add to eventual pack |
+| Companion | development/common library | absent from replacement pack | common API `1.6.0` | packaging remains deferred |
+
+The old Create-specific `WrappedServerWorld` import and canary were removed.
+Create `6.0.8` does not contain that class. Ponder `1.0.91` supplies
+`net.createmod.catnip.levelWrappers.WrappedServerLevel`, now referenced only by
+the nested `SablePlatformImpl$PonderWrappedLevelCheck`. The outer provider first
+checks that Create is loaded and has no Ponder bytecode reference, preserving
+optional classloading isolation. The 35 vanilla Minecraft 1.20.1 AT mappings
+did not change; their external dependency canary now proves the Ponder class
+and proves the obsolete Create wrapper is absent.
+
+The deferred source graph was not enabled or edited. Mechanical inspection
+found 213 of 214 distinct imported Create/Catnip/Flywheel target types in the
+new stack. The sole missing type remains
+`com.simibubi.create.AllDataComponents` in `SchematicPlacePacketMixin`, a
+Minecraft 1.21 data-component boundary. Existing networking, Java 17 ports,
+Minecraft-core Mixins, Companion, and Veil need regression validation only.
+The old Flywheel package/API assumptions and all deferred Create 0.5 method and
+descriptor assumptions need re-audit before any individual feature is selected.
+
+Static gates, all with JDK 17, passed:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat projects` | pass; only `:forge` and `:sable_companion_1_20` |
+| `.\gradlew.bat :sable_companion_1_20:verifySableCompanionBackport` | pass; 12 sources, Java 17, common ServiceLoader library |
+| `.\gradlew.bat :forge:prepareTargetModpackDependencies` | pass; complete four-entry JarJar inventory plus both MixinExtras hashes |
+| `.\gradlew.bat :forge:verifyTargetModpackDependencies` | pass; four mapped local modules, no raw staged jar |
+| `.\gradlew.bat :forge:verifyVeilDependency` | pass; external Veil `1.0.0.296` raw/mapped canaries |
+| `.\gradlew.bat :forge:verifyForgeAccessTransformer` | pass; 35 entries and new Ponder boundary |
+| `.\gradlew.bat :forge:verifyRunClientClasspath` | pass; exact filtered Create 6 runtime, no standalone Registrate/old stack, and optional Ponder bytecode isolated to the nested helper |
+| `.\gradlew.bat :forge:networkTest` | pass; 12/12 tests across three suites |
+| `.\gradlew.bat :forge:compileJava` | pass; 0 errors, 4 Forge deprecation warnings |
+| `.\gradlew.bat :forge:build` | pass; reobfuscation, Checkstyle, Spotless, AT and packaging checks |
+
+No `runClient` or other Minecraft launch was performed. The Windows network
+test no longer puts the generated Companion jar on javac's classpath: the
+isolated protocol source set compiles the 12 Java 17 Companion sources directly
+and filters the project jar, avoiding its short-path file lock without changing
+network code or protocol behavior.
+
+## Create 6 Runtime Smoke Attempt (2026-08-23)
+
+The target-runtime milestone used exactly one `:forge:runClient` process. It
+failed before the title screen during Java module-layer construction because
+Registrate was present twice: as the explicit standalone mapped runtime module
+`Registrate.MC1._20` and as Create's JarJar module `Registrate`. Both exported
+`com.tterrag.registrate`. Gate 1 therefore failed pre-title; Gates 2–5,
+including same-JVM reload, were not run. No second Minecraft process was
+launched and the disposable world was not opened.
+
+The narrow build fix removes standalone Registrate from `runtimeOnly` while
+retaining it as an exact staged/mapped compile module. The corrected runtime
+uses mapped standalone Create `6.0.8`, Flywheel `1.0.5`, and Ponder `1.0.91`;
+mapped Create supplies its exact Registrate `MC1.20-1.3.3` JarJar once. The
+mapped nested Registrate SHA-256 is
+`AB90001E9EC42922DA4E499CDAFF6D7F1F6E78432CE71555397931804E94E5FB`.
+Patched mapped Veil `1.0.0.296` remains external.
+
+After the fix, `verifyRunClientClasspath` proves that corrected shape, the
+mapped nested Registrate canary/hash, old-stack absence, Ponder isolation, and
+the still-disabled deferred Mixin graph. `:forge:build` passes reobfuscation,
+Checkstyle, Spotless, AT, and packaging validation. Runtime remains unproven
+until a separate one-launch retry. See `TARGET_RUNTIME_SMOKE.md` for the exact
+matrix, command results, failure evidence, and gate table.
+
+## Create 6 Static Runtime Preflight (2026-08-23)
+
+No Minecraft client or server was launched. The comprehensive static pass
+found and fixed one more instance of the Registrate failure class before
+spending another launch: Create owns a nested MixinExtras Forge `0.4.1`
+wrapper, while Sable supplies standalone MixinExtras Forge `0.5.3`. Both outer
+wrappers use automatic module name `mixinextras` and expose the Forge bootstrap
+package. Resolving their internal common payload upward to `0.5.3` does not by
+itself remove the duplicate outer module.
+
+The mapped development Create jar is now prepared with exactly that older
+wrapper payload and JarJar metadata row removed. Create's mapped Registrate,
+Flywheel, and Ponder entries remain intact. The filtered Create SHA-256 is
+`13FCA92CD9C89611943A28ACA296E444AA38365F10F8EDEF427419038B65756E`.
+Runtime keeps Sable's MixinExtras Forge `0.5.3`
+(`89D60F6BF1F29664319ACFA80E777ABC03FDE674370AF52E94A9A2E452B98833`)
+and its common `0.5.3` payload
+(`D0020CAFF27B478E5CBACE1C0C1D74B755AF9F5D351B619BA1EC45C0DE8CF3C9`).
+The source Create `0.4.1` wrapper/common hashes remain validated during target
+staging; Sable was not downgraded.
+
+`:forge:verifyRuntimeModuleBoundary` reconstructs the effective mod/game
+library surface and now fails on the Registrate/MixinExtras class of defect.
+It proved unique module/package ownership, although the first implementation
+reported Registrate from its JarJar artifact identifier as `Registrate` rather
+than deriving the mapped automatic-module name. Runtime later established that
+the exact effective names are `create`, `flywheel`, `ponder`,
+`Registrate.MC1._20`,
+`mixinextras`, `MixinExtras`, and `veil`; package counts 286/66/50/7/1/49/150;
+no split packages; no repeated provider implementations; unique runtime mod
+IDs; no old/raw/mapped pairs; and no standalone Registrate. Create's nested
+Flywheel/Ponder bytes exactly match the mapped source modules Forge selects,
+and mapped Registrate retains SHA-256
+`AB90001E9EC42922DA4E499CDAFF6D7F1F6E78432CE71555397931804E94E5FB`.
+
+`:forge:verifyRetainedMixinCoexistence` mechanically compared the enabled Sable
+Forge config with Create `6.0.8`, Flywheel `1.0.5`, Ponder `1.0.91`, and Veil.
+The generated `RUNTIME_MIXIN_OVERLAP.md` records 164
+`SAFE_INDEPENDENT` shared-target pairs, one `ORDER_SENSITIVE`, zero
+`NEEDS_BYTECODE_CHECK`, and zero `LIKELY_RUNTIME_CONFLICT`. The sole ordered
+pair is the Sable sublevel-collision and Create contraption-interaction
+handlers at mapped `Entity.move` `TAIL`. Both are priority 1100,
+non-cancellable, use the present 1.20.1 descriptor/return boundary, and have no
+shared direct field writes. No concrete incompatibility was proven and no
+retained Mixin was changed. Equal-priority semantic ordering remains a focused
+runtime observation for the next launch.
+
+`:forge:verifyBootstrapLifecycleBoundary` proved exact `mods.toml` ranges and
+optionality, one Sable network channel, one common/client config registration,
+one command/reload-listener owner, guarded smoke-probe installation,
+server-instance UDP cleanup, connection-instance UDP cleanup, and explicit
+first/second integrated-server lifecycle counters. Constant-pool scanning
+still finds no Create/Catnip/Flywheel type in retained outer classes;
+`WrappedServerLevel` remains confined to
+`SablePlatformImpl$PonderWrappedLevelCheck` after the Create presence check.
+
+Veil remains external artifact `1.0.0.296`; its embedded Forge mod version is
+`1.0.0`. The next runtime harness now validates `ModList` against `1.0.0`
+instead of incorrectly expecting the artifact coordinate.
+
+Post-preflight static gates all pass under JDK 17: `projects`, Companion
+verification, target preparation/verification, Veil verification, Forge AT,
+`verifyRunClientClasspath`, the three new preflight gates, `networkTest` 12/12,
+`compileJava` with zero errors, and `build` with reobfuscation, Checkstyle, and
+Spotless. No deferred Create/Flywheel Mixins, rendering, Rapier, Simulated,
+Aeronautics, or Companion JarJar work was enabled.
+
+## Create 6 Runtime Evidence Attempt (2026-08-23 12:47)
+
+Exactly one `:forge:runClient` process was launched, and no separate server or
+second client was started. The client passed module-layer construction and
+reached the stable title-screen harness condition. Gate 1 then failed only
+because the strengthened evidence probe expected Registrate module
+`Registrate`; the one loaded mapped JarJar class actually belongs to automatic
+module `Registrate.MC1._20`:
+
+```text
+com.tterrag.registrate.AbstractRegistrate module=Registrate.MC1._20,
+expected=Registrate
+```
+
+The resource-count assertion immediately before that comparison passed, so
+there was exactly one `AbstractRegistrate.class` resource. There was no
+`ResolutionException`, proving the prior duplicate Registrate failure is gone.
+Forge JarJar found exactly two remaining nested dependencies: Create-owned
+Registrate and Sable MixinExtras common `0.5.3`; Flywheel/Ponder were selected
+from their explicit mapped source modules. MixinExtras initialized
+`MixinExtrasServiceImpl(version=0.5.3)`, and no Create-owned Forge `0.4.1`
+wrapper/module collision occurred.
+
+Create `6.0.8`, Flywheel `1.0.5`, Ponder `1.0.91`, Veil mod `1.0.0`
+(artifact `1.0.0.296`), Forge, and Minecraft initialized. Filtered Create and
+Flywheel each passed exact-one class-resource and module-name probes. Active
+Companion selection, all eight platform providers, the client render provider,
+Forge packet transport, protocol `1`, and packet IDs `0..13` passed. Common and
+client config each loaded once, both runtime probes installed once, the client
+reload listener registered once, and common setup ran once.
+
+Because Gate 1 did not transition, the disposable world was not opened:
+`level.dat` retained its 2026-08-21 timestamp. Gates 2–5, integrated-server
+lifecycle counters, server command/reload-listener counters, UDP endpoints,
+sublevel creation, persistence, and same-JVM reload were not exercised. Client
+logout cleanup ran once during the harness crash exit. Both equal-priority
+`Entity.move` Mixins applied without an injection error, but no in-world
+movement occurred, so their semantic runtime observation remains pending.
+
+The captured evidence is in `forge/run/m6-client/logs/latest.log` and
+`forge/run/m6-client/crash-reports/crash-2026-08-23_12.48.32-client.txt`
+(crash UUID `3a29ba1f-3efe-4de3-8de6-46f0f2c1d50b`). The next narrow change is
+only a smoke-verifier correction: expect `Registrate.MC1._20`, derive the same
+name in the static module report, and run MixinExtras detailed probes before
+descriptive module-name canaries. Dependency selection and retained/deferred
+feature boundaries must remain unchanged. No relaunch was performed in this
+milestone.
+
+## Create 6 Harness Static Correction (2026-08-23)
+
+No Minecraft client, manual client, or Forge server was launched. The smoke
+harness no longer treats the JarJar artifact identifier `Registrate` as the
+effective module name. It derives the expected Registrate module from the mapped
+nested runtime filename `Registrate-MC1.20-1.3.3.jar` using Forge/SecureJar
+filename semantics, producing `Registrate.MC1._20`, while retaining the
+exact-one `AbstractRegistrate.class` resource assertion.
+
+`:forge:verifyRuntimeModuleBoundary` now derives the same name from the
+extracted mapped nested runtime jar and reports:
+
+```text
+registrate:Registrate.MC1._20
+Derived Registrate module Registrate.MC1._20 from Registrate-MC1.20-1.3.3.jar
+```
+
+Detailed MixinExtras Forge/common uniqueness and version evidence now runs
+before the descriptive Registrate module-name canary, so a future harmless name
+mismatch cannot hide MixinExtras evidence. The requested static suite passed
+under JDK 17 with `--offline`: `verifyRuntimeModuleBoundary`,
+`verifyRunClientClasspath`, `verifyRetainedMixinCoexistence`,
+`verifyBootstrapLifecycleBoundary`, `networkTest`, `compileJava`, and `build`.
+The repo is ready for one final single-JVM runtime smoke attempt with unchanged
+dependency selection and unchanged deferred-feature boundaries.
+
+## Create 6 Final Runtime Smoke Attempt (2026-08-23 13:14)
+
+Exactly one `.\gradlew.bat --offline :forge:runClient` process was launched.
+No second client, manual Minecraft launch, or Forge server was started.
+Dependency selection and feature scope were unchanged.
+
+Gate 1 passed: the title screen was reached and the runtime evidence confirmed
+Sable, Create `6.0.8`, Flywheel `1.0.5`, Ponder `1.0.91`, Veil mod `1.0.0`
+(artifact `1.0.0.296`), Companion, all eight Sable platform providers, packet
+transport, Create-owned Registrate module `Registrate.MC1._20`, and
+MixinExtras Forge/common `0.5.3`. The filtered Create development artifact did
+not reintroduce the removed MixinExtras Forge `0.4.1` wrapper.
+
+Gate 2 passed: the disposable smoke world opened, the player joined, ticking /
+chunk-loading probes passed, and `/sable` registered for integrated-server
+cycle `1`.
+
+Gate 3 failed after `/sable spawn block minecraft:stone create6_runtime_smoke`
+and `/sable info @l` both returned `1`. The object existed and reported zero
+velocities, but `/sable info` showed `Mass: 0.0`; the harness expected the
+stationary stone sublevel mass `2.0`. Sable then removed
+`ServerSubLevel[name=create6_runtime_smoke, ...]` for an extreme Y coordinate
+range. The fatal exception was:
+
+```text
+java.lang.IllegalStateException: Expected stationary stone mass 2.0, found 0.0
+```
+
+Gates 4 and 5 were not run because Gate 3 crashed the one permitted JVM before
+Save and Quit / same-JVM reopen. Crash cleanup did observe integrated-server
+stop and client logout cleanup, but duplicate-registration and persistence
+checks remain unproven. The equal-priority Sable/Create `Entity.move` TAIL
+Mixins both applied without injection failure; no semantic conflict was
+observed before the mass/bounds failure.
+
+Evidence is in `forge/run/m6-client/logs/latest.log` and
+`forge/run/m6-client/crash-reports/crash-2026-08-23_13.16.08-client.txt`.
+The next blocker is a narrow static-first repair of retained single-block
+sublevel spawn mass/bounds initialization around `/sable spawn block`,
+`EmbeddedPlotLevelAccessor.setBlock`, plot/block association, and
+`SubLevelPhysicsSystem.updateMassDataFromBlockChange`. Do not change dependency
+selection, Mixin priority, networking, or deferred-feature scope for that
+investigation.
+
+## Gate 3 Single-Block Initialization Static Repair (2026-08-23)
+
+No Minecraft client, manual client, or Forge server was launched. Dependency
+selection, Mixin priorities, and deferred-feature scope were unchanged.
+
+The proven defect was retained-core initialization ordering in
+`/sable spawn block`: the command allocated an empty plot, placed one block via
+`EmbeddedPlotLevelAccessor.setBlock`, and then recorded `lastPose` without
+synchronously finalizing the new object's plot bounds or mass tracker. The
+server sublevel had already entered the physics system with empty mass/bounds,
+so the command depended on the live block-change callback completing before the
+immediate `/sable info` / harness assertion. In the Create 6 smoke the object
+existed and the origin block was `minecraft:stone`, but the tracker was still
+mass `0.0`; the later tick transformed the empty bounds sentinel and removed
+the object for an extreme Y range.
+
+The Create/Ponder wrapped-level path was inspected and eliminated as the
+proven cause: the command runs on the integrated `ServerLevel`, while
+`SablePlatform.isWrappedLevel(...)` / `PonderWrappedLevelCheck` only guard
+optional wrapped-level exclusions.
+
+The fix adds a narrow post-placement finalization step for the single-block
+spawn path. It resolves the actual plot chunk for the embedded origin, applies
+the block change to the `PlotChunkHolder`, rebuilds plot bounds, performs
+normal plot expansion, rejects empty bounds, rebuilds mass from actual
+world/plot contents through the normal physics-property registry, updates
+merged mass/global bounds, and rejects invalid mass data before the command
+records `lastPose`. It does not special-case stone, hardcode mass `2.0`,
+disable bounds validation, alter networking, or change any dependency/Mixin
+scope.
+
+M6 previously passed because the historical runtime path observed the expected
+creation/update boundary and fresh-JVM reload restored mass `2.0`; it did not
+prove that the command itself self-finalized mass/bounds before an immediate
+same-JVM assertion. The Create 6 smoke exposed that ordering hole.
+
+New static regression gate:
+`:forge:verifySingleBlockSpawnInitialization`. It verifies the production
+spawn-block path reads the old state, places the block, runs finalization before
+`updateLastPose()`, proves block association / bounds / mass rebuild markers,
+and rejects stone or mass hardcoding in the helper.
+
+Validation with JDK 17 and `--offline` passed:
+
+- `:forge:verifySingleBlockSpawnInitialization`
+- `:forge:compileJava` — 0 errors, existing 4 Forge deprecation warnings
+- `:forge:networkTest` — up-to-date/pass
+- `:forge:verifyRuntimeModuleBoundary`
+- `:forge:build` — reobfuscation, Checkstyle, Spotless, AT and packaging checks
+
+The first managed compile attempt hit the known Windows short-path
+`AccessDeniedException`; rerunning the same offline Gradle validation outside
+that filesystem wrapper passed. No retained Mixin changed, so
+`verifyRetainedMixinCoexistence` was not rerun. Remaining risk: the repair is
+static only. The next runtime milestone should use one fresh `runClient` JVM to
+retry Gate 3 and then continue to same-JVM reload and clean shutdown if Gate 3
+passes.
+
+## Create 6 Post Gate-3 Repair Runtime Smoke (2026-08-23 13:42)
+
+Exactly one `.\gradlew.bat --offline :forge:runClient` process was launched.
+No second client, manual Minecraft launch, or Forge server was started.
+Dependency selection, Mixin priorities, and deferred-feature scope were
+unchanged.
+
+Gates 1 and 2 passed again: the title screen and disposable smoke world loaded
+with Sable, Create `6.0.8`, Flywheel `1.0.5`, Ponder `1.0.91`, Veil mod
+`1.0.0`, Companion, Create-owned Registrate `Registrate.MC1._20`, and
+MixinExtras `0.5.3`.
+
+Gate 3 passed after the static repair. The exact commands
+`/sable spawn block minecraft:stone create6_runtime_smoke` and
+`/sable info @l` both returned `1`. Runtime evidence reported:
+
+- name: `create6_runtime_smoke`
+- position: `-6.5 -107.73569043825906 6.5`
+- orientation: `0.0 0.0 0.0 1.0`
+- mass: `2.0`
+- linear velocity: `0.0 0.0 0.0`
+- angular velocity: `0.0 0.0 0.0`
+- `ClientboundStartTrackingSubLevelPacket` before
+  `ClientboundFinalizeSubLevelPacket`, followed by
+  `ClientboundChangeBoundsSubLevelPacket`
+
+No extreme-Y removal was logged before the first Save and Quit, and the updated
+sublevel region `M6_Smoke_Empty/sublevels/r.-1.0.0.slvls` was written during
+the first server stop. The current harness does not print numeric plot/global
+bounds, so the exact bound coordinates are not captured in this run; the
+runtime evidence proves non-empty/valid bounds through command completion,
+ChangeBounds emission, Gate 3 PASS, no extreme removal, and save output.
+
+Gate 4 failed before same-JVM reopen. After Save and Quit, integrated-server
+stop cycle `1` was observed, but the existing lifecycle verifier expected one
+client logout cleanup and observed two. The run logged a pre-world client
+logout cleanup cycle `1` during world startup, then the expected Save-and-Quit
+cleanup cycle `2`. The fatal assertion was:
+
+```text
+java.lang.IllegalStateException: SABLE_M6 first server stopped client logouts=2, expected=1
+```
+
+Gate 5 was not run. Evidence is in `forge/run/m6-client/logs/latest.log` and
+`forge/run/m6-client/crash-reports/crash-2026-08-23_13.44.10-client.txt`
+(crash UUID `3fe3a6d9-4e65-4a7c-84c0-9c7508eb356e`). The next blocker is a
+static harness/lifecycle repair: distinguish baseline/pre-world client logout
+cleanup from Save-and-Quit cleanup, or assert deltas from a baseline captured
+after Gate 2. Same-JVM reload, duplicate-registration audit for the second
+integrated server, and clean shutdown remain unproven until the next single-JVM
+runtime attempt.
+
+## Create 6 Same-JVM Runtime Smoke Acceptance (2026-08-23 13:56)
+
+The lifecycle smoke harness was corrected without changing production
+lifecycle behavior. It now captures lifecycle baselines at completed gate
+boundaries and validates deltas for per-integrated-server events instead of
+assuming process-global counters begin at zero. This distinguishes one-time
+process/client-global registration from per-server start/stop, command/reload
+listener, player login/logout, UDP, and client logout cleanup events.
+
+Static validation passed with JDK 17 and `--offline` before runtime:
+
+- `:forge:verifyBootstrapLifecycleBoundary`
+- `:forge:compileJava` — 0 errors, existing 4 Forge deprecation warnings
+- `:forge:build` — reobfuscation, Checkstyle, Spotless, AT and packaging checks
+
+After static validation, exactly one
+`.\gradlew.bat --offline :forge:runClient` process was launched. It completed
+successfully; no second client, manual Minecraft launch, or Forge server was
+started.
+
+All Create 6 runtime smoke gates passed:
+
+- Gate 1: title/main menu with Sable, Create `6.0.8`, Flywheel `1.0.5`,
+  Ponder `1.0.91`, Veil mod `1.0.0`, Registrate `Registrate.MC1._20`, and
+  MixinExtras `0.5.3`.
+- Gate 2: disposable world opened, player joined, and first-world lifecycle
+  baseline was captured after the legitimate pre-world client logout cleanup.
+- Gate 3: `create6_runtime_smoke` existed as the single expected
+  `minecraft:stone` object, mass `2.0`, zero velocities, ordered
+  StartTracking -> Finalize, and no extreme-Y removal.
+- Gate 4: first Save and Quit returned to title without exiting the client;
+  the same JVM reopened the same world; the same named stone sublevel restored
+  with mass `2.0`; second-server active delta duplicate-registration audit
+  passed.
+- Gate 5: second Save and Quit plus final client exit passed; integrated
+  server, client networking, UDP, and second-server stopped delta audit were
+  clean.
+
+Relevant lifecycle baselines in `forge/run/m6-client/logs/latest.log`:
+
+- first world active:
+  `starting=1 started=1 stopping=0 stopped=0 commands=1 reloadListeners=1 playerLogins=1 playerLogouts=0 clientLogouts=1`
+- first stopped:
+  `starting=1 started=1 stopping=1 stopped=1 commands=1 reloadListeners=1 playerLogins=1 playerLogouts=1 clientLogouts=2`
+- second world active:
+  `starting=2 started=2 stopping=1 stopped=1 commands=2 reloadListeners=2 playerLogins=2 playerLogouts=1 clientLogouts=3`
+
+`SABLE_TARGET_RUNTIME phase=complete status=PASS` confirms all five target
+runtime gates passed in one client JVM. This proves only the retained Sable
+core runtime against the Create 6 target stack. Deferred Create/Flywheel
+Mixins, chunked/advanced rendering, Rapier/full physics, Simulated,
+Aeronautics, and Companion JarJar remain outside this milestone.
 
 ## Known Target Modpack Issue
 

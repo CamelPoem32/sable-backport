@@ -3,26 +3,28 @@
 ## Read This First
 
 This repository is the working backport of Sable 2.0.0 from Minecraft 1.21.1
-NeoForge to Minecraft 1.20.1 Forge. Do not begin M7 or feature work until the
-new `../target_modpack` has been inventoried using
-`TARGET_REBASE_CHECKLIST.md`.
+NeoForge to Minecraft 1.20.1 Forge. The replacement `../target_modpack` was
+rebaselined on 2026-08-22. Do not interpret that static milestone as a new
+runtime smoke or permission to enable deferred feature families.
 
-The build currently encodes the old target modpack:
+The build now encodes this exact baseline:
 
-| Component | Old target |
+| Component | Current target |
 |---|---|
 | Minecraft | `1.20.1` |
 | Forge | `47.4.20` |
-| Create | `0.5.1.j` |
-| Flywheel | `0.6.11-13` |
+| Create | `6.0.8` |
+| Flywheel | `1.0.5` |
 | Registrate | `MC1.20-1.3.3` |
+| Ponder | `1.0.91` |
 | Veil | `1.0.0.296` |
 | Java | `17` |
 
-The user is about to replace that modpack and move Create to Create 6. All old
-target hashes, embedded-dependency assumptions, version ranges, staging rules,
-and Create-0.5-specific decisions require revalidation. Do not edit those
-areas until the replacement modpack is present and inspected.
+Create supplies Flywheel, Registrate, Ponder, and MixinExtras through exactly
+four top-level JarJar records. Veil and Sable Companion are absent from the
+replacement pack; Veil remains an additional required runtime dependency, and
+Companion final packaging is still deferred. See `TARGET_REBASE_CHECKLIST.md`
+and `BACKPORT_STATUS.md` for exact coordinates, paths, ranges, and hashes.
 
 ## Project Identity
 
@@ -32,8 +34,8 @@ areas until the replacement modpack is present and inspected.
 - Upstream Sable commit: `b7226222caf4eace63a708bdcd73ef36c971137d`.
 - Backport branch: `backport/forge-1.20.1-sable-2.0.0`.
 - M6 source checkpoint: `9ff44c1a870f0c47e8a7df141503ec3bd5b496b6`.
-- Current target before rebaseline: Minecraft `1.20.1`, Forge `47.4.20`, Java
-  `17`.
+- Current target: Minecraft `1.20.1`, Forge `47.4.20`, Java `17`, Create
+  `6.0.8`, Flywheel `1.0.5`, Registrate `MC1.20-1.3.3`, and Ponder `1.0.91`.
 - Upstream dependency reference in `gradle.properties`: Minecraft `1.21.1`,
   Create `6.0.10-280`, Flywheel `1.0.6`, Registrate
   `MC1.21-1.3.0+67`, Ponder `1.0.82`, and Veil `4.1.4`.
@@ -54,6 +56,10 @@ areas until the replacement modpack is present and inspected.
 - M6: added the runtime harness and diagnostics, fixed retained-core runtime
   issues, reached main menu, loaded and reloaded an empty world, and created,
   synchronized, saved, and restored one stationary named stone sublevel.
+- Target rebaseline: staged and mapped Create `6.0.8`, Flywheel `1.0.5`,
+  Registrate `MC1.20-1.3.3`, and Ponder `1.0.91` from exact nested metadata;
+  replaced the old Create wrapper boundary with Ponder's
+  `WrappedServerLevel`; all requested static gates pass.
 
 ## Current Status
 
@@ -63,7 +69,7 @@ areas until the replacement modpack is present and inspected.
   17, without `--configure-on-demand`.
 - `:forge:compileJava`, `:forge:build`, reobfuscation, Checkstyle, Spotless,
   static package verification, mapped Veil verification, curated AT
-  verification, and old-target dependency deobfuscation.
+  verification, and four-module replacement-target deobfuscation.
 - Companion common API on Java 17, both ServiceLoader providers present, and
   deterministic selection of `ActiveSableCompanion` because priority
   `1000 > 500`.
@@ -226,6 +232,10 @@ the rebaseline is implemented.
 - No dedicated server, remote multiplayer, standalone mods-folder artifact, or
   target-modpack runtime has been tested.
 - Create/Flywheel were intentionally absent from M6 runtime.
+- The first Create 6 target-runtime attempt used its single allowed client
+  process but failed pre-title on a duplicate Registrate Java module. The
+  standalone runtime copy was removed and the corrected one-copy Create JarJar
+  shape is statically green; it has not been relaunched.
 - Companion is not yet bundled; full physics is absent.
 
 ## Inspect First
@@ -239,7 +249,7 @@ the rebaseline is implemented.
    `SableForgeRuntimeSmoke.java`, the Forge `platform` and `network` packages,
    and `sable_companion_1_20`.
 
-## Target Modpack Rebaseline Procedure
+## Completed Target Modpack Rebaseline Procedure
 
 1. Place or inspect the replacement modpack at `../target_modpack`; do not
    change source code first.
@@ -265,13 +275,16 @@ the rebaseline is implemented.
    `TARGET_REBASE_CHECKLIST.md`. Stop with a reviewed dependency delta before
    beginning JarJar, rendering, physics, Simulated, or Aeronautics work.
 
-## Recommended Next Steps
+## Recommended Next Step
 
-The next task is target-modpack rebaseline only. After the new environment is
-documented and build assumptions are updated, rerun the complete static suite
-and decide a new milestone from the resulting evidence. Do not assume the old
-recommendation of Companion JarJar is still the immediate M7 until the new
-modpack packaging layout is known.
+Use a separate one-launch retry of the automated target-runtime smoke. The
+corrected development runtime has mapped standalone Create `6.0.8`, Flywheel
+`1.0.5`, and Ponder `1.0.91`; mapped Create supplies Registrate
+`MC1.20-1.3.3` once through JarJar; external Veil remains `1.0.0.296`. Do not
+enable deferred Create/Flywheel Mixins, advanced rendering, Rapier, Simulated,
+Aeronautics, or feature JarJar work. Run all five gates sequentially in that
+one client JVM and consult `TARGET_RUNTIME_SMOKE.md` for the failed attempt and
+verified fix.
 
 ## M6 Checkpoint Files
 
@@ -320,14 +333,13 @@ They include the runtime probe, retained Mixin fixes, Veil development patcher,
 resource/build changes, M6 report, generated Mixin matrix, and ignored-output
 rule. No world, log, cache, or build artifact belongs in the checkpoint.
 
-## First Prompt For The Next Codex
+## Suggested Prompt For The Next Codex
 
 ```text
-Read HANDOFF.md, TARGET_REBASE_CHECKLIST.md, BACKPORT_STATUS.md,
-M6_RUNTIME_SMOKE.md, NETWORK_BACKPORT_MATRIX.md, MIXIN_BACKPORT_MATRIX.md,
-VEIL_1_20_API_MATRIX.md, and ACCESS_TRANSFORMER_BACKPORT_MATRIX.md. Do not
-implement M7 or any feature yet. Inspect the replacement ../target_modpack,
-perform the documented target-modpack rebaseline, compare it with both the old
-Create 0.5.1.j environment and upstream Sable 2.0.0, then report the exact
-dependency/build delta and which existing compatibility work needs re-audit.
+Read HANDOFF.md, TARGET_RUNTIME_SMOKE.md, BACKPORT_STATUS.md, and
+M6_RUNTIME_SMOKE.md. The first Create 6 runtime attempt failed pre-title because
+Registrate was supplied both standalone and through Create JarJar. The
+one-copy runtime fix is statically green but was not relaunched due the hard
+one-process cap. Retry the existing automated five-gate smoke in exactly one
+client JVM. Do not enable any deferred feature family.
 ```

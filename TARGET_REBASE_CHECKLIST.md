@@ -3,6 +3,37 @@
 Use this checklist before any post-M6 implementation. The replacement
 `../target_modpack` is authoritative; filenames alone are not sufficient.
 
+## Rebaseline Result: Complete 2026-08-22
+
+This checklist was executed against the replacement pack before feature work.
+The pack has 308 valid unique jars. The Create manifest and metadata establish
+Minecraft `1.20.1` and Create `6.0.8`; the replacement files do not contain a
+separate launcher profile proving a Forge build number, so the already proven
+project baseline remains Forge `47.4.20` / Java `17`. All inspected target
+classes are Java 17-compatible (class major at most 61).
+
+Create `create-1.20.1-6.0.8.jar` has SHA-256
+`6FBB910C367DBCE8E4FC7E5BF64B6EDD4DE980906ED00AF8E47E4AF843C0D9B0` and
+exactly four top-level JarJar records:
+
+| Coordinate | Version / range | Nested path | SHA-256 |
+|---|---|---|---|
+| `dev.engine-room.flywheel:flywheel-forge-1.20.1` | `1.0.5`; `[1.0,2.0)` | `META-INF/jarjar/flywheel-forge-1.20.1-1.0.5.jar` | `316CA250F19244956B5F0CD75329309EA65A77B4B8DA854389B6A9222E7F427C` |
+| `com.tterrag.registrate:Registrate` | `MC1.20-1.3.3`; `[MC1.20-1.3.3,)` | `META-INF/jarjar/Registrate-MC1.20-1.3.3.jar` | `226862D4638B77273F4627FBAC871AA0B3AF584DDE377F4CE2CB0C7CC228CF00` |
+| `net.createmod.ponder:Ponder-Forge-1.20.1` | `1.0.91`; `[1.0.91,)` | `META-INF/jarjar/Ponder-Forge-1.20.1-1.0.91.jar` | `86E6B64372ABA6D9C56F2C35725EA26D8FEBF2C75EED9950566E7F2849443B34` |
+| `io.github.llamalad7:mixinextras-forge` | `0.4.1`; `[0.4.1,)` | `META-INF/jarjar/mixinextras-forge-0.4.1.jar` | `9D48CB0A40299D283248FDAD8B02C6D175C45B27F9BEC48EF63D7EE8A4EE3066` |
+
+Every record has `isObfuscated: false`. The MixinExtras Forge jar additionally
+contains `META-INF/jars/MixinExtras-0.4.1.jar`, SHA-256
+`D13C480D4E84128E76E8F509346F8137CEAA195091B3CFEAF4EBBA584CA68374`.
+Create, Flywheel, Registrate, and Ponder are the four mapped local modules;
+MixinExtras is recursively validated but Sable retains its own `0.5.3`.
+
+The pack contains neither Veil nor Sable Companion. Veil
+`foundry.veil:Veil-forge-1.20.1:1.0.0.296` therefore remains an additional
+required runtime dependency. Companion packaging remains a separate deferred
+milestone. No Minecraft launch was performed for this rebaseline.
+
 ## 1. Protect The M6 Baseline
 
 - Confirm branch `backport/forge-1.20.1-sable-2.0.0` and a clean worktree.
@@ -29,19 +60,20 @@ than assuming that Flywheel, Registrate, or Ponder is standalone.
 
 Record exactly:
 
-- [ ] Minecraft version and loader metadata.
-- [ ] Forge version and loader range.
-- [ ] Java requirement.
-- [ ] Create artifact name, exact version, mod metadata version, and SHA-256.
-- [ ] Flywheel exact version, standalone/embedded status, coordinates, and
+- [x] Minecraft version and available loader metadata (the replacement has no
+      separate loader profile; retain the proven Forge baseline).
+- [x] Forge version and loader range retained from the proven project baseline.
+- [x] Java requirement checked from target class-file majors.
+- [x] Create artifact name, exact version, mod metadata version, and SHA-256.
+- [x] Flywheel exact version, standalone/embedded status, coordinates, and
       SHA-256.
-- [ ] Registrate exact version, standalone/embedded status, coordinates, and
+- [x] Registrate exact version, standalone/embedded status, coordinates, and
       SHA-256.
-- [ ] Ponder exact version and whether standalone, bundled, embedded, or absent.
-- [ ] Veil presence, exact version, artifact type/classifier, dependencies, and
+- [x] Ponder exact version and whether standalone, bundled, embedded, or absent.
+- [x] Veil presence, exact version, artifact type/classifier, dependencies, and
       SHA-256.
-- [ ] Sable Companion presence/packaging, if any.
-- [ ] Other Sable-relevant mods: MixinExtras, JEI, Sodium/Embeddium/Oculus/Iris,
+- [x] Sable Companion presence/packaging, if any.
+- [x] Other Sable-relevant mods: MixinExtras, JEI, Sodium/Embeddium/Oculus/Iris,
       Jade, ComputerCraft, Exposure, Vista, and any physics/runtime library.
 
 ## 3. Build The Three-Way Comparison
@@ -74,33 +106,33 @@ Upstream Sable 2.0.0 reference:
 | Ponder | `1.0.82` |
 | Veil | `4.1.4` |
 
-- [ ] Mark every version/package mismatch.
-- [ ] Mark every old hash as historical and replace only after verification.
-- [ ] Decide whether Minecraft/Forge/Java remain `1.20.1`/`47.4.20`/`17`.
-- [ ] Determine whether the new Create 6 line is API-close to upstream Sable's
+- [x] Mark every version/package mismatch.
+- [x] Mark every old hash as historical and replace only after verification.
+- [x] Decide whether Minecraft/Forge/Java remain `1.20.1`/`47.4.20`/`17`.
+- [x] Determine whether the new Create 6 line is API-close to upstream Sable's
       Create 6 line or still requires a version-specific adapter.
 
 ## 4. Re-Audit Existing Decisions
 
-- [ ] `forge/build.gradle`: Create jar filename discovery, manifest validation,
+- [x] `forge/build.gradle`: Create jar filename discovery, manifest validation,
       expected coordinates, versions, SHA-256 values, JarJar extraction,
       staged filenames, flatDir coordinates, and dependency declarations.
-- [ ] `gradle.properties`: Forge target values and Create/Flywheel/Registrate,
+- [x] `gradle.properties`: Forge target values and Create/Flywheel/Registrate,
       Veil, and loader version ranges.
-- [ ] `forge/src/main/resources/META-INF/mods.toml`: mandatory/optional status,
+- [x] `forge/src/main/resources/META-INF/mods.toml`: mandatory/optional status,
       sides, ordering, and version ranges.
-- [ ] `SablePlatformImpl.CreateWrappedLevelCheck`: verify whether the new Create
-      jar still contains
-      `com.simibubi.create.foundation.utility.worldWrappers.WrappedServerWorld`.
-- [ ] `verifyForgeAccessTransformer`: revalidate the Create wrapped-world
+- [x] `SablePlatformImpl.CreateWrappedLevelCheck`: verified that the old Create
+      class is absent; replaced it with the isolated Ponder `1.0.91`
+      `WrappedServerLevel` check.
+- [x] `verifyForgeAccessTransformer`: revalidate the Create wrapped-world
       classpath canary; do not retain or delete it without evidence.
-- [ ] Flywheel: re-audit the `0.6` no-op/compatibility assumptions against the
+- [x] Flywheel: re-audit the `0.6` no-op/compatibility assumptions against the
       actual new API and packaging.
-- [ ] Ponder: determine whether a new explicit dependency/staging rule is needed
+- [x] Ponder: determine whether a new explicit dependency/staging rule is needed
       or whether Create bundles it.
-- [ ] Veil: rerun the API/version assessment before retaining the Veil 1.20
+- [x] Veil: rerun the dependency/API canaries before retaining the Veil 1.20
       dependency, development patcher, or `mods.toml` range.
-- [ ] Deferred Create/Flywheel Mixins: compare them with the actual new classes.
+- [x] Deferred Create/Flywheel Mixins: compare them with the actual new classes.
       Create 6 may make some upstream code directly reusable; do not enable the
       whole upstream config blindly.
 
@@ -147,13 +179,14 @@ After updating build assumptions, under the confirmed Java version run:
 .\gradlew.bat :forge:build
 ```
 
-- [ ] No raw local mod jar appears on `compileClasspath`.
-- [ ] Every required local module resolves through ForgeGradle deobfuscation.
-- [ ] Exact versions and hashes in documentation match observed artifacts.
-- [ ] The second compile is up-to-date or otherwise has an explained reason.
-- [ ] Existing 12 networking tests still pass.
-- [ ] Current Mixin config/refmap counts are recorded, not assumed.
-- [ ] Build/package outputs remain ignored.
+- [x] No raw local mod jar appears on `compileClasspath`.
+- [x] Every required local module resolves through ForgeGradle deobfuscation.
+- [x] Exact versions and hashes in documentation match observed artifacts.
+- [x] The build's repeated compile was up-to-date.
+- [x] Existing 12 networking tests still pass.
+- [x] Current Mixin config/refmap counts remain the recorded M6 values; no
+      Mixin selection changed.
+- [x] Build/package outputs remain ignored.
 
 Do not run `runClient` or begin a feature milestone until the static rebaseline
 passes and the dependency delta is documented.

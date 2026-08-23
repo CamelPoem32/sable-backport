@@ -2,6 +2,8 @@
 
 Generated mechanically by `:forge:generateMixinBackportMatrix`. Upstream configs remain authoritative and unmodified.
 
+> Target rebaseline note (2026-08-22): the selected Mixin set is unchanged and the deferred Create/Flywheel graph remains disabled. Against Create `6.0.8`, Flywheel `1.0.5`, Registrate `MC1.20-1.3.3`, and Ponder `1.0.91`, 213 of 214 distinct imported target types exist. The sole missing type is `com.simibubi.create.AllDataComponents` in `SchematicPlacePacketMixin`, a Minecraft 1.21 data-component boundary. Old Create 0.5 and Flywheel 0.6 assumptions require per-feature re-audit; this does not authorize enabling the graph.
+
 ## Summary
 
 Total Mixins: 373

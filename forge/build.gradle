@@ -5,6 +5,9 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.jar.JarFile
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 plugins {
     id 'java-library'
@@ -50,6 +53,7 @@ minecraft {
             property 'mixin.debug.verbose', 'true'
             property 'mixin.debug.countInjections', 'true'
             property 'sable.runtimeSmoke', 'true'
+            property 'sable.targetRuntimeSmoke', 'true'
             property 'veil.disableImgui', 'true'
 
             mods {
@@ -167,6 +171,7 @@ sourceSets {
         java {
             srcDir rootProject.file('common/src/main/java')
             srcDir 'src/main/java'
+            srcDir project(':sable_companion_1_20').file('src/main/java')
             include 'dev/ryanhcode/sable/network/SablePacketCodec.java'
             include 'dev/ryanhcode/sable/network/packets/ClientboundSableSnapshotDualPacket.java'
             include 'dev/ryanhcode/sable/network/packets/ClientboundSableSnapshotInfoDualPacket.java'
@@ -191,9 +196,14 @@ sourceSets {
             include 'dev/ryanhcode/sable/physics/floating_block/FloatingBlockMaterial.java'
             include 'dev/ryanhcode/sable/util/SableBufferUtils.java'
             include 'dev/ryanhcode/sable/forge/network/ForgeSablePacketDispatcher.java'
+            include 'dev/ryanhcode/sable/companion/**/*.java'
         }
-        compileClasspath += sourceSets.main.compileClasspath
-        runtimeClasspath += output + compileClasspath
+        // Compile the small Java 17 Companion source set directly into the isolated protocol slice.
+        // Asking javac to consume its generated jar here leaves that jar locked on Windows.
+        compileClasspath = sourceSets.main.compileClasspath.filter {
+            !it.name.startsWith("sable-companion-common-${forge_minecraft_version}")
+        }
+        runtimeClasspath = output + compileClasspath
     }
 
     networkTest {
@@ -271,6 +281,11 @@ configurations {
         canBeResolved = true
         transitive = false
     }
+    createRuntimeMapped {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
 }
 
 def targetModpackModsDir = rootProject.file('../target_modpack/mods')
@@ -278,6 +293,8 @@ def targetCreateJar = new File(targetModpackModsDir, "create-${forge_minecraft_v
 def targetModpackRepository = layout.buildDirectory.dir('targetModpackRepository')
 def veilDevelopmentRuntime = layout.buildDirectory.file(
         "m6Runtime/Veil-forge-${forge_minecraft_version}-${forge_veil_version}-mapped-dev.jar")
+def createDevelopmentRuntime = layout.buildDirectory.file(
+        "runtimePreflight/create-${forge_minecraft_version}-${forge_create_version}-mapped-dev.jar")
 
 def expectedTargetArtifacts = [
         create    : [
@@ -285,21 +302,51 @@ def expectedTargetArtifacts = [
                 artifact: "create-${forge_minecraft_version}",
                 version: forge_create_version,
                 file   : "create-${forge_minecraft_version}-${forge_create_version}.jar",
-                sha256 : 'A18763BE04F6A7921D2E3BC5E9150B0BB5BC89B5EF45A607E93939972021F932'
+                sha256 : '6FBB910C367DBCE8E4FC7E5BF64B6EDD4DE980906ED00AF8E47E4AF843C0D9B0'
         ],
         flywheel : [
-                group  : 'com.jozufozu.flywheel',
+                group  : 'dev.engine-room.flywheel',
                 artifact: "flywheel-forge-${forge_minecraft_version}",
                 version: forge_flywheel_version,
                 file   : "flywheel-forge-${forge_minecraft_version}-${forge_flywheel_version}.jar",
-                sha256 : 'FD71EF28C2FC2694E661366A254CE1519791A39E7EC660A87A07212173AFF178'
+                range  : '[1.0,2.0)',
+                path   : "META-INF/jarjar/flywheel-forge-${forge_minecraft_version}-${forge_flywheel_version}.jar",
+                obfuscated: false,
+                sha256 : '316CA250F19244956B5F0CD75329309EA65A77B4B8DA854389B6A9222E7F427C'
         ],
         registrate: [
                 group  : 'com.tterrag.registrate',
                 artifact: 'Registrate',
                 version: forge_registrate_version,
                 file   : "Registrate-${forge_registrate_version}.jar",
+                range  : '[MC1.20-1.3.3,)',
+                path   : "META-INF/jarjar/Registrate-${forge_registrate_version}.jar",
+                obfuscated: false,
                 sha256 : '226862D4638B77273F4627FBAC871AA0B3AF584DDE377F4CE2CB0C7CC228CF00'
+        ],
+        ponder    : [
+                group  : 'net.createmod.ponder',
+                artifact: "Ponder-Forge-${forge_minecraft_version}",
+                version: forge_ponder_version,
+                file   : "Ponder-Forge-${forge_minecraft_version}-${forge_ponder_version}.jar",
+                range  : '[1.0.91,)',
+                path   : "META-INF/jarjar/Ponder-Forge-${forge_minecraft_version}-${forge_ponder_version}.jar",
+                obfuscated: false,
+                sha256 : '86E6B64372ABA6D9C56F2C35725EA26D8FEBF2C75EED9950566E7F2849443B34'
+        ]
+]
+
+def expectedCreateLibraries = [
+        mixinextras: [
+                group  : 'io.github.llamalad7',
+                artifact: 'mixinextras-forge',
+                version: forge_create_mixinextras_version,
+                range  : '[0.4.1,)',
+                path   : "META-INF/jarjar/mixinextras-forge-${forge_create_mixinextras_version}.jar",
+                obfuscated: false,
+                sha256 : '9D48CB0A40299D283248FDAD8B02C6D175C45B27F9BEC48EF63D7EE8A4EE3066',
+                nestedPath: "META-INF/jars/MixinExtras-${forge_create_mixinextras_version}.jar",
+                nestedSha256: 'D13C480D4E84128E76E8F509346F8137CEAA195091B3CFEAF4EBBA584CA68374'
         ]
 ]
 
@@ -317,9 +364,15 @@ def sha256 = { File file ->
     digest.digest().collect { String.format('%02X', it & 0xFF) }.join()
 }
 
+def sha256Bytes = { byte[] bytes ->
+    MessageDigest digest = MessageDigest.getInstance('SHA-256')
+    digest.update(bytes)
+    digest.digest().collect { String.format('%02X', it & 0xFF) }.join()
+}
+
 def prepareTargetModpackDependencies = tasks.register('prepareTargetModpackDependencies') {
     group = 'forge backport'
-    description = 'Validates and stages the exact Create, Flywheel, and Registrate target-modpack jars.'
+    description = 'Validates the exact Create JarJar inventory and stages four mapped target-modpack modules.'
 
     inputs.file(targetCreateJar)
     outputs.dir(targetModpackRepository)
@@ -346,6 +399,33 @@ def prepareTargetModpackDependencies = tasks.register('prepareTargetModpackDepen
             if (implementationVersion != createSpec.version) {
                 throw new GradleException("Expected Create ${createSpec.version}, found ${implementationVersion}")
             }
+            String builtOnMinecraft = createJar.manifest?.mainAttributes?.getValue('Built-On-Minecraft')
+            if (builtOnMinecraft != forge_minecraft_version) {
+                throw new GradleException(
+                        "Expected Create built for Minecraft ${forge_minecraft_version}, found ${builtOnMinecraft}"
+                )
+            }
+
+            def modsEntry = createJar.getJarEntry('META-INF/mods.toml')
+            if (modsEntry == null) {
+                throw new GradleException('Create jar does not contain META-INF/mods.toml')
+            }
+            String createMetadata
+            createJar.getInputStream(modsEntry).withCloseable { input ->
+                createMetadata = input.getText('UTF-8')
+            }
+            [
+                    'modId = "create"',
+                    'version = "6.0.8"',
+                    'modId = "flywheel"',
+                    'versionRange = "[1.0.0,2.0)"',
+                    'modId = "ponder"',
+                    'versionRange = "[0.8,)"'
+            ].each { expectedLine ->
+                if (!createMetadata.contains(expectedLine)) {
+                    throw new GradleException("Create metadata lacks exact baseline line: ${expectedLine}")
+                }
+            }
 
             Files.copy(
                     targetCreateJar.toPath(),
@@ -363,7 +443,15 @@ def prepareTargetModpackDependencies = tasks.register('prepareTargetModpackDepen
                 metadata = new JsonSlurper().parse(input)
             }
 
-            expectedTargetArtifacts.findAll { key, ignored -> key != 'create' }.each { key, spec ->
+            def expectedEmbedded = expectedTargetArtifacts.findAll { key, ignored -> key != 'create' }
+            expectedEmbedded.putAll(expectedCreateLibraries)
+            if (metadata.jars.size() != expectedEmbedded.size()) {
+                throw new GradleException(
+                        "Expected ${expectedEmbedded.size()} Create JarJar entries, found ${metadata.jars.size()}"
+                )
+            }
+
+            expectedEmbedded.each { key, spec ->
                 def embedded = metadata.jars.find { jar ->
                     jar.identifier.group == spec.group && jar.identifier.artifact == spec.artifact
                 }
@@ -375,18 +463,42 @@ def prepareTargetModpackDependencies = tasks.register('prepareTargetModpackDepen
                             "Expected ${spec.artifact} ${spec.version}, found ${embedded.version.artifactVersion}"
                     )
                 }
+                if (embedded.version.range != spec.range || embedded.path != spec.path ||
+                        embedded.isObfuscated != spec.obfuscated) {
+                    throw new GradleException(
+                            "Unexpected JarJar metadata for ${spec.group}:${spec.artifact}: ${embedded}"
+                    )
+                }
 
                 def embeddedEntry = createJar.getJarEntry(embedded.path as String)
                 if (embeddedEntry == null) {
                     throw new GradleException("Missing embedded jar entry: ${embedded.path}")
                 }
 
-                File stagedJar = new File(repositoryDir, spec.file)
+                byte[] embeddedBytes
                 createJar.getInputStream(embeddedEntry).withCloseable { input ->
-                    Files.copy(input, stagedJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    embeddedBytes = input.readAllBytes()
                 }
-                if (sha256(stagedJar) != spec.sha256) {
-                    throw new GradleException("Unexpected SHA-256 for embedded ${spec.file}")
+                if (sha256Bytes(embeddedBytes) != spec.sha256) {
+                    throw new GradleException("Unexpected SHA-256 for embedded ${embedded.path}")
+                }
+                if (spec.nestedPath != null) {
+                    byte[] nestedBytes = null
+                    new ZipInputStream(new ByteArrayInputStream(embeddedBytes)).withCloseable { nestedJar ->
+                        def nestedEntry
+                        while ((nestedEntry = nestedJar.nextEntry) != null) {
+                            if (nestedEntry.name == spec.nestedPath) {
+                                nestedBytes = nestedJar.readAllBytes()
+                                break
+                            }
+                        }
+                    }
+                    if (nestedBytes == null || sha256Bytes(nestedBytes) != spec.nestedSha256) {
+                        throw new GradleException("Unexpected nested payload ${spec.nestedPath}")
+                    }
+                }
+                if (spec.file != null) {
+                    Files.write(new File(repositoryDir, spec.file).toPath(), embeddedBytes)
                 }
             }
         } finally {
@@ -395,6 +507,12 @@ def prepareTargetModpackDependencies = tasks.register('prepareTargetModpackDepen
 
         expectedTargetArtifacts.each { key, spec ->
             logger.lifecycle("Staged ${spec.group}:${spec.artifact}:${spec.version} (${spec.sha256})")
+        }
+        expectedCreateLibraries.each { key, spec ->
+            logger.lifecycle("Validated embedded ${spec.group}:${spec.artifact}:${spec.version} (${spec.sha256})")
+            if (spec.nestedPath != null) {
+                logger.lifecycle("Validated nested ${spec.nestedPath} (${spec.nestedSha256})")
+            }
         }
     }
 }
@@ -416,6 +534,65 @@ def prepareVeilDevelopmentRuntime = tasks.register('prepareVeilDevelopmentRuntim
         logger.lifecycle(
                 "Prepared filtered Veil development runtime with ${aliasCount} mapped shadow aliases: ${outputJar}"
         )
+    }
+}
+
+def prepareCreateDevelopmentRuntime = tasks.register('prepareCreateDevelopmentRuntime') {
+    group = 'forge backport'
+    description = 'Removes Create\'s older MixinExtras wrapper from the mapped development runtime only.'
+    dependsOn prepareTargetModpackDependencies
+    inputs.files(configurations.createRuntimeMapped)
+    outputs.file(createDevelopmentRuntime)
+
+    doLast {
+        File inputJar = configurations.createRuntimeMapped.singleFile
+        File outputJar = createDevelopmentRuntime.get().asFile
+        outputJar.parentFile.mkdirs()
+        String oldMixinExtras = expectedCreateLibraries.mixinextras.path
+        int removedMetadataEntries = 0
+        int removedPayloads = 0
+
+        ZipInputStream input = new ZipInputStream(new BufferedInputStream(new FileInputStream(inputJar)))
+        ZipOutputStream output = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(outputJar)))
+        try {
+            def entry
+            while ((entry = input.nextEntry) != null) {
+                if (entry.name == oldMixinExtras) {
+                    removedPayloads++
+                    continue
+                }
+
+                byte[] contents = input.readAllBytes()
+                if (entry.name == 'META-INF/jarjar/metadata.json') {
+                    def metadata = new JsonSlurper().parseText(new String(contents, 'UTF-8'))
+                    int originalSize = metadata.jars.size()
+                    metadata.jars.removeAll { nested ->
+                        nested.identifier.group == expectedCreateLibraries.mixinextras.group
+                                && nested.identifier.artifact == expectedCreateLibraries.mixinextras.artifact
+                    }
+                    removedMetadataEntries += originalSize - metadata.jars.size()
+                    contents = groovy.json.JsonOutput.prettyPrint(
+                            groovy.json.JsonOutput.toJson(metadata)).getBytes('UTF-8')
+                }
+
+                ZipEntry outputEntry = new ZipEntry(entry.name)
+                outputEntry.time = entry.time
+                output.putNextEntry(outputEntry)
+                output.write(contents)
+                output.closeEntry()
+            }
+        } finally {
+            input.close()
+            output.close()
+        }
+
+        if (removedMetadataEntries != 1 || removedPayloads != 1) {
+            throw new GradleException(
+                    "Expected to suppress one Create MixinExtras metadata row and payload, removed "
+                            + "metadata=${removedMetadataEntries}, payloads=${removedPayloads}"
+            )
+        }
+        logger.lifecycle("Prepared Create development runtime without nested MixinExtras 0.4.1: ${outputJar}")
     }
 }
 
@@ -444,6 +621,12 @@ dependencies {
     compileOnly fg.deobf("local.target:create-${forge_minecraft_version}:${forge_create_version}")
     compileOnly fg.deobf("local.target:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
     compileOnly fg.deobf("local.target:Registrate:${forge_registrate_version}")
+    compileOnly fg.deobf("local.target:Ponder-Forge-${forge_minecraft_version}:${forge_ponder_version}")
+    runtimeOnly files(prepareCreateDevelopmentRuntime)
+    runtimeOnly fg.deobf("local.target:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
+    runtimeOnly fg.deobf("local.target:Ponder-Forge-${forge_minecraft_version}:${forge_ponder_version}")
+
+    createRuntimeMapped fg.deobf("local.target:create-${forge_minecraft_version}:${forge_create_version}")
 
     compileOnly fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}:slim")
     runtimeOnly files(prepareVeilDevelopmentRuntime)
@@ -472,9 +655,10 @@ tasks.named('processM6SableRunResources') {
 
 tasks.register('verifyRunClientClasspath') {
     group = 'verification'
-    description = 'Verifies the isolated M6 runClient classpath and optional Create/Flywheel boundary.'
+    description = 'Verifies the exact Create 6 target runtime and the retained optional-linkage boundary.'
     dependsOn tasks.named('classes')
     dependsOn project(':sable_companion_1_20').tasks.named('classes')
+    dependsOn prepareCreateDevelopmentRuntime
     dependsOn prepareVeilDevelopmentRuntime
 
     doLast {
@@ -549,6 +733,17 @@ tasks.register('verifyRunClientClasspath') {
         def artifactIds = artifacts.collect {
             "${it.moduleVersion.id.group}:${it.name}:${it.moduleVersion.id.version}"
         }
+        File patchedCreate = createDevelopmentRuntime.get().asFile.canonicalFile
+        if (!runtimeFiles.contains(patchedCreate)) {
+            throw new GradleException('Filtered mapped Create 6.0.8 is absent from runClient runtimeClasspath')
+        }
+        def leakedCreateFiles = runtimeFiles.findAll { runtimeFile ->
+            runtimeFile.name.toLowerCase(Locale.ROOT).contains("create-${forge_minecraft_version}")
+                    && runtimeFile.canonicalFile != patchedCreate
+        }
+        if (!leakedCreateFiles.isEmpty()) {
+            throw new GradleException("Raw or unfiltered Create artifact leaked onto runClient: ${leakedCreateFiles}")
+        }
         File patchedVeil = veilDevelopmentRuntime.get().asFile.canonicalFile
         if (!runtimeFiles.any { it.canonicalFile == patchedVeil }) {
             throw new GradleException('Patched mapped Veil 1.20 is absent from runClient runtimeClasspath')
@@ -564,17 +759,112 @@ tasks.register('verifyRunClientClasspath') {
         } finally {
             patchedVeilJar.close()
         }
-        def forbidden = artifactIds.findAll { coordinate ->
-            coordinate.contains(':create-1.20.1:') ||
-                    coordinate.contains(':flywheel-forge-1.20.1:') ||
-                    coordinate.contains(':Registrate:')
+        Map<String, String> expectedRuntimeModules = [
+                ("flywheel-forge-${forge_minecraft_version}".toString()) : forge_flywheel_version.toString(),
+                ("Ponder-Forge-${forge_minecraft_version}".toString())    : forge_ponder_version.toString()
+        ]
+        def targetRuntimeArtifacts = artifacts.findAll { artifact ->
+            artifact.moduleVersion.id.group == 'local.target'
         }
-        if (!forbidden.isEmpty()) {
-            throw new GradleException("Optional Create stack leaked into the core smoke runtime: ${forbidden}")
+        if ((targetRuntimeArtifacts.collect { it.name } as Set) != expectedRuntimeModules.keySet()) {
+            throw new GradleException(
+                    "Expected exact target runtime modules ${expectedRuntimeModules.keySet()}, resolved "
+                            + "${targetRuntimeArtifacts.collect { it.moduleVersion.id }}"
+            )
+        }
+        File targetRepository = targetModpackRepository.get().asFile.canonicalFile
+        targetRuntimeArtifacts.each { artifact ->
+            String expectedVersion = expectedRuntimeModules[artifact.name]
+            String resolvedVersion = artifact.moduleVersion.id.version
+            String expectedMappedVersion = "${expectedVersion}_mapped_official_${forge_minecraft_version}"
+            File resolvedFile = artifact.file.canonicalFile
+            if (resolvedVersion != expectedMappedVersion) {
+                throw new GradleException(
+                        "Unexpected mapped runtime version for ${artifact.name}: ${artifact.moduleVersion.id}; "
+                                + "expected ${expectedMappedVersion}"
+                )
+            }
+            if (resolvedFile.toPath().startsWith(targetRepository.toPath())) {
+                throw new GradleException("Raw target artifact leaked onto runClient runtimeClasspath: ${resolvedFile}")
+            }
+            if (!runtimeFiles.contains(resolvedFile)) {
+                throw new GradleException("Mapped target artifact is absent from sourceSets.main.runtimeClasspath: ${resolvedFile}")
+            }
+        }
+        def obsoleteArtifacts = artifactIds.findAll { coordinate ->
+            coordinate.contains(':create-1.20.1:0.5.1.j') ||
+                    coordinate.contains(':flywheel-forge-1.20.1:0.6.11-13')
+        }
+        def obsoleteFiles = runtimeFiles.findAll { runtimeFile ->
+            runtimeFile.name.contains('0.5.1.j') || runtimeFile.name.contains('0.6.11-13')
+        }
+        if (!obsoleteArtifacts.isEmpty() || !obsoleteFiles.isEmpty()) {
+            throw new GradleException(
+                    "Obsolete Create/Flywheel runtime detected: artifacts=${obsoleteArtifacts}, files=${obsoleteFiles}"
+            )
+        }
+
+        requireEntry('com/simibubi/create/Create.class')
+        requireEntry('dev/engine_room/flywheel/api/visualization/VisualizationManager.class')
+        requireEntry('net/createmod/catnip/levelWrappers/WrappedServerLevel.class')
+
+        JarFile mappedCreateJar = new JarFile(patchedCreate)
+        try {
+            def jarJarMetadataEntry = mappedCreateJar.getJarEntry('META-INF/jarjar/metadata.json')
+            if (jarJarMetadataEntry == null) {
+                throw new GradleException('Filtered mapped Create runtime lacks JarJar metadata')
+            }
+            def createJarJarMetadata = new JsonSlurper().parse(
+                    mappedCreateJar.getInputStream(jarJarMetadataEntry))
+            Set<String> actualNestedCoordinates = createJarJarMetadata.jars.collect { nested ->
+                "${nested.identifier.group}:${nested.identifier.artifact}:${nested.version.artifactVersion}".toString()
+            } as Set
+            Set<String> expectedNestedCoordinates = [
+                    "${expectedTargetArtifacts.registrate.group}:${expectedTargetArtifacts.registrate.artifact}:${expectedTargetArtifacts.registrate.version}",
+                    "${expectedTargetArtifacts.flywheel.group}:${expectedTargetArtifacts.flywheel.artifact}:${expectedTargetArtifacts.flywheel.version}",
+                    "${expectedTargetArtifacts.ponder.group}:${expectedTargetArtifacts.ponder.artifact}:${expectedTargetArtifacts.ponder.version}"
+            ] as Set
+            if (actualNestedCoordinates != expectedNestedCoordinates) {
+                throw new GradleException(
+                        "Filtered Create JarJar inventory differs from the exact development baseline: "
+                                + "${actualNestedCoordinates}"
+                )
+            }
+            if (mappedCreateJar.getJarEntry(expectedCreateLibraries.mixinextras.path) != null) {
+                throw new GradleException('Create MixinExtras 0.4.1 wrapper remains in the development runtime')
+            }
+            String registratePath = expectedTargetArtifacts.registrate.path
+            def registrateEntry = mappedCreateJar.getJarEntry(registratePath)
+            if (registrateEntry == null) {
+                throw new GradleException("Mapped Create runtime is missing nested ${registratePath}")
+            }
+            byte[] registrateBytes = mappedCreateJar.getInputStream(registrateEntry).readAllBytes()
+            String mappedRegistrateHash = 'AB90001E9EC42922DA4E499CDAFF6D7F1F6E78432CE71555397931804E94E5FB'
+            if (sha256Bytes(registrateBytes) != mappedRegistrateHash) {
+                throw new GradleException("Mapped Create runtime has an unexpected nested Registrate payload")
+            }
+            ZipInputStream registrateZip = new ZipInputStream(new ByteArrayInputStream(registrateBytes))
+            try {
+                boolean foundCanary = false
+                def entry
+                while ((entry = registrateZip.nextEntry) != null) {
+                    if (entry.name == 'com/tterrag/registrate/AbstractRegistrate.class') {
+                        foundCanary = true
+                        break
+                    }
+                }
+                if (!foundCanary) {
+                    throw new GradleException('Nested Registrate runtime lacks AbstractRegistrate.class')
+                }
+            } finally {
+                registrateZip.close()
+            }
+        } finally {
+            mappedCreateJar.close()
         }
 
         File classesDir = sourceSets.main.output.classesDirs.singleFile
-        String createName = 'com/simibubi/create/foundation/utility/worldWrappers/WrappedServerWorld'
+        String wrappedLevelName = 'net/createmod/catnip/levelWrappers/WrappedServerLevel'
         def classReferences = { String needle ->
             fileTree(classesDir).matching { include '**/*.class' }.files.findAll { classFile ->
                 new String(Files.readAllBytes(classFile.toPath()), java.nio.charset.StandardCharsets.ISO_8859_1)
@@ -582,25 +872,33 @@ tasks.register('verifyRunClientClasspath') {
                         .contains(needle.toLowerCase(Locale.ROOT))
             }.collect { classesDir.toPath().relativize(it.toPath()).toString().replace('\\', '/') }.sort()
         }
-        def createReferences = classReferences(createName)
-        def expectedCreateReference = [
-                'dev/ryanhcode/sable/forge/platform/SablePlatformImpl$CreateWrappedLevelCheck.class'
+        def wrappedLevelReferences = classReferences(wrappedLevelName)
+        def expectedWrappedLevelReference = [
+                'dev/ryanhcode/sable/forge/platform/SablePlatformImpl$PonderWrappedLevelCheck.class'
         ]
-        if (createReferences != expectedCreateReference) {
-            throw new GradleException("Unexpected selected-core Create references: ${createReferences}")
+        if (wrappedLevelReferences != expectedWrappedLevelReference) {
+            throw new GradleException("Unexpected selected-core Ponder references: ${wrappedLevelReferences}")
         }
         def flywheelReferences = (classReferences('com/jozufozu/flywheel')
                 + classReferences('dev/engine_room/flywheel')).unique().sort()
         if (!flywheelReferences.isEmpty()) {
             throw new GradleException("Flywheel references leaked into selected core classes: ${flywheelReferences}")
         }
+        def createReferences = classReferences('com/simibubi/create')
+        if (!createReferences.isEmpty()) {
+            throw new GradleException("Create references leaked into selected core classes: ${createReferences}")
+        }
+        def catnipReferences = classReferences('net/createmod')
+        if (catnipReferences != expectedWrappedLevelReference) {
+            throw new GradleException("Unexpected selected-core Catnip/Ponder references: ${catnipReferences}")
+        }
 
         File outerPlatform = new File(classesDir,
                 'dev/ryanhcode/sable/forge/platform/SablePlatformImpl.class')
         String outerBytes = new String(Files.readAllBytes(outerPlatform.toPath()),
                 java.nio.charset.StandardCharsets.ISO_8859_1)
-        if (outerBytes.contains('WrappedServerWorld')) {
-            throw new GradleException('Create WrappedServerWorld leaked into the outer SablePlatformImpl class')
+        if (outerBytes.contains('WrappedServerLevel')) {
+            throw new GradleException('Ponder WrappedServerLevel leaked into the outer SablePlatformImpl class')
         }
 
         File modsToml = file('src/main/resources/META-INF/mods.toml')
@@ -658,14 +956,29 @@ tasks.register('verifyRunClientClasspath') {
             }
         }
 
-        logger.lifecycle('Verified M6 runClient: Companion and mapped Veil present; Create/Flywheel absent and optional')
-        logger.lifecycle("Verified Create isolation: ${expectedCreateReference[0]} is the only compiled reference")
+        logger.lifecycle(
+                'Verified target runClient: filtered mapped Create 6.0.8, mapped Flywheel 1.0.5/Ponder 1.0.91; '
+                        + 'Create-owned Registrate MC1.20-1.3.3 JarJar; Sable MixinExtras 0.5.3; '
+                        + 'mapped Veil artifact 1.0.0.296; old stack absent'
+        )
+        logger.lifecycle("Verified Ponder isolation: ${expectedWrappedLevelReference[0]} is the only compiled reference")
         logger.lifecycle('Verified Minecraft 1.21 data paths and tag references are adapted for Forge 1.20.1')
     }
 }
 
 tasks.named('compileNetworkProtocolJava') {
-    dependsOn ':sable_companion_1_20:compileJava'
+    dependsOn ':sable_companion_1_20:classes'
+    // ForgeGradle mutates Java source-set classpaths during configuration. Pin the task to the
+    // filtered view; the Java 17 Companion sources are compiled into this isolated test slice.
+    classpath = sourceSets.networkProtocol.compileClasspath
+    doFirst {
+        def companionJars = classpath.files.findAll {
+            it.name.startsWith("sable-companion-common-${forge_minecraft_version}") && it.name.endsWith('.jar')
+        }
+        if (!companionJars.isEmpty()) {
+            throw new GradleException("Generated Companion jar leaked onto networkTest javac classpath: ${companionJars}")
+        }
+    }
     options.fork = true
     options.incremental = false
 }
@@ -959,24 +1272,35 @@ tasks.register('verifyForgeAccessTransformer') {
             forgeJar.close()
         }
 
-        def createArtifact = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.find { artifact ->
-            artifact.moduleVersion.id.group == 'local.target' && artifact.name == "create-${forge_minecraft_version}"
+        def localArtifacts = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
+            artifact.moduleVersion.id.group == 'local.target'
         }
-        if (createArtifact == null) {
-            throw new GradleException('Mapped Create artifact is absent from compileClasspath')
+        def createArtifact = localArtifacts.find { it.name == "create-${forge_minecraft_version}" }
+        def ponderArtifact = localArtifacts.find { it.name == "Ponder-Forge-${forge_minecraft_version}" }
+        if (createArtifact == null || ponderArtifact == null) {
+            throw new GradleException('Mapped Create/Ponder artifacts are absent from compileClasspath')
         }
         JarFile createJar = new JarFile(createArtifact.file)
         try {
-            String wrappedClass = 'com/simibubi/create/foundation/utility/worldWrappers/WrappedServerWorld.class'
-            if (createJar.getJarEntry(wrappedClass) == null) {
-                throw new GradleException("Create ${forge_create_version} lacks ${wrappedClass}")
+            String obsoleteClass = 'com/simibubi/create/foundation/utility/worldWrappers/WrappedServerWorld.class'
+            if (createJar.getJarEntry(obsoleteClass) != null) {
+                throw new GradleException("Create ${forge_create_version} unexpectedly retains ${obsoleteClass}")
             }
         } finally {
             createJar.close()
         }
+        JarFile ponderJar = new JarFile(ponderArtifact.file)
+        try {
+            String wrappedClass = 'net/createmod/catnip/levelWrappers/WrappedServerLevel.class'
+            if (ponderJar.getJarEntry(wrappedClass) == null) {
+                throw new GradleException("Ponder ${forge_ponder_version} lacks ${wrappedClass}")
+            }
+        } finally {
+            ponderJar.close()
+        }
 
         logger.lifecycle("Verified ${curatedAt.readLines().findAll { it.trim() }.size()} Forge AT entries in ${mappedForge}")
-        logger.lifecycle('Verified Create 0.5.1.j WrappedServerWorld boundary')
+        logger.lifecycle('Verified Ponder 1.0.91 WrappedServerLevel boundary and obsolete Create wrapper absence')
     }
 }
 
@@ -1188,3 +1512,5 @@ tasks.named('jarJar') {
 tasks.named('sourcesJar') {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
+
+apply from: rootProject.file('gradle/runtime-preflight.gradle')

@@ -42,8 +42,52 @@ public final class SableForgeRuntimeSmoke {
     private static final AtomicBoolean SERVER_ACTIVE = new AtomicBoolean();
     private static final AtomicInteger COMMON_CONFIG_LOADS = new AtomicInteger();
     private static final AtomicInteger CLIENT_CONFIG_LOADS = new AtomicInteger();
+    private static final AtomicInteger COMMAND_REGISTRATIONS = new AtomicInteger();
+    private static final AtomicInteger RELOAD_LISTENER_REGISTRATIONS = new AtomicInteger();
+    private static final AtomicInteger SERVER_STARTING_EVENTS = new AtomicInteger();
+    private static final AtomicInteger SERVER_STARTED_EVENTS = new AtomicInteger();
+    private static final AtomicInteger SERVER_STOPPING_EVENTS = new AtomicInteger();
+    private static final AtomicInteger SERVER_STOPPED_EVENTS = new AtomicInteger();
+    private static final AtomicInteger PLAYER_LOGINS = new AtomicInteger();
+    private static final AtomicInteger PLAYER_LOGOUTS = new AtomicInteger();
+    private static final AtomicInteger CLIENT_LOGOUTS = new AtomicInteger();
+    private static final AtomicInteger TARGET_PACKET_STAGE = new AtomicInteger(-1);
+    private static volatile String targetPacketSequence;
     private static final String ACTIVE_COMPANION = ActiveSableCompanion.class.getName();
     private static final String DEFAULT_COMPANION = DefaultSableCompanion.class.getName();
+
+    static final class LifecycleBaseline {
+        private final int starting;
+        private final int started;
+        private final int stopping;
+        private final int stopped;
+        private final int commands;
+        private final int reloadListeners;
+        private final int playerLogins;
+        private final int playerLogouts;
+        private final int clientLogouts;
+
+        private LifecycleBaseline(
+                final int starting,
+                final int started,
+                final int stopping,
+                final int stopped,
+                final int commands,
+                final int reloadListeners,
+                final int playerLogins,
+                final int playerLogouts,
+                final int clientLogouts) {
+            this.starting = starting;
+            this.started = started;
+            this.stopping = stopping;
+            this.stopped = stopped;
+            this.commands = commands;
+            this.reloadListeners = reloadListeners;
+            this.playerLogins = playerLogins;
+            this.playerLogouts = playerLogouts;
+            this.clientLogouts = clientLogouts;
+        }
+    }
 
     private SableForgeRuntimeSmoke() {
     }
@@ -91,11 +135,12 @@ public final class SableForgeRuntimeSmoke {
     }
 
     static void commandRegistered() {
-        pass("lifecycle", "Sable command registered");
+        pass("lifecycle", "Sable command registered cycle=" + COMMAND_REGISTRATIONS.incrementAndGet());
     }
 
     static void reloadListenersRegistered() {
-        pass("lifecycle", "server reload listeners registered");
+        pass("lifecycle", "server reload listeners registered cycle="
+                + RELOAD_LISTENER_REGISTRATIONS.incrementAndGet());
     }
 
     static void dataPackSync(final int players) {
@@ -107,7 +152,7 @@ public final class SableForgeRuntimeSmoke {
     }
 
     static void clientLogout() {
-        pass("lifecycle", "client logout cleanup");
+        pass("lifecycle", "client logout cleanup cycle=" + CLIENT_LOGOUTS.incrementAndGet());
     }
 
     public static <T extends SableTCPPacket> void packetThread(
@@ -119,8 +164,123 @@ public final class SableForgeRuntimeSmoke {
         }
         require(expectedThread, side + " packet ran off its main thread: "
                 + registration.packetType().getName());
+        recordTargetPacket(side, registration.packetType().getSimpleName());
         pass("network", side + " packet id=" + registration.id()
                 + " type=" + registration.packetType().getSimpleName());
+    }
+
+    static void beginTargetPacketSequence(final String sequence) {
+        require(TARGET_PACKET_STAGE.compareAndSet(-1, 0),
+                "Packet sequence already active: " + targetPacketSequence);
+        targetPacketSequence = sequence;
+        pass("network", "target sequence started=" + sequence);
+    }
+
+    static void verifyTargetPacketSequence() {
+        require(TARGET_PACKET_STAGE.compareAndSet(2, -1),
+                "Target packet sequence did not reach StartTracking -> Finalize: "
+                        + targetPacketSequence + " stage=" + TARGET_PACKET_STAGE.get());
+        pass("network", "target sequence ordered StartTracking -> Finalize: " + targetPacketSequence);
+        targetPacketSequence = null;
+    }
+
+    static LifecycleBaseline captureLifecycleBaseline(final String phase) {
+        final LifecycleBaseline baseline = new LifecycleBaseline(
+                SERVER_STARTING_EVENTS.get(),
+                SERVER_STARTED_EVENTS.get(),
+                SERVER_STOPPING_EVENTS.get(),
+                SERVER_STOPPED_EVENTS.get(),
+                COMMAND_REGISTRATIONS.get(),
+                RELOAD_LISTENER_REGISTRATIONS.get(),
+                PLAYER_LOGINS.get(),
+                PLAYER_LOGOUTS.get(),
+                CLIENT_LOGOUTS.get());
+        pass("lifecycle", phase + " baseline captured starting=" + baseline.starting
+                + " started=" + baseline.started
+                + " stopping=" + baseline.stopping
+                + " stopped=" + baseline.stopped
+                + " commands=" + baseline.commands
+                + " reloadListeners=" + baseline.reloadListeners
+                + " playerLogins=" + baseline.playerLogins
+                + " playerLogouts=" + baseline.playerLogouts
+                + " clientLogouts=" + baseline.clientLogouts);
+        return baseline;
+    }
+
+    static void verifyFirstIntegratedServerStopped(final LifecycleBaseline baseline) {
+        verifyLifecycleDeltas(baseline, 0, 0, 1, 1, 0, 0, 0, 1, 1, false, "first server stopped");
+    }
+
+    static void verifySecondIntegratedServerActive(final LifecycleBaseline baseline) {
+        verifyLifecycleDeltas(baseline, 1, 1, 0, 0, 1, 1, 1, 0, -1, true, "second server active");
+    }
+
+    static void verifySecondIntegratedServerStopped(final LifecycleBaseline baseline) {
+        verifyLifecycleDeltas(baseline, 0, 0, 1, 1, 0, 0, 0, 1, 1, false, "second server stopped");
+    }
+
+    private static void recordTargetPacket(final String side, final String packetType) {
+        if (TARGET_PACKET_STAGE.get() < 0 || !side.equals("client")) {
+            return;
+        }
+        if (packetType.equals("ClientboundStartTrackingSubLevelPacket")) {
+            require(TARGET_PACKET_STAGE.compareAndSet(0, 1),
+                    "Duplicate or out-of-order StartTracking in " + targetPacketSequence);
+        } else if (packetType.equals("ClientboundFinalizeSubLevelPacket")) {
+            require(TARGET_PACKET_STAGE.compareAndSet(1, 2),
+                    "Finalize arrived before StartTracking in " + targetPacketSequence);
+        }
+    }
+
+    private static void verifyLifecycleDeltas(
+            final LifecycleBaseline baseline,
+            final int starting,
+            final int started,
+            final int stopping,
+            final int stopped,
+            final int commands,
+            final int reloadListeners,
+            final int playerLogins,
+            final int playerLogouts,
+            final int clientLogouts,
+            final boolean active,
+            final String phase) {
+        require(baseline != null, phase + " lifecycle baseline was not captured");
+        requireDelta(SERVER_STARTING_EVENTS.get(), baseline.starting, starting, phase, "starting events");
+        requireDelta(SERVER_STARTED_EVENTS.get(), baseline.started, started, phase, "started events");
+        requireDelta(SERVER_STOPPING_EVENTS.get(), baseline.stopping, stopping, phase, "stopping events");
+        requireDelta(SERVER_STOPPED_EVENTS.get(), baseline.stopped, stopped, phase, "stopped events");
+        requireDelta(COMMAND_REGISTRATIONS.get(), baseline.commands, commands, phase, "command registrations");
+        requireDelta(RELOAD_LISTENER_REGISTRATIONS.get(), baseline.reloadListeners, reloadListeners,
+                phase, "reload listener registrations");
+        requireDelta(PLAYER_LOGINS.get(), baseline.playerLogins, playerLogins, phase, "player logins");
+        requireDelta(PLAYER_LOGOUTS.get(), baseline.playerLogouts, playerLogouts, phase, "player logouts");
+        if (clientLogouts >= 0) {
+            requireDelta(CLIENT_LOGOUTS.get(), baseline.clientLogouts, clientLogouts, phase, "client logouts");
+        }
+        require(COMMON_CONFIG_LOADS.get() == 1 && CLIENT_CONFIG_LOADS.get() == 1,
+                phase + " config loads common=" + COMMON_CONFIG_LOADS.get()
+                        + " client=" + CLIENT_CONFIG_LOADS.get());
+        require(COMMON_INSTALLED.get() && CLIENT_INSTALLED.get(),
+                phase + " runtime probes common=" + COMMON_INSTALLED.get()
+                        + " client=" + CLIENT_INSTALLED.get());
+        require(SERVER_ACTIVE.get() == active,
+                phase + " server active=" + SERVER_ACTIVE.get() + ", expected=" + active);
+        pass("lifecycle", phase + " delta duplicate-registration audit passed");
+    }
+
+    private static void requireDelta(
+            final int actual,
+            final int baseline,
+            final int expectedDelta,
+            final String phase,
+            final String label) {
+        final int delta = actual - baseline;
+        require(delta == expectedDelta,
+                phase + " " + label + " delta=" + delta
+                        + ", expected=" + expectedDelta
+                        + " actual=" + actual
+                        + " baseline=" + baseline);
     }
 
     private static void verifyCompanionSelection() {
@@ -226,22 +386,23 @@ public final class SableForgeRuntimeSmoke {
 
     private static void onServerStarting(final ServerStartingEvent event) {
         require(SERVER_ACTIVE.compareAndSet(false, true), "A server started while another smoke server was active");
-        pass("lifecycle", "server starting thread=" + Thread.currentThread().getName());
+        pass("lifecycle", "server starting cycle=" + SERVER_STARTING_EVENTS.incrementAndGet()
+                + " thread=" + Thread.currentThread().getName());
     }
 
     private static void onServerStarted(final ServerStartedEvent event) {
         require(SERVER_ACTIVE.get(), "Server started without a preceding starting event");
-        pass("lifecycle", "server started");
+        pass("lifecycle", "server started cycle=" + SERVER_STARTED_EVENTS.incrementAndGet());
     }
 
     private static void onServerStopping(final ServerStoppingEvent event) {
         require(SERVER_ACTIVE.get(), "Server stopping without an active server");
-        pass("lifecycle", "server stopping");
+        pass("lifecycle", "server stopping cycle=" + SERVER_STOPPING_EVENTS.incrementAndGet());
     }
 
     private static void onServerStopped(final ServerStoppedEvent event) {
         require(SERVER_ACTIVE.compareAndSet(true, false), "Server stopped without an active smoke server");
-        pass("lifecycle", "server stopped");
+        pass("lifecycle", "server stopped cycle=" + SERVER_STOPPED_EVENTS.incrementAndGet());
     }
 
     private static void onLevelLoad(final LevelEvent.Load event) {
@@ -259,11 +420,13 @@ public final class SableForgeRuntimeSmoke {
     }
 
     private static void onPlayerLogin(final PlayerEvent.PlayerLoggedInEvent event) {
-        pass("lifecycle", "player login=" + event.getEntity().getScoreboardName());
+        pass("lifecycle", "player login cycle=" + PLAYER_LOGINS.incrementAndGet()
+                + " player=" + event.getEntity().getScoreboardName());
     }
 
     private static void onPlayerLogout(final PlayerEvent.PlayerLoggedOutEvent event) {
-        pass("lifecycle", "player logout=" + event.getEntity().getScoreboardName());
+        pass("lifecycle", "player logout cycle=" + PLAYER_LOGOUTS.incrementAndGet()
+                + " player=" + event.getEntity().getScoreboardName());
     }
 
     private static void require(final boolean condition, final String message) {

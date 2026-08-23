@@ -16,12 +16,15 @@ import dev.ryanhcode.sable.api.physics.object.rope.RopePhysicsObject;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
+import dev.ryanhcode.sable.companion.math.BoundingBox3i;
+import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.companion.math.Pose3d;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.plot.EmbeddedPlotLevelAccessor;
 import dev.ryanhcode.sable.sublevel.plot.LevelPlot;
+import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
 import dev.ryanhcode.sable.sublevel.plot.ServerLevelPlot;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import dev.ryanhcode.sable.util.SchematicLoader;
@@ -33,6 +36,7 @@ import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.blocks.BlockStateArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -474,11 +478,45 @@ public class SableSpawnCommands {
         final ChunkPos center = plot.getCenterChunk();
         plot.newEmptyChunk(center);
 
-        plot.getEmbeddedLevelAccessor().setBlock(BlockPos.ZERO, material, 3);
+        final EmbeddedPlotLevelAccessor accessor = plot.getEmbeddedLevelAccessor();
+        final BlockState oldState = accessor.getBlockState(BlockPos.ZERO);
+        accessor.setBlock(BlockPos.ZERO, material, 3);
+        finishInitialSpawnBlock(subLevel, BlockPos.ZERO, oldState, material);
         subLevel.updateLastPose();
 
         source.sendSuccess(() -> Component.translatable("commands.sable.spawn.success", "block"), false);
         return 1;
+    }
+
+    private static void finishInitialSpawnBlock(final SubLevel subLevel, final BlockPos localBlockPos,
+                                                final BlockState oldState, final BlockState newState) {
+        if (!(subLevel instanceof final ServerSubLevel serverSubLevel)) {
+            return;
+        }
+
+        final ServerLevelPlot plot = serverSubLevel.getPlot();
+        final BlockPos globalBlockPos = plot.getCenterBlock().offset(localBlockPos);
+        final PlotChunkHolder chunkHolder = plot.getChunkHolder(plot.toLocal(new ChunkPos(globalBlockPos)));
+        if (chunkHolder == null) {
+            throw new IllegalStateException("Initial spawn block is not associated with a plot chunk: " + globalBlockPos);
+        }
+
+        chunkHolder.handleBlockChange(globalBlockPos.getX() & SectionPos.SECTION_MASK, globalBlockPos.getY(),
+                globalBlockPos.getZ() & SectionPos.SECTION_MASK, oldState, newState);
+        plot.updateBoundingBox();
+        plot.expandIfNecessary(globalBlockPos);
+
+        final BoundingBox3ic bounds = plot.getBoundingBox();
+        if (bounds == BoundingBox3i.EMPTY || bounds.volume() <= 0) {
+            throw new IllegalStateException("Initial spawn block produced invalid plot bounds: " + bounds);
+        }
+
+        serverSubLevel.buildMassTracker();
+        serverSubLevel.updateMergedMassData(1.0f);
+        if (serverSubLevel.getMassTracker().isInvalid()) {
+            throw new IllegalStateException("Initial spawn block produced invalid mass data");
+        }
+        serverSubLevel.updateBoundingBox();
     }
 
     private static int spawnPlatform(final CommandContext<CommandSourceStack> ctx, final BlockState material, final @Nullable String name) throws CommandSyntaxException {

@@ -1,0 +1,693 @@
+import groovy.json.JsonSlurper
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.Opcodes
+import org.objectweb.asm.Type
+import org.objectweb.asm.tree.AnnotationNode
+import org.objectweb.asm.tree.ClassNode
+import org.objectweb.asm.tree.FieldInsnNode
+import org.objectweb.asm.tree.MethodNode
+
+import java.security.MessageDigest
+import java.util.jar.JarFile
+
+def runtimePreflightCreate = layout.buildDirectory.file(
+        "runtimePreflight/create-${forge_minecraft_version}-${forge_create_version}-mapped-dev.jar")
+def runtimePreflightVeil = layout.buildDirectory.file(
+        "m6Runtime/Veil-forge-${forge_minecraft_version}-${forge_veil_version}-mapped-dev.jar")
+
+def preflightSha256 = { byte[] bytes ->
+    MessageDigest digest = MessageDigest.getInstance('SHA-256')
+    digest.update(bytes)
+    digest.digest().collect { String.format('%02X', it & 0xFF) }.join()
+}
+
+def jarEntryBytes = { File file, String path ->
+    JarFile jar = new JarFile(file)
+    try {
+        def entry = jar.getJarEntry(path)
+        return entry == null ? null : jar.getInputStream(entry).readAllBytes()
+    } finally {
+        jar.close()
+    }
+}
+
+def jarPackages = { File file ->
+    JarFile jar = new JarFile(file)
+    try {
+        return jar.entries().findAll { entry ->
+            !entry.directory && entry.name.endsWith('.class') && entry.name.contains('/')
+                    && !entry.name.startsWith('META-INF/versions/')
+        }.collect { entry -> entry.name.substring(0, entry.name.lastIndexOf('/')).replace('/', '.') } as Set
+    } finally {
+        jar.close()
+    }
+}
+
+def jarServices = { File file ->
+    Map<String, Set<String>> services = [:].withDefault { [] as Set }
+    JarFile jar = new JarFile(file)
+    try {
+        jar.entries().findAll { entry ->
+            !entry.directory && entry.name.startsWith('META-INF/services/')
+        }.each { entry ->
+            services[entry.name.substring('META-INF/services/'.length())].addAll(
+                    jar.getInputStream(entry).getText('UTF-8').readLines()
+                            .collect { it.replaceFirst('#.*$', '').trim() }.findAll { it })
+        }
+    } finally {
+        jar.close()
+    }
+    services
+}
+
+def secureJarModuleNameFromFileName = { String fileName ->
+    String name = fileName
+    int extension = name.lastIndexOf('.')
+    if (extension > 0) {
+        name = name.substring(0, extension)
+    }
+    name = name.replaceAll(/-([.\d]+)/, '')
+    name = name.replaceAll(/[^A-Za-z0-9]/, '.')
+    name = name.replaceAll(/(\.)(\1)+/, '.')
+    name = name.replaceAll(/^\./, '')
+    name = name.replaceAll(/\.$/, '')
+    name = name.replaceAll(/(?<=^|\.)([0-9]+)/, '_$1')
+    String keywords = [
+            'abstract', 'continue', 'for', 'new', 'switch', 'assert', 'default', 'goto', 'package',
+            'synchronized', 'boolean', 'do', 'if', 'private', 'this', 'break', 'double', 'implements',
+            'protected', 'throw', 'byte', 'else', 'import', 'public', 'throws', 'case', 'enum',
+            'instanceof', 'return', 'transient', 'catch', 'extends', 'int', 'short', 'try', 'char',
+            'final', 'interface', 'static', 'void', 'class', 'finally', 'long', 'strictfp', 'volatile',
+            'const', 'float', 'native', 'super', 'while'
+    ].join('|')
+    name.replaceAll(/(?<=^|\.)(${keywords})(?=\.|$)/, '_$1')
+}
+
+def secureJarAutomaticModuleName = { File file ->
+    JarFile jar = new JarFile(file)
+    try {
+        String declared = jar.manifest?.mainAttributes?.getValue('Automatic-Module-Name')
+        return declared ?: secureJarModuleNameFromFileName(file.name)
+    } finally {
+        jar.close()
+    }
+}
+
+def extractNested = { File outer, String path, File destination ->
+    byte[] bytes = jarEntryBytes(outer, path)
+    if (bytes == null) {
+        throw new GradleException("Missing nested runtime library ${path} in ${outer.name}")
+    }
+    destination.parentFile.mkdirs()
+    destination.bytes = bytes
+    destination
+}
+
+def nestedFileName = { String path ->
+    path.substring(path.lastIndexOf('/') + 1)
+}
+
+tasks.register('verifyRuntimeModuleBoundary') {
+    group = 'verification'
+    description = 'Rejects duplicate/split runtime modules and validates the exact effective JarJar graph.'
+    dependsOn tasks.named('classes')
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    dependsOn tasks.named('prepareVeilDevelopmentRuntime')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+
+    doLast {
+        Set<File> runtimeFiles = sourceSets.main.runtimeClasspath.files.collect { it.canonicalFile } as Set
+        def artifacts = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+        File create = runtimePreflightCreate.get().asFile.canonicalFile
+        File veil = runtimePreflightVeil.get().asFile.canonicalFile
+        File flywheel = artifacts.find {
+            it.moduleVersion.id.group == 'local.target' && it.name == "flywheel-forge-${forge_minecraft_version}"
+        }?.file?.canonicalFile
+        File ponder = artifacts.find {
+            it.moduleVersion.id.group == 'local.target' && it.name == "Ponder-Forge-${forge_minecraft_version}"
+        }?.file?.canonicalFile
+        File mixinExtrasForge = artifacts.find {
+            it.moduleVersion.id.group == 'io.github.llamalad7' && it.name == 'mixinextras-forge'
+                    && it.moduleVersion.id.version == '0.5.3'
+        }?.file?.canonicalFile
+        [create, veil, flywheel, ponder, mixinExtrasForge].each { required ->
+            if (required == null || !runtimeFiles.contains(required)) {
+                throw new GradleException("Expected effective runtime file is missing: ${required}")
+            }
+        }
+
+        def createMetadata = new JsonSlurper().parseText(
+                new String(jarEntryBytes(create, 'META-INF/jarjar/metadata.json'), 'UTF-8'))
+        Map<String, ?> createNested = createMetadata.jars.collectEntries { nested ->
+            [("${nested.identifier.group}:${nested.identifier.artifact}".toString()): nested]
+        }
+        Map<String, String> exactNested = [
+                'com.tterrag.registrate:Registrate'                : forge_registrate_version.toString(),
+                'dev.engine-room.flywheel:flywheel-forge-1.20.1'  : forge_flywheel_version.toString(),
+                'net.createmod.ponder:Ponder-Forge-1.20.1'        : forge_ponder_version.toString()
+        ]
+        if (createNested.keySet() != exactNested.keySet()) {
+            throw new GradleException("Unexpected filtered Create JarJar coordinates: ${createNested.keySet()}")
+        }
+        exactNested.each { coordinate, version ->
+            if (createNested[coordinate].version.artifactVersion != version) {
+                throw new GradleException("Unexpected Create JarJar version for ${coordinate}: ${createNested[coordinate]}")
+            }
+        }
+        if (jarEntryBytes(create, "META-INF/jarjar/mixinextras-forge-${forge_create_mixinextras_version}.jar") != null) {
+            throw new GradleException('Create MixinExtras Forge 0.4.1 wrapper survived development filtering')
+        }
+
+        def mixinMetadata = new JsonSlurper().parseText(
+                new String(jarEntryBytes(mixinExtrasForge, 'META-INF/jarjar/metadata.json'), 'UTF-8'))
+        if (mixinMetadata.jars.size() != 1
+                || mixinMetadata.jars[0].identifier.group != 'com.github.LlamaLad7'
+                || mixinMetadata.jars[0].identifier.artifact != 'MixinExtras'
+                || mixinMetadata.jars[0].version.artifactVersion != '0.5.3') {
+            throw new GradleException("Unexpected Sable MixinExtras JarJar metadata: ${mixinMetadata}")
+        }
+
+        File extraction = layout.buildDirectory.dir('runtimePreflight/effective-modules').get().asFile
+        String registratePath = createNested['com.tterrag.registrate:Registrate'].path as String
+        File registrate = extractNested(create, registratePath,
+                new File(extraction, nestedFileName(registratePath)))
+        String mixinExtrasCommonPath = mixinMetadata.jars[0].path as String
+        File mixinExtrasCommon = extractNested(mixinExtrasForge, mixinExtrasCommonPath,
+                new File(extraction, nestedFileName(mixinExtrasCommonPath)))
+        if (preflightSha256(mixinExtrasCommon.bytes) !=
+                'D0020CAFF27B478E5CBACE1C0C1D74B755AF9F5D351B619BA1EC45C0DE8CF3C9') {
+            throw new GradleException('Sable MixinExtras common 0.5.3 payload hash changed')
+        }
+        if (preflightSha256(registrate.bytes) !=
+                'AB90001E9EC42922DA4E499CDAFF6D7F1F6E78432CE71555397931804E94E5FB') {
+            throw new GradleException('Mapped Create-owned Registrate payload hash changed')
+        }
+        Map<String, File> selectedSourceModules = [
+                'dev.engine-room.flywheel:flywheel-forge-1.20.1': flywheel,
+                'net.createmod.ponder:Ponder-Forge-1.20.1'      : ponder
+        ]
+        selectedSourceModules.each { coordinate, sourceFile ->
+            byte[] nestedBytes = jarEntryBytes(create, createNested[coordinate].path as String)
+            if (!Arrays.equals(nestedBytes, sourceFile.bytes)) {
+                throw new GradleException(
+                        "Mapped source/nested JarJar copies differ for ${coordinate}; selection is ambiguous"
+                )
+            }
+        }
+
+        Map<String, File> effective = [
+                create                 : create,
+                flywheel               : flywheel,
+                ponder                 : ponder,
+                registrate             : registrate,
+                mixinextras_forge      : mixinExtrasForge,
+                mixinextras_common     : mixinExtrasCommon,
+                veil                   : veil
+        ]
+        Map<String, String> moduleNames = [
+                create             : 'create',
+                flywheel           : 'flywheel',
+                ponder             : 'ponder',
+                registrate         : secureJarAutomaticModuleName(registrate),
+                mixinextras_forge  : secureJarAutomaticModuleName(mixinExtrasForge),
+                mixinextras_common : secureJarAutomaticModuleName(mixinExtrasCommon),
+                veil               : 'veil'
+        ]
+        def duplicateModuleNames = moduleNames.groupBy { it.value }.findAll { ignored, rows -> rows.size() > 1 }
+        if (!duplicateModuleNames.isEmpty()) {
+            throw new GradleException("Duplicate effective Java module names: ${duplicateModuleNames}")
+        }
+
+        Map<String, Set<String>> packagesByModule = effective.collectEntries { label, file ->
+            [(label): jarPackages(file)]
+        }
+        Map<String, Set<String>> packageOwners = [:].withDefault { [] as Set }
+        packagesByModule.each { label, packages -> packages.each { packageOwners[it] << label } }
+        def splitPackages = packageOwners.findAll { ignored, owners -> owners.size() > 1 }
+        if (!splitPackages.isEmpty()) {
+            throw new GradleException("Split packages across effective runtime modules: ${splitPackages}")
+        }
+
+        Map<String, Map<String, Set<String>>> servicesByModule = effective.collectEntries { label, file ->
+            [(label): jarServices(file)]
+        }
+        Map<String, Map<String, Set<String>>> serviceOwners = [:].withDefault { [:] }
+        servicesByModule.each { label, services ->
+            services.each { service, providers -> serviceOwners[service][label] = providers }
+        }
+        def duplicateProviders = serviceOwners.collectEntries { service, owners ->
+            Set<String> seen = [] as Set
+            Set<String> repeated = [] as Set
+            owners.values().flatten().each { provider ->
+                if (!seen.add(provider)) repeated << provider
+            }
+            repeated.isEmpty() ? [:] : [(service): repeated]
+        }
+        if (!duplicateProviders.isEmpty()) {
+            throw new GradleException("Duplicate service providers across effective modules: ${duplicateProviders}")
+        }
+
+        def rawOrOld = runtimeFiles.findAll { file ->
+            String lower = file.name.toLowerCase(Locale.ROOT)
+            lower.contains('0.5.1.j') || lower.contains('0.6.11-13')
+                    || (lower.contains('registrate') && file != registrate)
+                    || (lower.contains("create-${forge_minecraft_version}") && file != create)
+        }
+        if (!rawOrOld.isEmpty()) {
+            throw new GradleException("Raw, obsolete, or standalone nested libraries leaked onto runtime: ${rawOrOld}")
+        }
+
+        String veilMods = new String(jarEntryBytes(veil, 'META-INF/mods.toml'), 'UTF-8')
+        if (!veilMods.contains('modId="veil"') || !veilMods.contains('version="1.0.0"')) {
+            throw new GradleException('Veil runtime metadata no longer declares mod veil version 1.0.0')
+        }
+        def declaredModIds = { String metadata ->
+            List<String> ids = []
+            (metadata =~ /(?ms)\[\[mods]](.*?)(?=\[\[|\z)/).each { section ->
+                def id = section[1] =~ /(?m)^\s*modId\s*=\s*"([^"]+)"/
+                if (id.find()) ids << id.group(1)
+            }
+            ids
+        }
+        Map<String, String> modMetadata = [
+                sable   : new File(sourceSets.main.output.resourcesDir, 'META-INF/mods.toml').getText('UTF-8'),
+                create  : new String(jarEntryBytes(create, 'META-INF/mods.toml'), 'UTF-8'),
+                flywheel: new String(jarEntryBytes(flywheel, 'META-INF/mods.toml'), 'UTF-8'),
+                ponder  : new String(jarEntryBytes(ponder, 'META-INF/mods.toml'), 'UTF-8'),
+                veil    : veilMods
+        ]
+        List<String> modIds = modMetadata.values().collectMany { declaredModIds(it) }
+        if ((modIds as Set) != (['sable', 'create', 'flywheel', 'ponder', 'veil'] as Set)
+                || modIds.size() != (modIds as Set).size()) {
+            throw new GradleException("Duplicate or unexpected runtime mod IDs: ${modIds}")
+        }
+
+        logger.lifecycle("Effective runtime module names: ${moduleNames}")
+        logger.lifecycle("Derived Registrate module ${moduleNames.registrate} from ${registrate.name}")
+        logger.lifecycle("Effective package counts: ${packagesByModule.collectEntries { k, v -> [(k): v.size()] }}")
+        logger.lifecycle("Service surfaces: ${servicesByModule.collectEntries { k, v -> [(k): v.keySet().sort()] }}")
+        logger.lifecycle('Verified MixinExtras resolution: one Forge 0.5.3 wrapper and one common 0.5.3 payload; Create 0.4.1 wrapper excluded')
+        logger.lifecycle('Verified Create nested Flywheel/Ponder bytes equal the selected mapped source modules and mapped Registrate hash is exact')
+        logger.lifecycle("Verified unique runtime mod IDs: ${modIds.sort()}")
+        logger.lifecycle('Verified no duplicate effective module names, split packages, duplicate providers, raw target jars, or standalone Registrate')
+    }
+}
+
+def annotationValues = { AnnotationNode annotation ->
+    Map<String, Object> values = [:]
+    if (annotation?.values != null) {
+        for (int index = 0; index < annotation.values.size(); index += 2) {
+            values[annotation.values[index] as String] = annotation.values[index + 1]
+        }
+    }
+    values
+}
+
+def annotationsOf = { Object node ->
+    ((node.visibleAnnotations ?: []) + (node.invisibleAnnotations ?: [])) as List<AnnotationNode>
+}
+
+def scalarList = { Object value -> value == null ? [] : (value instanceof List ? value : [value]) }
+
+def atSignature = { Object value ->
+    scalarList(value).findAll { it instanceof AnnotationNode }.collect { AnnotationNode at ->
+        Map<String, Object> values = annotationValues(at)
+        ['value', 'target', 'ordinal', 'opcode', 'shift', 'by'].collect { key ->
+            values.containsKey(key) ? "${key}=${values[key]}" : null
+        }.findAll { it }.join(',')
+    }.sort().join('|')
+}
+
+def sliceSignature = { Object value ->
+    scalarList(value).findAll { it instanceof AnnotationNode }.collect { AnnotationNode slice ->
+        Map<String, Object> values = annotationValues(slice)
+        [values.id ? "id=${values.id}" : null,
+         values.from ? "from={${atSignature(values.from)}}" : null,
+         values.to ? "to={${atSignature(values.to)}}" : null]
+                .findAll { it }.join(',')
+    }.sort().join('|')
+}
+
+tasks.register('verifyRetainedMixinCoexistence') {
+    group = 'verification'
+    description = 'Mechanically inventories retained Sable/external Mixin target and injection overlap.'
+    dependsOn tasks.named('classes')
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    dependsOn tasks.named('prepareVeilDevelopmentRuntime')
+
+    doLast {
+        def artifacts = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+        Map<String, File> owners = [
+                Create   : runtimePreflightCreate.get().asFile,
+                Flywheel : artifacts.find { it.name == "flywheel-forge-${forge_minecraft_version}" }?.file,
+                Ponder   : artifacts.find { it.name == "Ponder-Forge-${forge_minecraft_version}" }?.file,
+                Veil     : runtimePreflightVeil.get().asFile
+        ]
+        File sableClasses = sourceSets.main.output.classesDirs.singleFile
+        File sableResources = sourceSets.main.output.resourcesDir
+
+        def readResource = { File owner, String path ->
+            if (owner.isDirectory()) {
+                File resource = new File(owner, path)
+                return resource.isFile() ? resource.bytes : null
+            }
+            jarEntryBytes(owner, path)
+        }
+        def loadMixin = { String source, File classOwner, String className, int priority ->
+            byte[] bytes = readResource(classOwner, className.replace('.', '/') + '.class')
+            if (bytes == null) {
+                throw new GradleException("Mixin class ${className} from ${source} is absent")
+            }
+            ClassNode node = new ClassNode()
+            new ClassReader(bytes).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
+            AnnotationNode mixin = annotationsOf(node).find { it.desc == 'Lorg/spongepowered/asm/mixin/Mixin;' }
+            if (mixin == null) {
+                throw new GradleException("Configured class ${className} lacks @Mixin")
+            }
+            Map<String, Object> mixinValues = annotationValues(mixin)
+            int effectivePriority = (mixinValues.priority ?: priority) as int
+            Set<String> targets = [] as Set
+            scalarList(mixinValues.value).each { value ->
+                if (value instanceof Type) targets << value.className
+            }
+            scalarList(mixinValues.targets).each { value -> targets << value.toString().replace('/', '.') }
+            List<Map<String, Object>> injections = []
+            node.methods.each { MethodNode method ->
+                annotationsOf(method).each { AnnotationNode annotation ->
+                    String kind = annotation.desc.substring(annotation.desc.lastIndexOf('/') + 1,
+                            annotation.desc.length() - 1)
+                    if (kind == 'Overwrite') {
+                        injections << [kind: kind, methods: [method.name], at: '',
+                                       ownerMethod: method.name + method.desc, node: method]
+                    } else if (annotation.desc.contains('/injection/')
+                            || annotation.desc.contains('/injector/')
+                            || kind in ['Accessor', 'Invoker']) {
+                        Map<String, Object> values = annotationValues(annotation)
+                        List<String> selectors = scalarList(values.method).collect { it.toString() }
+                        if (selectors.isEmpty() && kind in ['Accessor', 'Invoker']) selectors = [method.name]
+                        injections << [kind: kind, methods: selectors, at: atSignature(values.at),
+                                       slice: sliceSignature(values.slice),
+                                       ownerMethod: method.name + method.desc, node: method,
+                                       cancellable: values.cancellable == true]
+                    }
+                }
+            }
+            [source: source, name: className, priority: effectivePriority, targets: targets,
+             injections: injections,
+             interfaces: (node.interfaces ?: []).collect { it.replace('/', '.') } as Set]
+        }
+
+        def loadConfigs = { String source, File classOwner, File resourceOwner, List<String> configs ->
+            List<Map<String, Object>> mixins = []
+            configs.each { configName ->
+                byte[] configBytes = readResource(resourceOwner, configName)
+                if (configBytes == null) throw new GradleException("Missing ${source} Mixin config ${configName}")
+                def config = new JsonSlurper().parseText(new String(configBytes, 'UTF-8'))
+                int priority = (config.priority ?: 1000) as int
+                String prefix = config.package ? config.package + '.' : ''
+                (scalarList(config.mixins) + scalarList(config.client) + scalarList(config.server)).unique().each { entry ->
+                    mixins << loadMixin(source, classOwner, prefix + entry.toString(), priority)
+                }
+            }
+            mixins
+        }
+
+        def manifestConfigs = { File jarFile ->
+            JarFile jar = new JarFile(jarFile)
+            try {
+                String value = jar.manifest?.mainAttributes?.getValue('MixinConfigs')
+                return value == null ? [] : value.split(',').collect { it.trim() }.findAll { it }
+            } finally {
+                jar.close()
+            }
+        }
+        List<Map<String, Object>> sableMixins = loadConfigs('Sable', sableClasses, sableResources,
+                ['sable-common-forge.mixins.json'])
+        List<Map<String, Object>> externalMixins = []
+        owners.each { source, owner ->
+            externalMixins.addAll(loadConfigs(source, owner, owner, manifestConfigs(owner)))
+        }
+
+        def selectorNames = { Map injection ->
+            injection.methods.collect { selector ->
+                selector.contains('(') ? selector.substring(0, selector.indexOf('(')) : selector
+            } as Set
+        }
+        List<Map<String, Object>> overlaps = []
+        sableMixins.each { sable ->
+            externalMixins.each { external ->
+                (sable.targets.intersect(external.targets) as Set).each { target ->
+                    String classification = 'SAFE_INDEPENDENT'
+                    List<String> reasons = []
+                    sable.injections.each { left ->
+                        external.injections.each { right ->
+                            Set<String> sharedMethods = selectorNames(left).intersect(selectorNames(right)) as Set
+                            if (!sharedMethods.isEmpty()) {
+                                if (left.kind == 'Overwrite' || right.kind == 'Overwrite') {
+                                    classification = 'LIKELY_RUNTIME_CONFLICT'
+                                    reasons << "Overwrite/shared method ${sharedMethods}"
+                                } else if (left.at && left.at == right.at && left.slice == right.slice
+                                        && (left.kind in ['Redirect', 'ModifyArg', 'ModifyVariable']
+                                        || right.kind in ['Redirect', 'ModifyArg', 'ModifyVariable'])) {
+                                    if (classification != 'LIKELY_RUNTIME_CONFLICT') {
+                                        classification = 'NEEDS_BYTECODE_CHECK'
+                                    }
+                                    reasons << "competing ${left.kind}/${right.kind} at ${left.at}"
+                                } else if (left.at && left.at == right.at && left.slice == right.slice) {
+                                    if (classification == 'SAFE_INDEPENDENT') classification = 'ORDER_SENSITIVE'
+                                    reasons << ("shared injection point ${sharedMethods} at ${left.at}"
+                                            + (left.slice ? " slice ${left.slice}" : ''))
+                                } else {
+                                    reasons << "shared method ${sharedMethods}, distinct injection points"
+                                }
+                            }
+                        }
+                    }
+                    Set<String> sharedInterfaces = sable.interfaces.intersect(external.interfaces) as Set
+                    if (!sharedInterfaces.isEmpty()) {
+                        if (classification == 'SAFE_INDEPENDENT') classification = 'NEEDS_BYTECODE_CHECK'
+                        reasons << "shared interface additions ${sharedInterfaces}"
+                    }
+                    overlaps << [target: target, sable: sable.name,
+                                 external: "${external.source}:${external.name}",
+                                 priorities: "${sable.priority}/${external.priority}",
+                                 classification: classification,
+                                 reasons: reasons.unique().join('; ') ?: 'shared target class only']
+                }
+            }
+        }
+
+        List<Map<String, Object>> hardConflicts = overlaps.findAll {
+            it.classification in ['NEEDS_BYTECODE_CHECK', 'LIKELY_RUNTIME_CONFLICT']
+        }
+        if (!hardConflicts.isEmpty()) {
+            throw new GradleException("Retained Mixin overlaps require resolution before runtime: ${hardConflicts}")
+        }
+        List<Map<String, Object>> ordered = overlaps.findAll { it.classification == 'ORDER_SENSITIVE' }
+        if (ordered.size() != 1
+                || ordered[0].target != 'net.minecraft.world.entity.Entity'
+                || !ordered[0].sable.endsWith('entity.entity_sublevel_collision.EntityMixin')
+                || !ordered[0].external.endsWith('EntityContraptionInteractionMixin')) {
+            throw new GradleException("Unexpected priority-sensitive Mixin surface: ${ordered}")
+        }
+
+        String entityPath = 'net/minecraft/world/entity/Entity.class'
+        byte[] entityBytes = null
+        sourceSets.main.compileClasspath.files.findAll { it.isFile() && it.name.endsWith('.jar') }.each { candidate ->
+            if (entityBytes == null) entityBytes = jarEntryBytes(candidate, entityPath)
+        }
+        if (entityBytes == null) throw new GradleException('Mapped 1.20.1 Entity.class is absent from compileClasspath')
+        ClassNode entityNode = new ClassNode()
+        new ClassReader(entityBytes).accept(entityNode, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
+        MethodNode move = entityNode.methods.find { method ->
+            method.name == 'move' && method.desc ==
+                    '(Lnet/minecraft/world/entity/MoverType;Lnet/minecraft/world/phys/Vec3;)V'
+        }
+        if (move == null || move.instructions.findAll { it.opcode == Opcodes.RETURN }.isEmpty()) {
+            throw new GradleException('Mapped 1.20.1 Entity.move bytecode no longer supports the audited TAIL boundary')
+        }
+
+        def findMixin = { List<Map<String, Object>> mixins, String suffix -> mixins.find { it.name.endsWith(suffix) } }
+        def sableEntity = findMixin(sableMixins, 'entity.entity_sublevel_collision.EntityMixin')
+        def createEntity = findMixin(externalMixins, 'EntityContraptionInteractionMixin')
+        def tailHandlers = { Map mixin -> mixin.injections.findAll { injection ->
+            selectorNames(injection).contains('move') && injection.at == 'value=TAIL'
+        } }
+        def sableTail = tailHandlers(sableEntity)
+        def createTail = tailHandlers(createEntity)
+        if (sableEntity.priority != 1100 || createEntity.priority != 1100
+                || sableTail.size() != 1 || createTail.size() != 1
+                || sableTail[0].cancellable || createTail[0].cancellable) {
+            throw new GradleException('Entity.move TAIL priority/non-cancellable bytecode fingerprint changed')
+        }
+        def writes = { Map injection ->
+            injection.node.instructions.findAll { instruction ->
+                instruction instanceof FieldInsnNode
+                        && instruction.opcode in [Opcodes.PUTFIELD, Opcodes.PUTSTATIC]
+            }.collect { FieldInsnNode field -> "${field.owner}.${field.name}:${field.desc}" } as Set
+        }
+        Set<String> sharedWrites = writes(sableTail[0]).intersect(writes(createTail[0])) as Set
+        if (!sharedWrites.isEmpty()) {
+            throw new GradleException("Entity.move TAIL handlers now write the same fields: ${sharedWrites}")
+        }
+        ordered[0].reasons += '; BYTECODE_CHECK_PASS: mapped Entity.move descriptor/RETURN present; '
+        ordered[0].reasons += 'both handlers priority 1100, non-cancellable, and have no shared direct field writes'
+
+        Map<String, Integer> counts = ['SAFE_INDEPENDENT', 'ORDER_SENSITIVE', 'NEEDS_BYTECODE_CHECK',
+                                       'LIKELY_RUNTIME_CONFLICT'].collectEntries { category ->
+            [(category): overlaps.count { it.classification == category }]
+        }
+        File report = rootProject.file('RUNTIME_MIXIN_OVERLAP.md')
+        StringBuilder text = new StringBuilder()
+        text << '# Retained runtime Mixin overlap inventory\n\n'
+        text << 'Generated mechanically by `:forge:verifyRetainedMixinCoexistence`. '
+        text << 'Only the retained Sable Forge config is included; deferred Create/Flywheel Sable Mixins remain disabled.\n\n'
+        text << "Classification counts: `${counts}`.\n\n"
+        text << '| Target | Sable mixin | External mixin | Priority | Classification | Detail |\n'
+        text << '|---|---|---|---:|---|---|\n'
+        overlaps.sort { a, b ->
+            int targetOrder = a.target <=> b.target
+            int sableOrder = a.sable <=> b.sable
+            targetOrder != 0 ? targetOrder : (sableOrder != 0 ? sableOrder : a.external <=> b.external)
+        }.each { row ->
+            text << "| `${row.target}` | `${row.sable}` | `${row.external}` | `${row.priorities}` | "
+            text << "`${row.classification}` | ${row.reasons.replace('|', '\\|')} |\n"
+        }
+        if (overlaps.isEmpty()) {
+            text << '| _None_ | | | | `SAFE_INDEPENDENT` | No shared target classes. |\n'
+        }
+        report.setText(text.toString(), 'UTF-8')
+
+        logger.lifecycle("Retained/external Mixin overlap classifications: ${counts}")
+        logger.lifecycle("Wrote mechanical overlap inventory: ${report}")
+    }
+}
+
+tasks.register('verifyBootstrapLifecycleBoundary') {
+    group = 'verification'
+    description = 'Checks exact metadata, registration ownership, and same-JVM lifecycle invariants.'
+    dependsOn tasks.named('processResources')
+
+    doLast {
+        File processedMods = new File(sourceSets.main.output.resourcesDir, 'META-INF/mods.toml')
+        String mods = processedMods.getText('UTF-8')
+        Map<String, String> dependencyRanges = [
+                minecraft: '[1.20.1,1.20.2)', forge: '[47.4.20,)', veil: '[1.0.0,1.0.1)',
+                create: '[6.0.8]', flywheel: '[1.0.5]'
+        ]
+        dependencyRanges.each { mod, range ->
+            String block = mods.split('\\[\\[dependencies\\.sable]]').find { it.contains("modId = \"${mod}\"") }
+            if (block == null || !block.contains("versionRange = \"${range}\"")) {
+                throw new GradleException("processed mods.toml lacks exact ${mod} range ${range}")
+            }
+            if (mod in ['create', 'flywheel']) {
+                if (!block.contains('mandatory = false')) throw new GradleException("${mod} must remain optional")
+            } else if (!block.contains('mandatory = true')) {
+                throw new GradleException("${mod} must remain mandatory")
+            }
+        }
+        if (mods.count('modId = "sable"') != 1) throw new GradleException('Sable mod ID is not unique')
+
+        String transport = file('src/main/java/dev/ryanhcode/sable/forge/network/ForgeSablePacketTransport.java').text
+        if (transport.count('NetworkRegistry.newSimpleChannel(') != 1
+                || !transport.contains('Sable.sablePath("main")')) {
+            throw new GradleException('Sable network channel ownership/name is not unique')
+        }
+        String forge = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java').text
+        String client = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClient.java').text
+        if (forge.count('registerConfig(ModConfig.Type.COMMON') != 1
+                || client.count('registerConfig(ModConfig.Type.CLIENT') != 1
+                || forge.count('addListener(this::registerReloadListeners)') != 1
+                || forge.count('addListener(this::registerCommand)') != 1) {
+            throw new GradleException('Config/command/reload-listener registration ownership changed')
+        }
+        String smoke = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeRuntimeSmoke.java').text
+        ['COMMON_INSTALLED.compareAndSet(false, true)', 'CLIENT_INSTALLED.compareAndSet(false, true)',
+         'captureLifecycleBaseline', 'verifyLifecycleDeltas', 'requireDelta',
+         'verifyFirstIntegratedServerStopped(final LifecycleBaseline baseline)',
+         'verifySecondIntegratedServerActive(final LifecycleBaseline baseline)',
+         'verifySecondIntegratedServerStopped(final LifecycleBaseline baseline)',
+         'PLAYER_LOGINS', 'PLAYER_LOGOUTS', 'clientLogouts >= 0'].each { marker ->
+            if (!smoke.contains(marker)) throw new GradleException("Same-JVM smoke lifecycle lacks ${marker}")
+        }
+        String targetSmoke = file(
+                'src/main/java/dev/ryanhcode/sable/forge/SableForgeTargetRuntimeSmoke.java').text
+        ['firstServer', 'secondServer', 'stoppedServers', 'FIRST_SERVER_STOP', 'SECOND_SERVER_STOP',
+         'firstWorldActiveBaseline', 'firstServerStoppedBaseline', 'secondWorldActiveBaseline',
+         'captureLifecycleBaseline("first world active")',
+         'captureLifecycleBaseline("first server stopped")',
+         'captureLifecycleBaseline("second world active")'].each { marker ->
+            if (!targetSmoke.contains(marker)) throw new GradleException("Target smoke lifecycle lacks ${marker}")
+        }
+        String serverUdp = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/udp/ServerConnectionListenerMixin.java').text
+        String clientUdp = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/udp/ConnectionMixin.java').text
+        ['@Inject(method = "stop", at = @At("TAIL"))', 'this.sable$server = null',
+         'this.sable$server = new SableUDPServer'].each { marker ->
+            if (!serverUdp.contains(marker)) throw new GradleException("Server UDP lifecycle lacks ${marker}")
+        }
+        ['@Inject(method = "disconnect(Lnet/minecraft/network/chat/Component;)V", at = @At("TAIL"))',
+         'this.sable$udpChannel = null', 'channel.close().awaitUninterruptibly()'].each { marker ->
+            if (!clientUdp.contains(marker)) throw new GradleException("Client UDP lifecycle lacks ${marker}")
+        }
+        logger.lifecycle('Verified exact mods.toml ranges/optionality, unique Sable/network IDs, one-time config/event ownership, and two-server lifecycle probes')
+        logger.lifecycle('Verified UDP setup and shutdown remain connection/server-instance owned for same-JVM restart')
+    }
+}
+
+tasks.register('verifySingleBlockSpawnInitialization') {
+    group = 'verification'
+    description = 'Checks the retained /sable spawn block path finalizes initial block ownership, bounds, and mass without launching Minecraft.'
+
+    doLast {
+        File spawnFile = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/command/SableSpawnCommands.java')
+        String source = spawnFile.getText('UTF-8')
+        int spawnStart = source.indexOf('private static int spawnBlock(')
+        int finishStart = source.indexOf('private static void finishInitialSpawnBlock(')
+        int platformStart = source.indexOf('private static int spawnPlatform(')
+        if (spawnStart < 0 || finishStart < 0 || platformStart < 0) {
+            throw new GradleException('Single-block spawn initialization helpers are missing')
+        }
+
+        String spawnBlock = source.substring(spawnStart, finishStart)
+        String finish = source.substring(finishStart, platformStart)
+        List<String> orderedSpawnMarkers = [
+                'final EmbeddedPlotLevelAccessor accessor = plot.getEmbeddedLevelAccessor();',
+                'final BlockState oldState = accessor.getBlockState(BlockPos.ZERO);',
+                'accessor.setBlock(BlockPos.ZERO, material, 3);',
+                'finishInitialSpawnBlock(subLevel, BlockPos.ZERO, oldState, material);',
+                'subLevel.updateLastPose();'
+        ]
+        int last = -1
+        orderedSpawnMarkers.each { marker ->
+            int idx = spawnBlock.indexOf(marker)
+            if (idx <= last) {
+                throw new GradleException("Spawn-block initialization order missing or changed near: ${marker}")
+            }
+            last = idx
+        }
+
+        [
+                'final PlotChunkHolder chunkHolder = plot.getChunkHolder(plot.toLocal(new ChunkPos(globalBlockPos)));',
+                'chunkHolder.handleBlockChange(globalBlockPos.getX() & SectionPos.SECTION_MASK, globalBlockPos.getY(),',
+                'plot.updateBoundingBox();',
+                'plot.expandIfNecessary(globalBlockPos);',
+                'bounds == BoundingBox3i.EMPTY || bounds.volume() <= 0',
+                'serverSubLevel.buildMassTracker();',
+                'serverSubLevel.updateMergedMassData(1.0f);',
+                'serverSubLevel.getMassTracker().isInvalid()',
+                'serverSubLevel.updateBoundingBox();'
+        ].each { marker ->
+            if (!finish.contains(marker)) {
+                throw new GradleException("Initial spawn finalization no longer proves ${marker}")
+            }
+        }
+        if (finish.contains('Blocks.STONE') || finish.contains('2.0')) {
+            throw new GradleException('Initial spawn finalization must not special-case stone or hardcode mass')
+        }
+
+        logger.lifecycle('Verified /sable spawn block finalizes block association, bounds, and mass from production state')
+    }
+}

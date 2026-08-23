@@ -1,7 +1,7 @@
 package dev.ryanhcode.sable.forge.platform;
 
-import com.simibubi.create.foundation.utility.worldWrappers.WrappedServerWorld;
 import dev.ryanhcode.sable.platform.SablePlatform;
+import net.createmod.catnip.levelWrappers.WrappedServerLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
@@ -13,7 +13,7 @@ import org.jetbrains.annotations.Nullable;
 public final class SablePlatformImpl implements SablePlatform {
     @Override
     public boolean isWrappedLevel(@Nullable final Level level) {
-        return ModList.get().isLoaded("create") && CreateWrappedLevelCheck.isWrapped(level);
+        return ModList.get().isLoaded("create") && PonderWrappedLevelCheck.isWrapped(level);
     }
 
     @Override
@@ -22,9 +22,9 @@ public final class SablePlatformImpl implements SablePlatform {
         return ForgeHooks.isLivingOnLadder(state, level, pos, entity).isPresent();
     }
 
-    private static final class CreateWrappedLevelCheck {
+    private static final class PonderWrappedLevelCheck {
         private static boolean isWrapped(@Nullable final Level level) {
-            return level instanceof WrappedServerWorld;
+            return level instanceof WrappedServerLevel;
         }
     }
 }

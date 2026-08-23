@@ -2,6 +2,11 @@
 
 This matrix accounts for all 82 Veil imports in the upstream Sable 2.0.0 common source graph. It was checked against the mapped and raw forms of `foundry.veil:Veil-forge-1.20.1:1.0.0.296`. Rows are grouped by imported API; the occurrence column preserves the full import count.
 
+The 2026-08-22 replacement target modpack does not contain Veil. This matrix
+and the proven `1.0.0.296` integration remain unchanged; Veil must be supplied
+as an additional runtime dependency. No Veil migration was attempted during
+the Create 6 rebaseline.
+
 ## Summary
 
 | Recommendation | Imports |
