@@ -21,6 +21,34 @@
 
 The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 added the Java 17/1.20.1 Companion library, official Veil 1.20, selected Java 17 rewrites, and the minimal Forge source graph. M4 replaced the missing modern Veil/Minecraft packet surface with a tested Forge 47 transport. M5 ported the selected Minecraft core/Mixins, added the Forge bootstrap and eight platform providers, and produced a statically verified Forge package. M6 now passes the Forge main-menu, empty-world, runtime-boundary, persistence, and stationary single-block smoke gates. Deferred advanced rendering, full physics/Sable Rapier, Create/Flywheel integration, Simulated, and Aeronautics remain unported.
 
+> **Standalone packaging milestone status (2026-08-23):** the final
+> reobfuscated Forge all-jar packages `:sable_companion_1_20` via Forge JarJar
+> as `META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar`. Companion
+> remains a common library, not a Forge mod. Static artifact, module-boundary,
+> network, compile, reobf, Checkstyle, and Spotless gates pass. Previously
+> exposed standalone blockers are fixed statically: Sable/Companion split
+> package, standalone Registrate leakage through ForgeGradle launch surfaces,
+> production-to-userdev Sable Mixin/member/hierarchy remapping, staged target
+> mod AT namespace remapping, mapped Flywheel/Ponder staging, and standalone
+> smoke provenance false negatives for Forge/SecureJar `union:` URLs. The
+> current verifier parses both `outer.jar#id!/resource` and nested
+> `outer.jar#id_/META-INF/jarjar/inner.jar#id!/resource` forms, proves the
+> staged `all-userdev.jar` under `run/standalone-client/mods`, keeps Companion
+> provenance strict for the nested Companion JarJar, and remaps proved
+> Minecraft hierarchy bridge/synthetic declarations in the standalone userdev
+> artifact. This fixes the server-data reload `SimplePreparableReloadListener`
+> erased `apply(Object, ResourceManager, ProfilerFiller)` bridge while leaving
+> the production all-jar reobfuscated. The standalone userdev mapper also now
+> remaps ASM `Handle` values in `invokedynamic`, LDC, and recursive
+> `ConstantDynamic` metadata; `ServerLevelPlot` canaries prove
+> `ChunkHolder.m_287213_ -> getFullStatus` and
+> `ServerGamePacketListenerImpl.m_9829_ -> send`, with the whole mapped Sable
+> artifact stale-known-reference scan at zero.
+> `.\gradlew.bat --offline :forge:build
+> :forge:verifyStandaloneRunConfiguration` passes. Packaged-artifact runtime
+> PASS remains the next blocker and must be proven by one later
+> `runStandaloneClient` process.
+
 ## Canonical Workflow
 
 `sableForgeBackport=true` is the default in `gradle.properties`. With `JAVA_HOME` pointing to JDK 17, the canonical compiler command is:
@@ -153,11 +181,21 @@ There is no remaining compile-time error frontier in the selected Forge core gra
 2. **Create 6.0.8:** only Ponder wrapped-level detection is implemented. Create contraption/logistics integrations remain deferred and absent from the Forge Mixin config.
 3. **Flywheel 1.0.5:** visual registration remains deliberately a no-op; Flywheel render integration is still deferred and must be re-audited against its new `dev.engine_room.flywheel` API.
 4. **Advanced rendering/gameplay:** chunked rendering, shader/water/Iris/Sodium bridges, Leashable/pathfinding, projectile dispenser, vibration, toast/settings, and other listed clusters remain intact but excluded.
-5. **Packaging:** Companion works on the Gradle `runClient` project classpath and remains intentionally absent from the Forge JarJar output. Standalone modpack testing requires that packaging step.
+5. **Packaging:** Companion is now included in the final Forge all-jar through
+   Forge JarJar as `dev.ryanhcode.sable-companion:sable_companion_1_20:1.6.0`
+   with range `[1.6.0,)`. The final artifact verifier inspects JarJar metadata
+   and the nested Companion jar, confirms Java 17 classes and ServiceLoader
+   resources, rejects Companion mod metadata, rejects duplicate Companion
+   classes outside/inside JarJar, and confirms Create/Flywheel/Ponder/Veil are
+   not bundled. The first standalone runtime attempt failed before title due to
+   an incorrect launcher main; the static run-configuration fix is validated,
+   but the packaged-artifact runtime smoke remains unproven.
 
-M6 completed the first `runClient` smoke milestone. The remaining frontier is
-standalone packaging, a separate minimal-launch runtime check of the new
-dependency baseline, and deferred-feature work.
+M6 completed the first `runClient` smoke milestone, and the standalone Companion
+JarJar packaging step is statically complete. The remaining immediate frontier
+is one successful packaged-artifact runtime smoke using the repaired
+BootstrapLauncher standalone run configuration, followed by deferred-feature
+work.
 
 ## Sable Companion Assessment
 
@@ -171,7 +209,11 @@ Mechanical inventory found 131 common source files containing 222 Companion impo
 
 M3 provides that API as `:sable_companion_1_20`, a `java-library` using ForgeGradle only for official Minecraft 1.20.1 mappings. Its baseline is the 12-source `sable-companion-common-1.21.1:1.6.0` source artifact (SHA-256 `74236A40A00AF0B2CF61B34E071468E3A547528154047E3548EAA0745B808C95`) plus the upstream MIT license and default `ServiceLoader` descriptor. The only required Java 17 edits were four `List.getFirst()` calls changed to indexed access. The jar has class major 61, contains the default provider, and contains no `mods.toml`, NeoForge metadata, or mandatory mod ID.
 
-Conclusion: Companion remains a public compile API and bundled/JiJ runtime common library, not a Forge mod or stub. `:forge` consumes it as a project API dependency for development. Final JarJar/runtime packaging is deferred; no Forge-specific Companion implementation is indicated. See the [official Sable Companion repository](https://github.com/ryanhcode/sable-companion).
+Conclusion: Companion remains a public compile API and bundled/JiJ runtime
+common library, not a Forge mod or stub. `:forge` consumes it as a project API
+dependency for development and packages it into the final Forge all-jar with
+Forge JarJar for distribution. No Forge-specific Companion implementation is
+indicated. See the [official Sable Companion repository](https://github.com/ryanhcode/sable-companion).
 
 ## Veil Assessment
 

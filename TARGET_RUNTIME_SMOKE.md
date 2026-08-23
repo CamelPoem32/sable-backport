@@ -2,6 +2,497 @@
 
 Date: 2026-08-23
 
+## Standalone InvokeDynamic Handle Userdev Remap Fix (2026-08-23)
+
+No Minecraft client or server was launched during this follow-up.
+
+After Gate 1 passed, the next standalone runtime failure was a
+`NoSuchMethodError` caused by stale SRG member names in `invokedynamic`
+bootstrap handles. Ordinary `MethodInsnNode` references in the same classes
+were already remapped correctly; the missing path was ASM `Handle` metadata.
+
+Required mappings:
+
+```text
+ChunkHolder.m_287213_()Lnet/minecraft/server/level/FullChunkStatus;
+-> ChunkHolder.getFullStatus()Lnet/minecraft/server/level/FullChunkStatus;
+
+ServerGamePacketListenerImpl.m_9829_(Lnet/minecraft/network/protocol/Packet;)V
+-> ServerGamePacketListenerImpl.send(Lnet/minecraft/network/protocol/Packet;)V
+```
+
+`ServerLevelPlot` production all-jar `BootstrapMethods` contained
+`REF_invokeVirtual ChunkHolder.m_287213_` and
+`REF_invokeVirtual ServerGamePacketListenerImpl.m_9829_`. The mapped
+standalone userdev artifact now contains
+`REF_invokeVirtual ChunkHolder.getFullStatus` and
+`REF_invokeVirtual ServerGamePacketListenerImpl.send`, with zero stale
+`m_287213_` / `m_9829_` handles remaining.
+
+`SableStandaloneUserdevMapper` now remaps member `Handle` values generally in:
+
+- `InvokeDynamicInsnNode.bsm`;
+- every `InvokeDynamicInsnNode.bsmArgs` element;
+- `ConstantDynamic` bootstrap methods and recursive bootstrap arguments;
+- `LdcInsnNode` constants containing `Handle` or `ConstantDynamic`.
+
+It preserves handle tag, owner, descriptor, and interface flag, remaps field
+handles through FD mappings, remaps method handles through MD mappings, and uses
+the existing complete hierarchy evidence where an apparent owner inherits a
+Minecraft mapped member. The verifier now scans every retained mapped Sable
+class for stale known-remappable member references in ordinary instructions,
+handles, LDC handles, and recursive `ConstantDynamic` values.
+
+Validation:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat --offline :forge:build :forge:verifyStandaloneRunConfiguration` | PASS; `handleReferenceRemaps=7`, `constantDynamicHandleReferenceRemaps=0`, whole-artifact stale scan `ordinary=0`, `handles=0`, `constantDynamicOrLdcHandles=0`, remaining `0` |
+
+The next task should launch exactly one
+`.\gradlew.bat --offline :forge:runStandaloneClient` process.
+
+## Standalone Reload Bridge Userdev Remap Fix (2026-08-23)
+
+No Minecraft client or server was launched during this follow-up.
+
+The latest standalone runtime proved Gate 1: `companion` and `gate1` both
+logged `PASS`, all mods reached `DONE`, and initial resource reload completed.
+The next failure happened only while opening/creating the smoke world:
+
+```text
+AbstractMethodError: Missing implementation of resolved method
+SimplePreparableReloadListener.apply(Object, ResourceManager, ProfilerFiller)
+```
+
+Static bytecode inspection found the failure class across the retained Sable
+server-data reload listeners registered by Forge. The first registered listener
+is `PhysicsBlockPropertiesDefinitionLoader`; the same bridge shape existed in
+`DimensionPhysicsData.ReloadListener` and
+`FloatingBlockMaterialDataHandler.ReloadListener`.
+
+Source typed declaration:
+`apply(Map<ResourceLocation, JsonElement>, ResourceManager, ProfilerFiller)`.
+Final production all-jar declarations:
+typed `apply(Map, ...)` plus bridge/synthetic
+`m_5787_(Object, ResourceManager, ProfilerFiller)`. Previous mapped userdev
+artifact left that bridge stale as `m_5787_`, while Forge userdev expects the
+named erased method
+`SimplePreparableReloadListener.apply(Object, ResourceManager, ProfilerFiller)`.
+
+Mapping proof:
+
+```text
+MD: net/minecraft/server/packs/resources/SimplePreparableReloadListener/m_5787_
+(Ljava/lang/Object;Lnet/minecraft/server/packs/resources/ResourceManager;Lnet/minecraft/util/profiling/ProfilerFiller;)V
+-> apply
+```
+
+`SableStandaloneUserdevMapper` now resolves superclass/interface hierarchy
+through the external Minecraft classpath as well as Sable classes, and remaps
+proved hierarchy methods including `ACC_BRIDGE` / `ACC_SYNTHETIC`
+declarations. Static canaries require every concrete Sable
+`SimplePreparableReloadListener` subclass to expose both typed `apply(Map,...)`
+and erased bridge `apply(Object,...)` in the mapped userdev artifact, with no
+stale `m_5787_` declarations/references.
+
+Validation:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat --offline :forge:build :forge:verifyStandaloneRunConfiguration` | PASS; `bridgeHierarchyDeclarationRemaps=9`, `bridgeHierarchyReferenceRemaps=0`, unresolved hierarchy declarations/references `0` |
+
+The next task should launch exactly one
+`.\gradlew.bat --offline :forge:runStandaloneClient` process.
+
+## Standalone Nested SecureJar Provenance Fix (2026-08-23)
+
+No Minecraft client or server was launched during this follow-up.
+
+The latest standalone runtime again reached a healthy Forge state: all mods
+reached `DONE` and initial resource reload completed. It was stopped only by a
+nested Companion provenance false negative. Forge/SecureJar reported the
+Companion API from a nested URL shaped like:
+
+```text
+union:/.../sable-forge-1.20.1-2.0.0-all-userdev.jar%23198_/META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar%23218!/dev/ryanhcode/sable/companion/SableCompanion.class
+```
+
+The standalone smoke parser now treats SecureJar URLs structurally instead of
+assuming every internal id is followed by `!`. It accepts arbitrary numeric
+ids and extracts:
+
+- outer artifact:
+  `run/standalone-client/mods/sable-forge-1.20.1-2.0.0-all-userdev.jar`;
+- nested entry:
+  `META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar`;
+- resource:
+  `dev/ryanhcode/sable/companion/SableCompanion.class`.
+
+Static canaries now cover both top-level
+`union:/C:/work/run/standalone-client/mods/sable-forge-1.20.1-2.0.0-all-userdev.jar%23198!/dev/example/Class.class`
+and nested
+`union:/C:/x/outer.jar%23198_/META-INF/jarjar/inner.jar%23218!/dev/Y.class`
+forms. The second canary must parse as `outer=C:/x/outer.jar`,
+`nested=META-INF/jarjar/inner.jar`, `resource=dev/Y.class`.
+
+Validation:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat --offline :forge:build :forge:verifyStandaloneRunConfiguration` | PASS; final all-jar rebuilt, mapped standalone artifact regenerated from it, nested SecureJar union URL canary passed |
+
+The next task should launch exactly one
+`.\gradlew.bat --offline :forge:runStandaloneClient` process.
+
+## Standalone Smoke Provenance Fix (2026-08-23)
+
+No Minecraft client or server was launched during this follow-up.
+
+The latest standalone runtime reached a healthy Forge state: all mods reached
+`DONE` and initial resource reload completed. It was stopped only by a
+standalone smoke provenance false negative:
+
+```text
+Sable standalone smoke did not resolve from the staged Sable artifact:
+union:/.../run/standalone-client/mods/sable-forge-1.20.1-2.0.0-all-userdev.jar%23198!/dev/ryanhcode/sable/forge/SableForgeStandaloneRuntimeSmoke.class
+```
+
+That `union:` URL is valid Forge/SecureJar evidence that the class came from
+the staged `all-userdev.jar`. The smoke verifier now normalizes resource URLs
+before comparing the outer artifact: it URI-decodes `%23`, strips the
+SecureJar `#<id>` suffix, strips the `!/resource` suffix, and compares the
+normalized outer jar path under `run/standalone-client/mods`. Companion
+provenance remains strict: Active provider from the staged outer Sable jar,
+Companion API/default provider from the nested
+`META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar`, and no external
+Companion/development output.
+
+Static canary:
+
+```text
+union:/C:/work/run/standalone-client/mods/sable-forge-1.20.1-2.0.0-all-userdev.jar%23198!/dev/example/Class.class
+-> C:/work/run/standalone-client/mods/sable-forge-1.20.1-2.0.0-all-userdev.jar
+```
+
+Validation:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat --offline :forge:build :forge:verifyStandaloneRunConfiguration` | PASS; final all-jar rebuilt, mapped standalone artifact regenerated from it, SecureJar union URL canary passed |
+
+The next task should launch exactly one
+`.\gradlew.bat --offline :forge:runStandaloneClient` process.
+
+## Current Standalone Packaged-Artifact Runtime Attempt (2026-08-23 15:40)
+
+Static setup before launch passed:
+
+- `prepareStandaloneSableUserdevArtifact` derives
+  `sable-forge-1.20.1-2.0.0-all-userdev.jar` from the final production
+  `sable-forge-1.20.1-2.0.0-all.jar` only;
+- production `MinecraftMixin` retains `f_91073_`; mapped userdev artifact
+  exposes `level`;
+- production `GameRendererMixin` retains `f_109059_`; mapped userdev artifact
+  exposes `minecraft`;
+- Companion and MixinExtras remain nested JarJar libraries; production
+  distributable remains unchanged;
+- standalone launcher surfaces remain clean of Sable dev output and target-mod
+  dependency leaks;
+- effective Registrate supplier count remains exactly one:
+  `create-1.20.1-6.0.8-mapped-dev.jar!/META-INF/jarjar/Registrate-MC1.20-1.3.3.jar`.
+
+Exactly one `.\gradlew.bat --offline :forge:runStandaloneClient` process was
+launched. No relaunch was performed.
+
+| Gate | Result | Evidence |
+|---|---|---|
+| 1 — Packaged artifact boot | **FAIL before title** | Sable's previous `MinecraftMixin.f_91073_` failure did not recur; Forge loaded `sable-forge-1.20.1-2.0.0-all-userdev.jar` from `run/standalone-client/mods` |
+| Companion runtime source | **NOT REACHED** | failure occurred while applying Flywheel Mixins before Sable construction/provider selection |
+| 2 — Short world regression | **NOT RUN** | title screen was not reached |
+| 3 — Clean exit | **NOT RUN** | process exited with a Mixin apply failure |
+
+Failure:
+
+```text
+Mixin [flywheel.impl.mixins.json:MinecraftMixin] ... FAILED during APPLY
+@Shadow field f_91036_ was not located in net.minecraft.client.Minecraft.
+```
+
+Root cause: the standalone userdev runtime still staged raw production
+Flywheel/Ponder jars while `forgeclientuserdev` runs against named/dev
+Minecraft classes. This is the same namespace class of issue as the Sable
+artifact, now exposed in an external target mod.
+
+No relaunch was performed. A static follow-up fix was applied:
+
+- standalone staging now copies ForgeGradle mapped Flywheel/Ponder artifacts:
+  `flywheel-forge-1.20.1-1.0.5_mapped_official_1.20.1.jar` and
+  `Ponder-Forge-1.20.1-1.0.91_mapped_official_1.20.1.jar`;
+- verifier checks Flywheel's `MinecraftMixin` canary is mapped from
+  `f_91036_` to `resourceManager`;
+- the staged mods directory now contains mapped Sable, mapped Create, mapped
+  Flywheel, mapped Ponder, and mapped Veil.
+
+Post-failure validation passed:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat --offline :forge:spotlessApply :forge:verifyStandaloneRunConfiguration :forge:verifyStandaloneForgeArtifact :forge:build` | PASS |
+
+Current blocker: **runtime PASS for the packaged artifact remains unproven**.
+The next task should use exactly one `runStandaloneClient` process with mapped
+Sable/Flywheel/Ponder/Create/Veil staged for Forge userdev.
+
+## Current Standalone Packaged-Artifact Runtime Attempt (2026-08-23 15:03)
+
+Static split-package proof/fix:
+
+- final outer `sable-forge-1.20.1-2.0.0-all.jar` and nested
+  `META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar` were mechanically
+  enumerated by Java package;
+- outer Sable classes and nested Companion classes had **no class-package
+  intersection**;
+- `dev.ryanhcode.sable.companion.impl` classes existed only in nested
+  Companion: `DefaultSableCompanion`, `DefaultSableCompanion$DistHelper`, and
+  `SableCompanionUtil`;
+- outer Sable owned `dev.ryanhcode.sable.ActiveSableCompanion`; no source move
+  was needed;
+- root cause was the outer Sable ServiceLoader descriptor naming nested
+  `DefaultSableCompanion`, causing module `sable` to claim the nested
+  Companion implementation package;
+- fix: outer descriptor now lists only `ActiveSableCompanion`; nested
+  Companion keeps its own `DefaultSableCompanion` descriptor. Artifact
+  verification now rejects outer/nested JarJar split packages and verifies
+  Active/default provider ownership and priority.
+
+Pre-launch validation passed:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat --offline :sable_companion_1_20:verifySableCompanionBackport :forge:verifyStandaloneForgeArtifact :forge:verifyStandaloneRunConfiguration :forge:compileJava :forge:build` | PASS |
+
+Exactly one `.\gradlew.bat --offline :forge:runStandaloneClient` process was
+launched. No second client, `runClient`, manual Minecraft launch, or separate
+server was started.
+
+| Gate | Result | Evidence |
+|---|---|---|
+| 1 — Packaged artifact boot | **FAIL before title** | Previous Sable/Companion split-package failure did not recur; Forge/ModLauncher owned startup and discovered Sable/Create/Flywheel/Ponder/Veil |
+| Companion runtime source | **NOT REACHED** | module resolution failed before Sable construction/provider selection |
+| 2 — Short world regression | **NOT RUN** | title screen was not reached |
+| 3 — Clean exit | **NOT RUN** | process exited with a module-layer exception |
+
+Failure:
+
+```text
+java.lang.module.ResolutionException: Modules Registrate.MC1._20 and
+Registrate export package com.tterrag.registrate.providers.loot to module sable
+```
+
+Targeted `debug.log` and launch-surface inspection showed the physical
+`run/standalone-client/mods` directory was clean. The extra `Registrate` module
+was instead supplied from ForgeGradle's mapped dependency path:
+`C:\Users\camel\.gradle\caches\forge_gradle\deobf_dependencies\local\target\Registrate\MC1.20-1.3.3_mapped_official_1.20.1\Registrate-MC1.20-1.3.3_mapped_official_1.20.1.jar`.
+The competing `Registrate.MC1._20` supplier was Create's nested JarJar:
+`run/standalone-client/mods/create-1.20.1-6.0.8-mapped-dev.jar!/META-INF/jarjar/Registrate-MC1.20-1.3.3.jar`.
+This was caused by the empty `standaloneRuntimeLauncher` source set inheriting
+`sourceSets.main.compileClasspath`, which let mapped target dependencies reach
+Forge/ModLauncher outside the staged mods directory.
+
+No relaunch was performed. A static follow-up harness fix was applied:
+
+- `runStandaloneClient` filters target mod artifacts from the launcher/module
+  classpath so they are supplied only from `run/standalone-client/mods` and
+  Create-owned JarJar;
+- `verifyStandaloneRunConfiguration` now rejects leaked Companion or target-mod
+  entries on JavaExec classpath, generated legacy classpath, JVM args, and
+  MOD_CLASSES, checks the exact five staged standalone mods, and proves Create's
+  nested Registrate canaries.
+
+Post-failure validation passed:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat --offline :forge:spotlessApply :forge:verifyStandaloneRunConfiguration :forge:verifyStandaloneForgeArtifact :forge:build` | PASS |
+
+Current blocker: **runtime PASS for the packaged artifact remains unproven**.
+The next task should use exactly one `runStandaloneClient` process with the
+validated Companion and effective-target-supplier fixes.
+
+## Current Standalone Packaged-Artifact Runtime Attempt (2026-08-23 14:45)
+
+Exactly one `.\gradlew.bat --offline :forge:runStandaloneClient` process was
+launched. No second client, `runClient`, manual Minecraft launch, or separate
+server was started.
+
+| Gate | Result | Evidence |
+|---|---|---|
+| 1 — Packaged artifact boot | **FAIL before title** | Forge/ModLauncher owned startup; `sable-forge-1.20.1-2.0.0-all.jar` was discovered as the `sable` mod; Create `6.0.8`, Flywheel `1.0.5`, Ponder `1.0.91`, and Veil `1.0.0` were discovered |
+| Companion runtime source | **FAIL before selection** | module resolution saw Companion both in the packaged JarJar and on the standalone runtime classpath |
+| 2 — Short world regression | **NOT RUN** | title screen was not reached |
+| 3 — Clean exit | **NOT RUN** | process exited with a module-layer exception |
+
+Targeted log evidence from `forge/run/standalone-client/logs/debug.log`:
+
+- `ModLauncher running ... --launchTarget forgeclientuserdev`;
+- `Found valid mod file sable-forge-1.20.1-2.0.0-all.jar with {sable}`;
+- `Selected file sable-companion-common-1.20.1-1.6.0.jar for modid sable.companion.common`;
+- failure:
+
+```text
+java.lang.module.ResolutionException: Modules sable and sable.companion.common
+export package dev.ryanhcode.sable.companion.impl to module veil
+```
+
+Root cause: `:forge` still exposed `:sable_companion_1_20` as a runtime API
+dependency, so the standalone JavaExec/module path carried Companion outside
+the final Sable JarJar. The final artifact itself still packages Companion
+through JarJar as intended.
+
+No relaunch was performed. A static follow-up fix was applied and validated:
+
+- `:forge` now uses `compileOnlyApi(project(':sable_companion_1_20'))` plus the
+  existing explicit `jarJar(project(':sable_companion_1_20'))` row;
+- `verifyStandaloneRunConfiguration` now rejects any external
+  `sable_companion_1_20` / `sable-companion-common-*` entry on the standalone
+  JavaExec classpath;
+- post-failure validation passed:
+  `verifyStandaloneRunConfiguration`, `verifyStandaloneForgeArtifact`, and
+  `:forge:build`.
+
+Current blocker: **runtime PASS for the packaged artifact remains unproven**.
+The next task should use exactly one `runStandaloneClient` process with the
+validated Companion classpath fix and unchanged dependency/feature scope.
+
+## Current Standalone Packaged-Artifact Runtime Attempt (2026-08-23 14:38)
+
+Static precheck before launch passed:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat --offline :forge:verifyStandaloneForgeArtifact` | PASS |
+| `.\gradlew.bat --offline :forge:verifyStandaloneRunConfiguration` | PASS |
+
+Exactly one `.\gradlew.bat --offline :forge:runStandaloneClient` process was
+then launched. No `runClient`, second standalone client, manual Minecraft
+launch, or separate server was started.
+
+| Gate | Result | Evidence |
+|---|---|---|
+| 1 — Packaged artifact boot | **FAIL before title** | Forge/ModLauncher owned startup this time: `ModLauncher running ... --launchTarget forgeclientuserdev`; Mixin subsystem initialized through ModLauncher |
+| Companion runtime source | **NOT REACHED** | Sable mod construction did not occur before the launcher failed |
+| 2 — Short world regression | **NOT RUN** | title screen was not reached |
+| 3 — Clean exit | **NOT RUN** | process exited with a launch-time exception |
+
+Failure evidence in `forge/run/standalone-client/logs/latest.log` and
+`debug.log` shows the launcher fix worked: `forgeclientuserdev` was selected and
+the previous vanilla `mcp.client.Start` / ignored-Mixin-args failure did not
+recur. The new failure is a standalone run-configuration filesystem issue:
+
+```text
+java.io.UncheckedIOException: java.io.IOException: Invalid paths argument,
+contained no existing paths:
+forge/build/resources/standaloneRuntimeLauncher,
+forge/build/classes/java/standaloneRuntimeLauncher
+```
+
+Root cause: the deliberately empty `standaloneRuntimeLauncher` source set
+prevents Sable development output from entering `MOD_CLASSES`, but Gradle did
+not physically create its empty output roots because it contains no files.
+Forge userdev still passed those roots through `MOD_CLASSES`, and SecureJar
+rejects non-existent roots.
+
+After the one failed runtime process, no relaunch was performed. A static
+follow-up fix was applied and validated:
+
+- new `prepareStandaloneRuntimeLauncherRoots` creates the empty
+  `standaloneRuntimeLauncher` resource/classes roots before the standalone run;
+- `verifyStandaloneRunConfiguration` now requires those roots to exist and to
+  contain no files, preserving the no-development-output guarantee;
+- post-failure static validation passed:
+  `spotlessApply`, `verifyStandaloneRunConfiguration`,
+  `verifyStandaloneForgeArtifact`, and `:forge:build`.
+
+Current blocker: **runtime PASS for the packaged artifact remains unproven**.
+The next task should use exactly one `runStandaloneClient` process with the now
+validated empty-root prep fix and unchanged dependency/feature scope.
+
+## Current Standalone Artifact Packaging Smoke (2026-08-23 14:27)
+
+Scope: package the existing Java 17 `:sable_companion_1_20` common library into
+the final Forge Sable artifact, validate the final reobfuscated JarJar output,
+and make one short standalone-style runtime attempt without enabling deferred
+Create/Flywheel Mixins, rendering, Rapier, Simulated, or Aeronautics.
+
+Packaging result: **STATIC PASS**.
+
+- Final artifact: `forge/build/libs/sable-forge-1.20.1-2.0.0-all.jar`.
+- Companion is packaged as a common JarJar library, not a Forge mod:
+  `META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar`.
+- Companion JarJar metadata:
+  `dev.ryanhcode.sable-companion:sable_companion_1_20:1.6.0`,
+  range `[1.6.0,)`, `isObfuscated=true`.
+- Companion contains `SableCompanion`, `DefaultSableCompanion`, its
+  `META-INF/services/dev.ryanhcode.sable.companion.SableCompanion` descriptor,
+  and `META-INF/LICENSE_sable_companion`; it contains no `mods.toml` or
+  NeoForge metadata.
+- The outer Sable artifact retains the Sable `@Mod` entrypoint, `mods.toml`,
+  `sable.refmap.json`, curated Mixin configs, Forge access transformer, and
+  required Sable ServiceLoader descriptors.
+- Companion classes are absent from the outer jar and present exactly once
+  inside the Companion JarJar.
+- MixinExtras Forge `0.5.3` remains the only additional Sable-owned JarJar row.
+- Create, Flywheel, Ponder, Registrate, and Veil are not bundled; Veil remains
+  an external runtime dependency.
+
+Static validation passed with JDK 17 and `--offline`:
+
+| Command | Result |
+|---|---|
+| `.\gradlew.bat --offline :sable_companion_1_20:verifySableCompanionBackport` | PASS |
+| `.\gradlew.bat --offline :forge:networkTest` | PASS |
+| `.\gradlew.bat --offline :forge:verifyTargetModpackDependencies` | PASS |
+| `.\gradlew.bat --offline :forge:verifyRuntimeModuleBoundary` | PASS |
+| `.\gradlew.bat --offline :forge:compileJava` | PASS |
+| `.\gradlew.bat --offline :forge:verifyStandaloneForgeArtifact` | PASS |
+| `.\gradlew.bat --offline :forge:verifyStandaloneRunConfiguration` | PASS after the launcher fix below |
+| `.\gradlew.bat --offline :forge:build` | PASS |
+
+One standalone client process was attempted through
+`.\gradlew.bat --offline :forge:runStandaloneClient`. It failed before title:
+
+```text
+Completely ignored arguments: [--mixin.config, sable-common-forge.mixins.json, --mixin.config, sable-forge.mixins.json]
+java.lang.NullPointerException: Cannot invoke
+"net.minecraftforge.fml.loading.progress.ProgressMeter.label(String)" because
+"net.minecraftforge.fml.loading.ImmediateWindowHandler.earlyProgress" is null
+```
+
+Root cause: the first standalone run configuration used `mcp.client.Start`,
+which entered vanilla `net.minecraft.client.main.Main`; Forge/ModLauncher did
+not own the launch, the Mixin arguments were ignored, and Forge's early-window
+progress handler crashed before `latest.log` initialized. `latest.log` is empty;
+the only file log is `forge/run/standalone-client/logs/debug.log`, and the
+useful failure evidence is the Gradle console stack above.
+
+After that one failed process, no second Minecraft launch was performed. The
+run configuration was repaired statically for the next task:
+
+- main is now `cpw.mods.bootstraplauncher.BootstrapLauncher`;
+- args now include `--launchTarget forgeclientuserdev` plus the Forge `47.4.20`
+  userdev arguments from the local Forge userdev `config.json`;
+- an empty `standaloneRuntimeLauncher` source set prevents ForgeGradle from
+  defaulting the standalone run to Sable's development output;
+- `verifyStandaloneRunConfiguration` now requires the BootstrapLauncher main,
+  `forgeclientuserdev`, exactly the empty launcher source set, and no
+  development mod declarations.
+
+Current blocker: **runtime PASS for the packaged artifact remains unproven**.
+The next milestone should use exactly one client JVM with the repaired
+standalone run configuration and should not change dependency selection or
+feature scope first.
+
 ## Current Final Result: Create 6 Same-JVM Runtime Smoke PASS (2026-08-23 13:56)
 
 The lifecycle smoke harness was fixed without changing production lifecycle

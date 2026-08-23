@@ -283,7 +283,7 @@ public final class SableForgeRuntimeSmoke {
                         + " baseline=" + baseline);
     }
 
-    private static void verifyCompanionSelection() {
+    static void verifyCompanionSelection() {
         final List<Class<? extends SableCompanion>> candidates = ServiceLoader.load(SableCompanion.class)
                 .stream()
                 .map(ServiceLoader.Provider::type)

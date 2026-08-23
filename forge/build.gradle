@@ -40,6 +40,12 @@ sourceSets {
         compileClasspath += sourceSets.main.compileClasspath
         runtimeClasspath += output + sourceSets.main.runtimeClasspath
     }
+    standaloneRuntimeLauncher {
+        java.setSrcDirs([])
+        resources.setSrcDirs([])
+        compileClasspath = files()
+        runtimeClasspath = output
+    }
 }
 
 minecraft {
@@ -61,6 +67,41 @@ minecraft {
                     source sourceSets.m6SableRun
                 }
             }
+        }
+
+        standaloneClient {
+            client true
+            main 'cpw.mods.bootstraplauncher.BootstrapLauncher'
+            source sourceSets.standaloneRuntimeLauncher
+            workingDirectory project.file('run/standalone-client')
+            args '--launchTarget', 'forgeclientuserdev'
+            args '--version', 'MOD_DEV'
+            args '--assetIndex', '{asset_index}'
+            args '--assetsDir', '{assets_root}'
+            args '--gameDir', '.'
+            args '--fml.forgeVersion', forge_version
+            args '--fml.mcVersion', forge_minecraft_version
+            args '--fml.forgeGroup', 'net.minecraftforge'
+            args '--fml.mcpVersion', '20230612.114412'
+            jvmArgs '-Djava.net.preferIPv6Addresses=system'
+            jvmArgs '-p', '{modules}'
+            jvmArgs '--add-modules', 'ALL-MODULE-PATH'
+            jvmArgs '--add-opens', 'java.base/java.util.jar=cpw.mods.securejarhandler'
+            jvmArgs '--add-opens', 'java.base/java.lang.invoke=cpw.mods.securejarhandler'
+            jvmArgs '--add-exports', 'java.base/sun.security.util=cpw.mods.securejarhandler'
+            jvmArgs '--add-exports', 'jdk.naming.dns/com.sun.jndi.dns=java.naming'
+            property 'legacyClassPath.file', '{minecraft_classpath_file}'
+            property 'ignoreList',
+                    ('bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,'
+                            + 'JarJarFileSystems,client-extra,fmlcore,javafmllanguage,lowcodelanguage,'
+                            + 'mclanguage,forge-')
+            property 'mergeModules', 'jna-5.10.0.jar,jna-platform-5.10.0.jar'
+            property 'forge.enableGameTest', 'true'
+            property 'forge.logging.console.level', 'info'
+            property 'mixin.debug.verbose', 'true'
+            property 'mixin.debug.countInjections', 'true'
+            property 'sable.standaloneRuntimeSmoke', 'true'
+            property 'veil.disableImgui', 'true'
         }
     }
 }
@@ -286,6 +327,11 @@ configurations {
         canBeResolved = true
         transitive = false
     }
+    targetRuntimeMapped {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
 }
 
 def targetModpackModsDir = rootProject.file('../target_modpack/mods')
@@ -295,6 +341,15 @@ def veilDevelopmentRuntime = layout.buildDirectory.file(
         "m6Runtime/Veil-forge-${forge_minecraft_version}-${forge_veil_version}-mapped-dev.jar")
 def createDevelopmentRuntime = layout.buildDirectory.file(
         "runtimePreflight/create-${forge_minecraft_version}-${forge_create_version}-mapped-dev.jar")
+def ponderDevelopmentRuntime = layout.buildDirectory.file(
+        "runtimePreflight/Ponder-Forge-${forge_minecraft_version}-${forge_ponder_version}-mapped-dev.jar")
+def standaloneRuntimeDir = layout.projectDirectory.dir('run/standalone-client')
+def standaloneRuntimeModsDir = layout.projectDirectory.dir('run/standalone-client/mods')
+def standaloneRuntimeSavesDir = layout.projectDirectory.dir('run/standalone-client/saves')
+def standaloneProductionSableArtifact = layout.buildDirectory.file(
+        "libs/${mod_id}-forge-${forge_minecraft_version}-${version}-all.jar")
+def standaloneMappedSableRuntime = layout.buildDirectory.file(
+        "standaloneRuntime/${mod_id}-forge-${forge_minecraft_version}-${version}-all-userdev.jar")
 
 def expectedTargetArtifacts = [
         create    : [
@@ -520,9 +575,9 @@ def prepareTargetModpackDependencies = tasks.register('prepareTargetModpackDepen
 def prepareVeilDevelopmentRuntime = tasks.register('prepareVeilDevelopmentRuntime') {
     group = 'forge backport'
     description = 'Patches Veil shadow aliases that ForgeGradle cannot reverse from the published reobfuscated jar.'
-    dependsOn tasks.named('createSrgToMcp')
     inputs.files(configurations.veilMapped)
     inputs.files(configurations.veilRuntimeMapped)
+    dependsOn tasks.named('createSrgToMcp')
     inputs.file(layout.buildDirectory.file('createSrgToMcp/output.srg'))
     outputs.file(veilDevelopmentRuntime)
 
@@ -530,27 +585,44 @@ def prepareVeilDevelopmentRuntime = tasks.register('prepareVeilDevelopmentRuntim
         File inputJar = configurations.veilRuntimeMapped.singleFile
         File outputJar = veilDevelopmentRuntime.get().asFile
         File mappingsFile = layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile
-        int aliasCount = VeilDevelopmentRuntimePatcher.patch(inputJar, mappingsFile, outputJar)
+        if (!mappingsFile.isFile()) {
+            throw new GradleException(
+                    "Veil development runtime patching requires ${mappingsFile}; run :forge:createSrgToMcp first"
+            )
+        }
+        def result = VeilDevelopmentRuntimePatcher.patch(inputJar, mappingsFile, outputJar)
         logger.lifecycle(
-                "Prepared filtered Veil development runtime with ${aliasCount} mapped shadow aliases: ${outputJar}"
+                "Prepared filtered Veil development runtime with ${result.aliasCount} mapped shadow aliases "
+                        + "and ${result.accessTransformerRemappedMembers}/${result.accessTransformerMemberEntries} "
+                        + "remapped AT member entries (unresolved known=${result.accessTransformerUnresolvedKnownMembers}): "
+                        + "${outputJar}"
         )
     }
 }
 
 def prepareCreateDevelopmentRuntime = tasks.register('prepareCreateDevelopmentRuntime') {
     group = 'forge backport'
-    description = 'Removes Create\'s older MixinExtras wrapper from the mapped development runtime only.'
+    description = 'Removes Create\'s older MixinExtras wrapper and remaps its AT for mapped userdev runtime.'
     dependsOn prepareTargetModpackDependencies
+    dependsOn tasks.named('createSrgToMcp')
     inputs.files(configurations.createRuntimeMapped)
+    inputs.file(layout.buildDirectory.file('createSrgToMcp/output.srg'))
     outputs.file(createDevelopmentRuntime)
 
     doLast {
         File inputJar = configurations.createRuntimeMapped.singleFile
         File outputJar = createDevelopmentRuntime.get().asFile
+        File mappingsFile = layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile
+        if (!mappingsFile.isFile()) {
+            throw new GradleException(
+                    "Create development runtime patching requires ${mappingsFile}; run :forge:createSrgToMcp first"
+            )
+        }
         outputJar.parentFile.mkdirs()
         String oldMixinExtras = expectedCreateLibraries.mixinextras.path
         int removedMetadataEntries = 0
         int removedPayloads = 0
+        def accessTransformerPatch = null
 
         ZipInputStream input = new ZipInputStream(new BufferedInputStream(new FileInputStream(inputJar)))
         ZipOutputStream output = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(outputJar)))
@@ -574,6 +646,10 @@ def prepareCreateDevelopmentRuntime = tasks.register('prepareCreateDevelopmentRu
                     contents = groovy.json.JsonOutput.prettyPrint(
                             groovy.json.JsonOutput.toJson(metadata)).getBytes('UTF-8')
                 }
+                if (entry.name == 'META-INF/accesstransformer.cfg') {
+                    accessTransformerPatch = VeilDevelopmentRuntimePatcher.remapAccessTransformer(contents, mappingsFile)
+                    contents = accessTransformerPatch.bytes
+                }
 
                 ZipEntry outputEntry = new ZipEntry(entry.name)
                 outputEntry.time = entry.time
@@ -592,20 +668,104 @@ def prepareCreateDevelopmentRuntime = tasks.register('prepareCreateDevelopmentRu
                             + "metadata=${removedMetadataEntries}, payloads=${removedPayloads}"
             )
         }
-        logger.lifecycle("Prepared Create development runtime without nested MixinExtras 0.4.1: ${outputJar}")
+        if (accessTransformerPatch == null) {
+            throw new GradleException('Create development runtime is missing META-INF/accesstransformer.cfg')
+        }
+        if (accessTransformerPatch.unresolvedKnownMembers != 0) {
+            throw new GradleException(
+                    "Create access transformer has unresolved mapped SRG members: "
+                            + accessTransformerPatch.unresolvedKnownMembers
+            )
+        }
+        logger.lifecycle("Prepared Create development runtime without nested MixinExtras 0.4.1 and with "
+                + "${accessTransformerPatch.remappedMembers}/${accessTransformerPatch.memberEntries} "
+                + "remapped AT member entries (unresolved known=${accessTransformerPatch.unresolvedKnownMembers}): "
+                + "${outputJar}")
+    }
+}
+
+def preparePonderDevelopmentRuntime = tasks.register('preparePonderDevelopmentRuntime') {
+    group = 'forge backport'
+    description = 'Remaps Ponder access transformer entries for mapped userdev runtime.'
+    dependsOn prepareTargetModpackDependencies
+    dependsOn tasks.named('createSrgToMcp')
+    inputs.files(configurations.targetRuntimeMapped)
+    inputs.file(layout.buildDirectory.file('createSrgToMcp/output.srg'))
+    outputs.file(ponderDevelopmentRuntime)
+
+    doLast {
+        File inputJar = configurations.targetRuntimeMapped.resolvedConfiguration.resolvedArtifacts.find {
+            it.moduleVersion.id.group == 'local.target'
+                    && it.name == "Ponder-Forge-${forge_minecraft_version}"
+                    && it.moduleVersion.id.version == "${forge_ponder_version}_mapped_official_${forge_minecraft_version}"
+        }?.file
+        if (inputJar == null || !inputJar.isFile()) {
+            throw new GradleException(
+                    "Ponder development runtime could not resolve mapped Ponder ${forge_ponder_version}"
+            )
+        }
+        File mappingsFile = layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile
+        if (!mappingsFile.isFile()) {
+            throw new GradleException(
+                    "Ponder development runtime patching requires ${mappingsFile}; run :forge:createSrgToMcp first"
+            )
+        }
+        File outputJar = ponderDevelopmentRuntime.get().asFile
+        outputJar.parentFile.mkdirs()
+        def accessTransformerPatch = null
+
+        ZipInputStream input = new ZipInputStream(new BufferedInputStream(new FileInputStream(inputJar)))
+        ZipOutputStream output = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(outputJar)))
+        try {
+            def entry
+            while ((entry = input.nextEntry) != null) {
+                byte[] contents = input.readAllBytes()
+                if (entry.name == 'META-INF/accesstransformer.cfg') {
+                    accessTransformerPatch = VeilDevelopmentRuntimePatcher.remapAccessTransformer(contents, mappingsFile)
+                    contents = accessTransformerPatch.bytes
+                }
+                ZipEntry outputEntry = new ZipEntry(entry.name)
+                outputEntry.time = entry.time
+                output.putNextEntry(outputEntry)
+                output.write(contents)
+                output.closeEntry()
+            }
+        } finally {
+            input.close()
+            output.close()
+        }
+
+        if (accessTransformerPatch == null) {
+            throw new GradleException('Ponder development runtime is missing META-INF/accesstransformer.cfg')
+        }
+        if (accessTransformerPatch.unresolvedKnownMembers != 0) {
+            throw new GradleException(
+                    "Ponder access transformer has unresolved mapped SRG members: "
+                            + accessTransformerPatch.unresolvedKnownMembers
+            )
+        }
+        logger.lifecycle("Prepared Ponder development runtime with "
+                + "${accessTransformerPatch.remappedMembers}/${accessTransformerPatch.memberEntries} "
+                + "remapped AT member entries (unresolved known=${accessTransformerPatch.unresolvedKnownMembers}): "
+                + "${outputJar}")
     }
 }
 
 dependencies {
     minecraft "net.minecraftforge:forge:${forge_minecraft_version}-${forge_version}"
 
-    api(project(':sable_companion_1_20')) {
+    compileOnlyApi(project(':sable_companion_1_20')) {
         attributes {
             attribute(
                     LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
                     objects.named(LibraryElements, LibraryElements.JAR)
             )
         }
+        transitive = false
+    }
+    jarJar(project(':sable_companion_1_20')) {
+        transitive = false
+        jarJar.ranged(it, "[${sable_companion_version},)")
     }
 
     compileOnly 'org.spongepowered:mixin:0.8.5'
@@ -627,6 +787,8 @@ dependencies {
     runtimeOnly fg.deobf("local.target:Ponder-Forge-${forge_minecraft_version}:${forge_ponder_version}")
 
     createRuntimeMapped fg.deobf("local.target:create-${forge_minecraft_version}:${forge_create_version}")
+    targetRuntimeMapped fg.deobf("local.target:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
+    targetRuntimeMapped fg.deobf("local.target:Ponder-Forge-${forge_minecraft_version}:${forge_ponder_version}")
 
     compileOnly fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}:slim")
     runtimeOnly files(prepareVeilDevelopmentRuntime)
@@ -1023,8 +1185,16 @@ tasks.register('verifyTargetModpackDependencies') {
 tasks.register('verifyVeilDependency') {
     group = 'verification'
     description = 'Confirms ForgeGradle compiles against mapped Veil 1.20 rather than its raw production jar.'
+    dependsOn prepareVeilDevelopmentRuntime
+    dependsOn tasks.named('preparePonderDevelopmentRuntime')
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    dependsOn tasks.named('createSrgToMcp')
 
     doLast {
+        File mappingsFile = layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile
+        if (!mappingsFile.isFile()) {
+            throw new GradleException("Missing SRG->named mapping file for Veil AT verification: ${mappingsFile}")
+        }
         def rawFiles = configurations.veilRaw.resolve()
         if (rawFiles.size() != 1) {
             throw new GradleException("Expected one raw Veil artifact, resolved ${rawFiles}")
@@ -1075,9 +1245,160 @@ tasks.register('verifyVeilDependency') {
             throw new GradleException('Mapped Veil canary does not contain the official-mapping Minecraft call')
         }
 
+        File stagedVeil = veilDevelopmentRuntime.get().asFile.canonicalFile
+        if (!stagedVeil.isFile()) {
+            throw new GradleException("Staged Veil development runtime is missing: ${stagedVeil}")
+        }
+        def sourceAtReport = VeilDevelopmentRuntimePatcher.inspectAccessTransformer(
+                configurations.veilRuntimeMapped.singleFile,
+                mappingsFile
+        )
+        def stagedAtReport = VeilDevelopmentRuntimePatcher.inspectAccessTransformer(stagedVeil, mappingsFile)
+        String compositeStateSrg = ('public net.minecraft.client.renderer.RenderType$CompositeRenderType '
+                + 'm_173265_()Lnet/minecraft/client/renderer/RenderType$CompositeState; # state')
+        String compositeStateNamed = ('public net.minecraft.client.renderer.RenderType$CompositeRenderType '
+                + 'state()Lnet/minecraft/client/renderer/RenderType$CompositeState; # state')
+        if (!sourceAtReport.text.contains(compositeStateSrg)) {
+            throw new GradleException('Original mapped Veil artifact no longer contains the expected stale state AT canary')
+        }
+        if (!stagedAtReport.text.contains(compositeStateNamed)
+                || stagedAtReport.text.contains('m_173265_()Lnet/minecraft/client/renderer/RenderType$CompositeState;')) {
+            throw new GradleException('Staged Veil AT did not remap CompositeRenderType.state() correctly')
+        }
+        if (!stagedAtReport.text.contains(
+                'public net.minecraft.client.renderer.GameRenderer getFov(Lnet/minecraft/client/Camera;FZ)D # getFov')) {
+            throw new GradleException('Staged Veil AT did not remap GameRenderer.getFov canary')
+        }
+        if (!stagedAtReport.text.contains(
+                'public net.minecraft.client.renderer.ItemInHandRenderer renderPlayerArm'
+                        + '(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;'
+                        + 'IFFLnet/minecraft/world/entity/HumanoidArm;)V # renderPlayerArm')) {
+            throw new GradleException('Staged Veil AT did not remap ItemInHandRenderer.renderPlayerArm canary')
+        }
+        if (stagedAtReport.unresolvedKnownMembers != 0) {
+            throw new GradleException(
+                    "Staged Veil AT has unresolved known SRG members: ${stagedAtReport.unresolvedKnownMembers}"
+            )
+        }
+        if (sourceAtReport.remappedMembers <= 0 || stagedAtReport.remappedMembers != 0) {
+            throw new GradleException(
+                    "Unexpected Veil AT remap counts: source remappable=${sourceAtReport.remappedMembers}, "
+                            + "staged remappable=${stagedAtReport.remappedMembers}"
+            )
+        }
+
+        def standaloneTargetAts = []
+        ([createDevelopmentRuntime.get().asFile, ponderDevelopmentRuntime.get().asFile])
+                .findAll { it.isFile() }
+                .each { jar ->
+                    try {
+                        def report = VeilDevelopmentRuntimePatcher.inspectAccessTransformer(jar, mappingsFile)
+                        standaloneTargetAts.add("${jar.name}: remappableNow=${report.remappedMembers}, "
+                                + "unresolvedKnown=${report.unresolvedKnownMembers}")
+                    } catch (IOException ignored) {
+                        // No access transformer in this target artifact.
+                    }
+                }
+
         logger.lifecycle("Verified mapped Veil ${mappedArtifact.moduleVersion.id}")
         logger.lifecycle("  raw:    ${rawVeil} (${sha256(rawVeil)})")
         logger.lifecycle("  mapped: ${mappedVeil} (${sha256(mappedVeil)})")
+        logger.lifecycle("  staged: ${stagedVeil} (${sha256(stagedVeil)})")
+        logger.lifecycle("  Veil AT: entries=${stagedAtReport.memberEntries}, "
+                + "remapped=${sourceAtReport.remappedMembers}, "
+                + "remainingRemappable=${stagedAtReport.remappedMembers}, "
+                + "unresolved=${stagedAtReport.unresolvedKnownMembers}; "
+                + "CompositeRenderType m_173265_ -> state")
+        if (!standaloneTargetAts.isEmpty()) {
+            logger.lifecycle("  Other staged target AT scan: ${standaloneTargetAts}")
+        }
+    }
+}
+
+tasks.register('verifyStandaloneAccessTransformerNamespaces') {
+    group = 'verification'
+    description = 'Verifies staged standalone target-mod access transformers are remapped from SRG to userdev names.'
+    dependsOn tasks.named('createSrgToMcp')
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    dependsOn tasks.named('preparePonderDevelopmentRuntime')
+    dependsOn tasks.named('prepareVeilDevelopmentRuntime')
+
+    doLast {
+        File mappingsFile = layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile
+        if (!mappingsFile.isFile()) {
+            throw new GradleException("Missing SRG->named mapping file for standalone AT verification: ${mappingsFile}")
+        }
+
+        def mappedRuntimeArtifact = { String artifactName, String expectedVersion ->
+            String expectedMappedVersion = "${expectedVersion}_mapped_official_${forge_minecraft_version}"
+            def artifact = configurations.targetRuntimeMapped.resolvedConfiguration.resolvedArtifacts.find {
+                it.moduleVersion.id.group == 'local.target'
+                        && it.name == artifactName
+                        && it.moduleVersion.id.version == expectedMappedVersion
+            }
+            if (artifact == null) {
+                throw new GradleException(
+                        "Standalone AT verifier could not resolve mapped ${artifactName}:${expectedMappedVersion}"
+                )
+            }
+            artifact.file
+        }
+
+        File sourceCreate = configurations.createRuntimeMapped.singleFile
+        File sourcePonder = mappedRuntimeArtifact(
+                "Ponder-Forge-${forge_minecraft_version}".toString(),
+                forge_ponder_version.toString())
+        File sourceVeil = configurations.veilRuntimeMapped.singleFile
+        File stagedCreate = createDevelopmentRuntime.get().asFile
+        File stagedPonder = ponderDevelopmentRuntime.get().asFile
+        File stagedVeil = veilDevelopmentRuntime.get().asFile
+
+        def checkAt = { String label, File source, File staged, int expectedRemapped ->
+            def sourceReport = VeilDevelopmentRuntimePatcher.inspectAccessTransformer(source, mappingsFile)
+            def stagedReport = VeilDevelopmentRuntimePatcher.inspectAccessTransformer(staged, mappingsFile)
+            if (sourceReport.remappedMembers != expectedRemapped) {
+                throw new GradleException(
+                        "${label} source AT remappable count=${sourceReport.remappedMembers}, "
+                                + "expected ${expectedRemapped}"
+                )
+            }
+            if (stagedReport.remappedMembers != 0 || stagedReport.unresolvedKnownMembers != 0) {
+                throw new GradleException(
+                        "${label} staged AT still has remappable=${stagedReport.remappedMembers}, "
+                                + "unresolvedKnown=${stagedReport.unresolvedKnownMembers}"
+                )
+            }
+            [sourceReport, stagedReport]
+        }
+
+        def createReports = checkAt('Create', sourceCreate, stagedCreate, 28)
+        def ponderReports = checkAt('Ponder', sourcePonder, stagedPonder, 5)
+        def veilReports = checkAt('Veil', sourceVeil, stagedVeil, 31)
+
+        String waxables = 'public-f net.minecraft.world.item.HoneycombItem WAXABLES # WAXABLES'
+        if (!createReports[1].text.contains(waxables)
+                || createReports[1].text.contains('HoneycombItem f_150863_')) {
+            throw new GradleException('Staged Create AT did not remap HoneycombItem.WAXABLES correctly')
+        }
+
+        def stagedMods = [
+                'Create': stagedCreate,
+                'Ponder': stagedPonder,
+                'Veil': stagedVeil
+        ]
+        stagedMods.each { label, jar ->
+            def report = VeilDevelopmentRuntimePatcher.inspectAccessTransformer(jar, mappingsFile)
+            if (report.remappedMembers != 0 || report.unresolvedKnownMembers != 0) {
+                throw new GradleException(
+                        "${label} staged AT has stale known SRG members: remappable=${report.remappedMembers}, "
+                                + "unresolvedKnown=${report.unresolvedKnownMembers}"
+                )
+            }
+        }
+
+        logger.lifecycle("Verified staged standalone AT namespaces: "
+                + "Create 28->0, Ponder 5->0, Veil 31->0; "
+                + "HoneycombItem f_150863_ -> WAXABLES")
     }
 }
 
@@ -1316,36 +1637,94 @@ def forgeServiceProviders = [
         'dev.ryanhcode.sable.platform.SableSubLevelRenderPlatform'    : 'dev.ryanhcode.sable.forge.platform.SableSubLevelRenderPlatformImpl'
 ]
 
-tasks.register('verifyForgePackaging') {
+tasks.register('verifyStandaloneForgeArtifact') {
     group = 'verification'
-    description = 'Statically verifies the Forge package and the separate Companion library package.'
-    dependsOn tasks.named('jar')
+    description = 'Statically verifies the final reobfuscated Forge artifact and its JarJar-packaged Companion library.'
+    dependsOn tasks.named('reobfJarJar')
     dependsOn project(':sable_companion_1_20').tasks.named('jar')
 
     doLast {
-        File forgeArchive = tasks.named('jar').get().archiveFile.get().asFile
-        File companionArchive = project(':sable_companion_1_20').tasks.named('jar').get().archiveFile.get().asFile
+        File forgeArchive = tasks.named('jarJar').get().archiveFile.get().asFile
         JarFile forgeJar = new JarFile(forgeArchive)
         try {
+            def outerEntries = forgeJar.entries().toList()
+            def requireEntry = { String entry ->
+                if (forgeJar.getJarEntry(entry) == null) {
+                    throw new GradleException("Final Forge artifact is missing ${entry}")
+                }
+            }
+            def readText = { String entry ->
+                def jarEntry = forgeJar.getJarEntry(entry)
+                if (jarEntry == null) {
+                    throw new GradleException("Final Forge artifact is missing ${entry}")
+                }
+                forgeJar.getInputStream(jarEntry).getText('UTF-8')
+            }
+            def readNestedJar = { String entry ->
+                def jarEntry = forgeJar.getJarEntry(entry)
+                if (jarEntry == null) {
+                    throw new GradleException("Final Forge artifact is missing nested jar ${entry}")
+                }
+                byte[] bytes = forgeJar.getInputStream(jarEntry).readAllBytes()
+                def nestedEntries = [:]
+                def classMajors = [:]
+                new java.util.jar.JarInputStream(new ByteArrayInputStream(bytes)).withCloseable { nested ->
+                    def nestedEntry
+                    while ((nestedEntry = nested.nextJarEntry) != null) {
+                        if (nestedEntry.directory) {
+                            continue
+                        }
+                        byte[] contents = nested.readAllBytes()
+                        nestedEntries[nestedEntry.name] = contents
+                        if (nestedEntry.name.endsWith('.class')) {
+                            if (contents.length < 8) {
+                                throw new GradleException("Nested class ${nestedEntry.name} has no class header")
+                            }
+                            int major = ((contents[6] & 0xFF) << 8) | (contents[7] & 0xFF)
+                            classMajors[nestedEntry.name] = major
+                        }
+                    }
+                }
+                [entries: nestedEntries, classMajors: classMajors]
+            }
+            def packageName = { String classEntryName ->
+                int slash = classEntryName.lastIndexOf('/')
+                slash < 0 ? '<default>' : classEntryName.substring(0, slash).replace('/', '.')
+            }
+            def classPackages = { Collection<String> entryNames ->
+                entryNames.findAll { it.endsWith('.class') }
+                        .collect { packageName(it) }
+                        .toSet()
+            }
+            def providerPackages = { Collection<String> providerNames ->
+                providerNames.collect { provider ->
+                    int dot = provider.lastIndexOf('.')
+                    dot < 0 ? '<default>' : provider.substring(0, dot)
+                }.toSet()
+            }
+            def serviceProviders = { byte[] bytes ->
+                new String(bytes, 'UTF-8')
+                        .readLines()
+                        .collect { it.trim() }
+                        .findAll { !it.isEmpty() && !it.startsWith('#') }
+            }
+
             def requiredEntries = [
                     'dev/ryanhcode/sable/forge/SableForge.class',
                     'META-INF/mods.toml',
                     'META-INF/accesstransformer-forge.cfg',
                     'sable-common-forge.mixins.json',
                     'sable-forge.mixins.json',
-                    'sable.refmap.json'
+                    'sable.refmap.json',
+                    'META-INF/jarjar/metadata.json'
             ]
-            requiredEntries.each { entry ->
-                if (forgeJar.getJarEntry(entry) == null) {
-                    throw new GradleException("Forge jar is missing ${entry}")
-                }
-            }
+            requiredEntries.each(requireEntry)
 
             forgeServiceProviders.each { service, provider ->
                 String servicePath = "META-INF/services/${service}"
                 def entry = forgeJar.getJarEntry(servicePath)
                 if (entry == null) {
-                    throw new GradleException("Forge jar is missing ${servicePath}")
+                    throw new GradleException("Final Forge artifact is missing ${servicePath}")
                 }
                 String content = forgeJar.getInputStream(entry).getText('UTF-8').trim()
                 if (content != provider) {
@@ -1353,12 +1732,26 @@ tasks.register('verifyForgePackaging') {
                 }
                 String providerClass = provider.replace('.', '/') + '.class'
                 if (forgeJar.getJarEntry(providerClass) == null) {
-                    throw new GradleException("Forge jar is missing provider class ${providerClass}")
+                    throw new GradleException("Final Forge artifact is missing provider class ${providerClass}")
                 }
             }
 
+            String companionServicePath = 'META-INF/services/dev.ryanhcode.sable.companion.SableCompanion'
+            def companionProviders = readText(companionServicePath)
+                    .readLines()
+                    .collect { it.trim() }
+                    .findAll { !it.isEmpty() && !it.startsWith('#') }
+            def expectedCompanionProviders = [
+                    'dev.ryanhcode.sable.ActiveSableCompanion'
+            ]
+            if (companionProviders != expectedCompanionProviders) {
+                throw new GradleException(
+                        "Unexpected Companion providers in ${companionServicePath}: ${companionProviders}"
+                )
+            }
+
             if (forgeJar.manifest.mainAttributes.getValue('FMLAT') != 'accesstransformer-forge.cfg') {
-                throw new GradleException('Forge jar manifest has no curated FMLAT')
+                throw new GradleException('Final Forge artifact manifest has no curated FMLAT')
             }
             if (!file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java').getText('UTF-8').contains('@Mod(Sable.MOD_ID)')) {
                 throw new GradleException('Forge bootstrap source is missing @Mod(Sable.MOD_ID)')
@@ -1381,35 +1774,1006 @@ tasks.register('verifyForgePackaging') {
                 deferredPrefixes.any { prefix -> entry.name.startsWith(prefix) }
             }
             if (!deferredEntries.isEmpty()) {
-                throw new GradleException("Deferred classes leaked into Forge jar: ${deferredEntries*.name}")
+                throw new GradleException("Deferred classes leaked into final Forge artifact: ${deferredEntries*.name}")
             }
-            if (forgeJar.entries().toList().any { it.name.startsWith('dev/ryanhcode/sable/companion/') }) {
-                throw new GradleException('Companion classes were unexpectedly bundled before the JarJar milestone')
+
+            def metadata = new JsonSlurper().parseText(readText('META-INF/jarjar/metadata.json'))
+            def nestedRows = metadata.jars ?: []
+            def companionRows = nestedRows.findAll { row ->
+                row.identifier.group == 'dev.ryanhcode.sable-companion'
+                        && row.version.artifactVersion == sable_companion_version
+            }
+            if (companionRows.size() != 1) {
+                throw new GradleException("Expected one Companion JarJar metadata row, found ${companionRows}")
+            }
+            def mixinExtrasRows = nestedRows.findAll { row ->
+                row.identifier.group == 'io.github.llamalad7'
+                        && row.identifier.artifact == 'mixinextras-forge'
+                        && row.version.artifactVersion == '0.5.3'
+            }
+            if (mixinExtrasRows.size() != 1) {
+                throw new GradleException("Expected one MixinExtras Forge 0.5.3 JarJar row, found ${mixinExtrasRows}")
+            }
+
+            def forbiddenNestedRows = nestedRows.findAll { row ->
+                String coordinates = "${row.identifier.group}:${row.identifier.artifact}:${row.version.artifactVersion}".toLowerCase(Locale.ROOT)
+                coordinates.contains('create')
+                        || coordinates.contains('flywheel')
+                        || coordinates.contains('ponder')
+                        || coordinates.contains('registrate')
+                        || coordinates.contains('veil')
+            }
+            if (!forbiddenNestedRows.isEmpty()) {
+                throw new GradleException("External target dependency was bundled into Sable: ${forbiddenNestedRows}")
+            }
+
+            def companionOuterClasses = outerEntries.findAll { entry ->
+                entry.name.startsWith('dev/ryanhcode/sable/companion/') && entry.name.endsWith('.class')
+            }
+            if (!companionOuterClasses.isEmpty()) {
+                throw new GradleException("Companion classes leaked outside JarJar: ${companionOuterClasses*.name}")
+            }
+
+            def outerClassPackages = classPackages(outerEntries.findAll {
+                !it.name.startsWith('META-INF/jarjar/')
+            }.collect { it.name })
+            def outerServiceProviders = outerEntries.findAll {
+                it.name.startsWith('META-INF/services/') && !it.directory
+            }.collectMany { entry ->
+                readText(entry.name)
+                        .readLines()
+                        .collect { it.trim() }
+                        .findAll { !it.isEmpty() && !it.startsWith('#') }
+            }
+            def outerModulePackages = (outerClassPackages + providerPackages(outerServiceProviders)).toSet()
+
+            def companionJar = readNestedJar(companionRows[0].path)
+            [
+                    'dev/ryanhcode/sable/companion/SableCompanion.class',
+                    'dev/ryanhcode/sable/companion/impl/DefaultSableCompanion.class',
+                    'META-INF/services/dev.ryanhcode.sable.companion.SableCompanion',
+                    'META-INF/LICENSE_sable_companion'
+            ].each { entry ->
+                if (!companionJar.entries.containsKey(entry)) {
+                    throw new GradleException("Nested Companion library is missing ${entry}")
+                }
+            }
+            if (companionJar.entries.containsKey('META-INF/mods.toml')
+                    || companionJar.entries.containsKey('META-INF/neoforge.mods.toml')) {
+                throw new GradleException('Nested Companion common library unexpectedly contains mod metadata')
+            }
+            String nestedProvider = new String(
+                    companionJar.entries['META-INF/services/dev.ryanhcode.sable.companion.SableCompanion'],
+                    'UTF-8'
+            ).trim()
+            if (nestedProvider != 'dev.ryanhcode.sable.companion.impl.DefaultSableCompanion') {
+                throw new GradleException("Unexpected nested Companion provider: ${nestedProvider}")
+            }
+            def nestedCompanionProviders = serviceProviders(
+                    companionJar.entries['META-INF/services/dev.ryanhcode.sable.companion.SableCompanion']
+            )
+            if (nestedCompanionProviders != ['dev.ryanhcode.sable.companion.impl.DefaultSableCompanion']) {
+                throw new GradleException("Unexpected nested Companion providers: ${nestedCompanionProviders}")
+            }
+            if (companionJar.entries.containsKey('dev/ryanhcode/sable/ActiveSableCompanion.class')) {
+                throw new GradleException('Nested Companion unexpectedly contains ActiveSableCompanion')
+            }
+            if (forgeJar.getJarEntry('dev/ryanhcode/sable/ActiveSableCompanion.class') == null) {
+                throw new GradleException('Outer Sable artifact is missing ActiveSableCompanion')
+            }
+            if (forgeJar.getJarEntry('dev/ryanhcode/sable/companion/impl/DefaultSableCompanion.class') != null) {
+                throw new GradleException('Outer Sable artifact unexpectedly contains DefaultSableCompanion')
+            }
+            if (file('../common/src/main/java/dev/ryanhcode/sable/ActiveSableCompanion.java')
+                    .getText('UTF-8').contains('@SableCompanion.LoadPriority')) {
+                throw new GradleException('ActiveSableCompanion should keep the default priority 1000')
+            }
+            if (!project(':sable_companion_1_20')
+                    .file('src/main/java/dev/ryanhcode/sable/companion/impl/DefaultSableCompanion.java')
+                    .getText('UTF-8').contains('@SableCompanion.LoadPriority(500)')) {
+                throw new GradleException('DefaultSableCompanion no longer declares fallback priority 500')
+            }
+            def incompatibleCompanionClasses = companionJar.classMajors.findAll { name, major ->
+                name.startsWith('dev/ryanhcode/sable/companion/') && major != 61
+            }
+            if (!incompatibleCompanionClasses.isEmpty()) {
+                throw new GradleException("Companion classes are not Java 17 major 61: ${incompatibleCompanionClasses}")
+            }
+
+            def companionClassRows = nestedRows.findAll { row ->
+                def nested = readNestedJar(row.path)
+                nested.entries.containsKey('dev/ryanhcode/sable/companion/SableCompanion.class')
+            }
+            if (companionClassRows.size() != 1) {
+                throw new GradleException(
+                        "Expected exactly one nested Companion class provider, found ${companionClassRows}"
+                )
+            }
+
+            def splitPackagesByNestedJar = nestedRows.collectEntries { row ->
+                def nested = readNestedJar(row.path)
+                def nestedPackages = classPackages(nested.entries.keySet())
+                [(row.path): (outerModulePackages.intersect(nestedPackages).sort())]
+            }.findAll { path, packages -> !packages.isEmpty() }
+            if (!splitPackagesByNestedJar.isEmpty()) {
+                throw new GradleException("Outer Sable and nested JarJar split packages: ${splitPackagesByNestedJar}")
+            }
+            def companionPackages = classPackages(companionJar.entries.keySet())
+            def companionSplitPackages = outerModulePackages.intersect(companionPackages).sort()
+            if (!companionSplitPackages.isEmpty()) {
+                throw new GradleException(
+                        "Outer Sable and nested Companion share Java packages: ${companionSplitPackages}"
+                )
+            }
+
+            def forbiddenArtifactEntries = outerEntries.findAll { entry ->
+                String name = entry.name.toLowerCase(Locale.ROOT)
+                name.contains('create-1.20.1-0.5')
+                        || name.contains('flywheel-0.6')
+                        || name.contains('flywheel-forge-1.20.1')
+                        || name.contains('ponder-forge-1.20.1')
+                        || name.contains('registrate-mc1.20')
+                        || name.contains('veil-forge-1.20.1')
+            }
+            if (!forbiddenArtifactEntries.isEmpty()) {
+                throw new GradleException(
+                        "Raw target/development dependency artifact leaked into final Sable jar: "
+                                + forbiddenArtifactEntries*.name
+                )
+            }
+
+            def configurableResources = outerEntries.findAll { entry ->
+                !entry.directory && (
+                        entry.name == 'META-INF/MANIFEST.MF'
+                                || entry.name == 'META-INF/mods.toml'
+                                || entry.name.startsWith('META-INF/services/')
+                                || entry.name.endsWith('.json')
+                                || entry.name.endsWith('.cfg')
+                )
+            }
+            def smokeConfigLeaks = configurableResources.findAll { entry ->
+                String content = forgeJar.getInputStream(entry).getText('UTF-8')
+                content.contains('sable.runtimeSmoke')
+                        || content.contains('sable.targetRuntimeSmoke')
+                        || content.contains('sable.standaloneRuntimeSmoke')
+            }
+            if (!smokeConfigLeaks.isEmpty()) {
+                throw new GradleException(
+                        "Development smoke/probe configuration leaked into packaged resources: "
+                                + smokeConfigLeaks*.name
+                )
             }
         } finally {
             forgeJar.close()
         }
 
-        JarFile companionJar = new JarFile(companionArchive)
-        try {
-            [
-                    'dev/ryanhcode/sable/companion/SableCompanion.class',
-                    'META-INF/services/dev.ryanhcode.sable.companion.SableCompanion',
-                    'META-INF/LICENSE_sable_companion'
-            ].each { entry ->
-                if (companionJar.getJarEntry(entry) == null) {
-                    throw new GradleException("Companion library jar is missing ${entry}")
-                }
+        logger.lifecycle("Verified final standalone Forge artifact ${forgeArchive.name}: Companion JarJar, "
+                + "ServiceLoader resources, curated metadata, no bundled target mods")
+    }
+}
+
+tasks.register('verifyForgePackaging') {
+    group = 'verification'
+    description = 'Compatibility alias for the final standalone Forge artifact verification.'
+    dependsOn tasks.named('verifyStandaloneForgeArtifact')
+}
+
+def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSableUserdevArtifact') {
+    dependsOn tasks.named('createSrgToMcp')
+    dependsOn tasks.named('reobfJarJar')
+    group = 'forge backport'
+    description = 'Derives a forgeclientuserdev-mapped standalone Sable artifact from the final reobfuscated all-jar.'
+
+    inputs.file(standaloneProductionSableArtifact)
+    inputs.file(layout.buildDirectory.file('createSrgToMcp/output.srg'))
+    inputs.files(configurations.compileClasspath)
+    outputs.file(standaloneMappedSableRuntime)
+
+    doLast {
+        File inputJar = standaloneProductionSableArtifact.get().asFile
+        if (!inputJar.isFile()) {
+            throw new GradleException(
+                    "Standalone Sable userdev mapping requires final artifact ${inputJar}; run :forge:build first"
+            )
+        }
+        File mappingsFile = layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile
+        if (!mappingsFile.isFile()) {
+            throw new GradleException(
+                    "Standalone Sable userdev mapping requires ${mappingsFile}; run :forge:createSrgToMcp first"
+            )
+        }
+        File outputJar = standaloneMappedSableRuntime.get().asFile
+        def standaloneHierarchyClasspath = configurations.compileClasspath.files.findAll {
+            it.isFile() && it.name.endsWith('.jar')
+        }
+        def result = SableStandaloneUserdevMapper.map(
+                inputJar,
+                mappingsFile,
+                outputJar,
+                standaloneHierarchyClasspath)
+        logger.lifecycle("Prepared standalone userdev Sable artifact ${outputJar.name} from "
+                + "${inputJar.absolutePath} sha256=${result.inputSha256}; transformedClasses="
+                + "${result.transformedClasses}, declarationRemaps=${result.declarationRemaps}, "
+                + "referenceRemaps=${result.referenceRemaps}, selfReferenceRemaps="
+                + "${result.selfReferenceRemaps}, annotationRemaps=${result.annotationRemaps}, "
+                + "hierarchyDeclarationRemaps=${result.hierarchyDeclarationRemaps}, "
+                + "hierarchyReferenceRemaps=${result.hierarchyReferenceRemaps}, "
+                + "bridgeHierarchyDeclarationRemaps=${result.bridgeHierarchyDeclarationRemaps}, "
+                + "bridgeHierarchyReferenceRemaps=${result.bridgeHierarchyReferenceRemaps}, "
+                + "handleReferenceRemaps=${result.handleReferenceRemaps}, "
+                + "constantDynamicHandleReferenceRemaps=${result.constantDynamicHandleReferenceRemaps}, "
+                + "unresolvedHierarchyDeclarations=${result.unresolvedHierarchyDeclarations}, "
+                + "unresolvedHierarchyReferences=${result.unresolvedHierarchyReferences}")
+    }
+}
+
+tasks.register('prepareStandaloneRuntimeLauncherRoots') {
+    group = 'forge backport'
+    description = 'Creates the intentionally empty standalone launcher source-set roots required by Forge userdev MOD_CLASSES.'
+    dependsOn tasks.named('standaloneRuntimeLauncherClasses')
+
+    outputs.dir(sourceSets.standaloneRuntimeLauncher.output.resourcesDir)
+    outputs.dirs(sourceSets.standaloneRuntimeLauncher.output.classesDirs)
+
+    doLast {
+        File resourcesDir = sourceSets.standaloneRuntimeLauncher.output.resourcesDir
+        resourcesDir.mkdirs()
+        sourceSets.standaloneRuntimeLauncher.output.classesDirs.files.each { dir ->
+            dir.mkdirs()
+        }
+        logger.lifecycle("Prepared empty standalone launcher MOD_CLASSES roots: "
+                + ([resourcesDir] + sourceSets.standaloneRuntimeLauncher.output.classesDirs.files).collect {
+                    it.absolutePath
+                })
+    }
+}
+
+tasks.register('prepareStandaloneRuntimeSmoke') {
+    group = 'forge backport'
+    description = 'Stages the standalone short-smoke mods directory with the final Sable artifact and external runtime dependencies.'
+    dependsOn prepareStandaloneSableUserdevArtifact
+    dependsOn tasks.named('prepareTargetModpackDependencies')
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    dependsOn tasks.named('preparePonderDevelopmentRuntime')
+    dependsOn tasks.named('prepareStandaloneSableUserdevArtifact')
+    dependsOn tasks.named('prepareVeilDevelopmentRuntime')
+    dependsOn tasks.named('prepareStandaloneRuntimeLauncherRoots')
+    dependsOn prepareCreateDevelopmentRuntime
+    dependsOn prepareTargetModpackDependencies
+
+    inputs.file(standaloneMappedSableRuntime)
+    inputs.file(createDevelopmentRuntime)
+    inputs.file(ponderDevelopmentRuntime)
+    inputs.file(veilDevelopmentRuntime)
+    inputs.files(fileTree(targetModpackRepository) { include '*.jar' })
+    outputs.dir(standaloneRuntimeDir)
+
+    doLast {
+        File runDir = standaloneRuntimeDir.asFile
+        File modsDir = standaloneRuntimeModsDir.asFile
+        File savesDir = standaloneRuntimeSavesDir.asFile
+        modsDir.mkdirs()
+        savesDir.mkdirs()
+
+        def mappedRuntimeArtifact = { String artifactName, String expectedVersion ->
+            String expectedMappedVersion = "${expectedVersion}_mapped_official_${forge_minecraft_version}"
+            def artifact = configurations.targetRuntimeMapped.resolvedConfiguration.resolvedArtifacts.find {
+                it.moduleVersion.id.group == 'local.target'
+                        && it.name == artifactName
+                        && it.moduleVersion.id.version == expectedMappedVersion
             }
-            if (companionJar.getJarEntry('META-INF/mods.toml') != null) {
-                throw new GradleException('Companion common library unexpectedly contains Forge mod metadata')
+            if (artifact == null) {
+                throw new GradleException(
+                        "Standalone runtime could not resolve mapped ${artifactName}:${expectedMappedVersion}"
+                )
             }
-        } finally {
-            companionJar.close()
+            artifact.file
+        }
+        File mappedFlywheel = mappedRuntimeArtifact(
+                "flywheel-forge-${forge_minecraft_version}".toString(),
+                forge_flywheel_version.toString())
+        File mappedPonder = ponderDevelopmentRuntime.get().asFile
+
+        def managedNames = [
+                standaloneMappedSableRuntime.get().asFile.name,
+                createDevelopmentRuntime.get().asFile.name,
+                mappedFlywheel.name,
+                mappedPonder.name,
+                veilDevelopmentRuntime.get().asFile.name
+        ] as Set
+        modsDir.listFiles()?.findAll { file ->
+            managedNames.contains(file.name)
+                    || file.name.startsWith("${mod_id}-forge-")
+                    || file.name.startsWith("flywheel-forge-${forge_minecraft_version}-")
+                    || file.name.startsWith("Ponder-Forge-${forge_minecraft_version}-")
+        }?.each { file ->
+            Files.deleteIfExists(file.toPath())
         }
 
-        logger.lifecycle("Verified Forge package ${forgeArchive.name} and Companion library ${companionArchive.name}")
+        def copyMod = { File source ->
+            if (!source.isFile()) {
+                throw new GradleException("Standalone runtime dependency is missing: ${source}")
+            }
+            Files.copy(
+                    source.toPath(),
+                    new File(modsDir, source.name).toPath(),
+                    StandardCopyOption.REPLACE_EXISTING
+            )
+        }
+
+        copyMod(standaloneMappedSableRuntime.get().asFile)
+        copyMod(createDevelopmentRuntime.get().asFile)
+        copyMod(mappedFlywheel)
+        copyMod(mappedPonder)
+        copyMod(veilDevelopmentRuntime.get().asFile)
+
+        File sourceWorld = file('run/m6-client/saves/M6_Smoke_Empty')
+        if (!sourceWorld.isDirectory()) {
+            throw new GradleException("Proven runtime-smoke world is missing: ${sourceWorld}")
+        }
+        File targetWorld = new File(savesDir, 'M6_Smoke_Empty')
+        String savesRoot = savesDir.canonicalPath + File.separator
+        if (!targetWorld.canonicalPath.startsWith(savesRoot)) {
+            throw new GradleException("Refusing to replace unexpected smoke-world path: ${targetWorld}")
+        }
+        delete targetWorld
+        copy {
+            from sourceWorld
+            into targetWorld
+        }
+
+        logger.lifecycle("Prepared standalone smoke runtime in ${runDir} with managed mods: ${managedNames}")
     }
+}
+
+def standaloneRuntimeClasspathLeak = { File file ->
+    String path = file.absolutePath.replace('\\', '/').toLowerCase(Locale.ROOT)
+    String name = file.name.toLowerCase(Locale.ROOT)
+    path.contains('/deobf_dependencies/local/target/')
+            || path.contains('/deobf_dependencies/foundry/veil/')
+            || name.contains("create-${forge_minecraft_version}-${forge_create_version}".toLowerCase(Locale.ROOT))
+            || name.contains("flywheel-forge-${forge_minecraft_version}-${forge_flywheel_version}".toLowerCase(Locale.ROOT))
+            || name.contains("ponder-forge-${forge_minecraft_version}-${forge_ponder_version}".toLowerCase(Locale.ROOT))
+            || name.contains("registrate-${forge_registrate_version}".toLowerCase(Locale.ROOT))
+            || name.contains("veil-forge-${forge_minecraft_version}-${forge_veil_version}".toLowerCase(Locale.ROOT))
+}
+
+tasks.register('verifyStandaloneRunConfiguration') {
+    group = 'verification'
+    description = 'Verifies the standalone smoke run uses the final mods directory instead of Sable development output.'
+    dependsOn tasks.named('prepareStandaloneRuntimeLauncherRoots')
+    dependsOn tasks.named('prepareStandaloneRuntimeSmoke')
+    dependsOn tasks.named('verifyStandaloneAccessTransformerNamespaces')
+
+    doLast {
+        def runConfig = minecraft.runs.standaloneClient
+        if (runConfig.main != 'cpw.mods.bootstraplauncher.BootstrapLauncher') {
+            throw new GradleException(
+                    "Standalone run main=${runConfig.main}, expected cpw.mods.bootstraplauncher.BootstrapLauncher"
+            )
+        }
+        int launchTarget = runConfig.args.indexOf('--launchTarget')
+        if (launchTarget < 0 || runConfig.args.size() <= launchTarget + 1
+                || runConfig.args[launchTarget + 1] != 'forgeclientuserdev') {
+            throw new GradleException("Standalone run args do not select forgeclientuserdev: ${runConfig.args}")
+        }
+        def sourceNames = runConfig.sources*.name
+        if (sourceNames != ['standaloneRuntimeLauncher']) {
+            throw new GradleException(
+                    "Standalone run sources=${sourceNames}, expected only standaloneRuntimeLauncher"
+            )
+        }
+        def launcherSourceClasspathSurfaces = [
+                'standaloneRuntimeLauncher.compileClasspath': sourceSets.standaloneRuntimeLauncher.compileClasspath.files,
+                'standaloneRuntimeLauncher.runtimeClasspath' : sourceSets.standaloneRuntimeLauncher.runtimeClasspath.files
+        ]
+        launcherSourceClasspathSurfaces.each { surface, files ->
+            def leakedEntries = files.findAll(standaloneRuntimeClasspathLeak)
+            if (!leakedEntries.isEmpty()) {
+                throw new GradleException(
+                        "Standalone ForgeGradle source-set surface ${surface} leaks target mods: "
+                                + leakedEntries*.absolutePath
+                )
+            }
+        }
+        if (!runConfig.mods.isEmpty()) {
+            throw new GradleException("Standalone run unexpectedly declares development mods: ${runConfig.mods*.name}")
+        }
+        def launcherRoots = [sourceSets.standaloneRuntimeLauncher.output.resourcesDir]
+        launcherRoots.addAll(sourceSets.standaloneRuntimeLauncher.output.classesDirs.files)
+        def missingRoots = launcherRoots.findAll { !it.isDirectory() }
+        if (!missingRoots.isEmpty()) {
+            throw new GradleException(
+                    "Standalone launcher MOD_CLASSES roots do not exist: ${missingRoots*.absolutePath}"
+            )
+        }
+        def leakedFiles = launcherRoots.collectMany { root ->
+            fileTree(root).files
+        }
+        if (!leakedFiles.isEmpty()) {
+            throw new GradleException(
+                    "Standalone launcher source set must stay empty, found: ${leakedFiles*.absolutePath}"
+            )
+        }
+        def standaloneClasspath = tasks.named('runStandaloneClient').get().classpath.files
+        def externalCompanionEntries = standaloneClasspath.findAll { file ->
+            String path = file.absolutePath.replace('\\', '/')
+            path.contains('/sable_companion_1_20/')
+                    || file.name.startsWith('sable-companion-common-')
+        }
+        if (!externalCompanionEntries.isEmpty()) {
+            throw new GradleException(
+                    "Standalone runtime must not expose Companion outside the packaged Sable JarJar: "
+                            + externalCompanionEntries*.absolutePath
+            )
+        }
+        def externalTargetEntries = standaloneClasspath.findAll(standaloneRuntimeClasspathLeak)
+        if (!externalTargetEntries.isEmpty()) {
+            throw new GradleException(
+                    'Standalone runtime must load target mods from run/standalone-client/mods, '
+                            + "not the launcher/module classpath: ${externalTargetEntries*.absolutePath}"
+            )
+        }
+        def developmentSableEntries = standaloneClasspath.findAll { file ->
+            String path = file.absolutePath.replace('\\', '/').toLowerCase(Locale.ROOT)
+            path.endsWith('/forge/build/classes/java/main')
+                    || path.endsWith('/forge/build/resources/main')
+                    || path.contains('/common/build/classes/')
+                    || path.contains('/common/build/resources/')
+                    || path.contains('/sable_companion_1_20/build/classes/')
+                    || path.contains('/sable_companion_1_20/build/resources/')
+        }
+        if (!developmentSableEntries.isEmpty()) {
+            throw new GradleException("Standalone launcher exposes development Sable/Companion output: "
+                    + developmentSableEntries*.absolutePath)
+        }
+        File legacyClasspathFile = layout.buildDirectory.file(
+                'classpath/forge_runStandaloneClient_minecraftClasspath.txt').get().asFile
+        if (!legacyClasspathFile.isFile()) {
+            throw new GradleException("Standalone legacy classpath file is missing: ${legacyClasspathFile}")
+        }
+        def legacyClasspathEntries = legacyClasspathFile.getText('UTF-8')
+                .readLines()
+                .collectMany { line -> line.split(';') as List }
+                .collect { it.trim() }
+                .findAll { !it.isEmpty() }
+                .collect { file(it) }
+        def leakedLegacyTargets = legacyClasspathEntries.findAll(standaloneRuntimeClasspathLeak)
+        if (!leakedLegacyTargets.isEmpty()) {
+            throw new GradleException(
+                    'Standalone legacyClassPath.file must not expose target mods; they belong in mods/: '
+                            + leakedLegacyTargets*.absolutePath
+            )
+        }
+        def jvmArgLeaks = runConfig.jvmArgs.findAll { arg ->
+            String lower = arg.toString().replace('\\', '/').toLowerCase(Locale.ROOT)
+            lower.contains('registrate') || lower.contains('/deobf_dependencies/local/target/')
+        }
+        if (!jvmArgLeaks.isEmpty()) {
+            throw new GradleException("Standalone JVM args leak target modules directly: ${jvmArgLeaks}")
+        }
+        def javaExecArgLeaks = (
+                tasks.named('runStandaloneClient').get().jvmArgs
+                        + tasks.named('runStandaloneClient').get().args
+                        + tasks.named('runStandaloneClient').get().systemProperties.values()
+        ).findAll { arg ->
+            String lower = arg.toString().replace('\\', '/').toLowerCase(Locale.ROOT)
+            lower.contains('registrate')
+                    || lower.contains('/deobf_dependencies/local/target/')
+                    || lower.contains('/deobf_dependencies/foundry/veil/')
+        }
+        if (!javaExecArgLeaks.isEmpty()) {
+            throw new GradleException("Standalone JavaExec generated launch args leak target modules: "
+                    + javaExecArgLeaks)
+        }
+        File modsDir = standaloneRuntimeModsDir.asFile
+        def mappedRuntimeArtifact = { String artifactName, String expectedVersion ->
+            String expectedMappedVersion = "${expectedVersion}_mapped_official_${forge_minecraft_version}"
+            def artifact = configurations.targetRuntimeMapped.resolvedConfiguration.resolvedArtifacts.find {
+                it.moduleVersion.id.group == 'local.target'
+                        && it.name == artifactName
+                        && it.moduleVersion.id.version == expectedMappedVersion
+            }
+            if (artifact == null) {
+                throw new GradleException(
+                        "Standalone verifier could not resolve mapped ${artifactName}:${expectedMappedVersion}"
+                )
+            }
+            artifact.file
+        }
+        File mappedFlywheel = mappedRuntimeArtifact(
+                "flywheel-forge-${forge_minecraft_version}".toString(),
+                forge_flywheel_version.toString())
+        File mappedPonder = ponderDevelopmentRuntime.get().asFile
+        if (!mappedPonder.isFile()) {
+            throw new GradleException("Standalone patched Ponder artifact is missing: ${mappedPonder}")
+        }
+        File productionSableJar = standaloneProductionSableArtifact.get().asFile
+        File mappedSableJar = standaloneMappedSableRuntime.get().asFile
+        if (!productionSableJar.isFile()) {
+            throw new GradleException("Standalone production Sable artifact is missing: ${productionSableJar}")
+        }
+        if (!mappedSableJar.isFile()) {
+            throw new GradleException("Standalone mapped Sable artifact is missing: ${mappedSableJar}")
+        }
+        if (mappedSableJar.canonicalFile == productionSableJar.canonicalFile) {
+            throw new GradleException('Standalone mapped Sable artifact must not replace the production all-jar')
+        }
+        String productionSableSha = SableStandaloneUserdevMapper.sha256Hex(productionSableJar)
+        String mappedSableSha = SableStandaloneUserdevMapper.sha256Hex(mappedSableJar)
+        if (productionSableSha == mappedSableSha) {
+            throw new GradleException('Standalone mapped Sable artifact is byte-identical to the reobfuscated all-jar')
+        }
+        def finalMinecraftMixin = SableStandaloneUserdevMapper.classMembers(
+                productionSableJar,
+                'dev/ryanhcode/sable/mixin/plot/MinecraftMixin.class')
+        def mappedMinecraftMixin = SableStandaloneUserdevMapper.classMembers(
+                mappedSableJar,
+                'dev/ryanhcode/sable/mixin/plot/MinecraftMixin.class')
+        if (!finalMinecraftMixin.fields.contains('f_91073_') || finalMinecraftMixin.fields.contains('level')) {
+            throw new GradleException("Final Sable MinecraftMixin does not prove production namespace: "
+                    + finalMinecraftMixin.fields)
+        }
+        if (!mappedMinecraftMixin.fields.contains('level') || mappedMinecraftMixin.fields.contains('f_91073_')) {
+            throw new GradleException("Standalone mapped MinecraftMixin does not expose userdev field level: "
+                    + mappedMinecraftMixin.fields)
+        }
+        def finalGameRendererMixin = SableStandaloneUserdevMapper.classMembers(
+                productionSableJar,
+                'dev/ryanhcode/sable/mixin/entity/entities_turn_with_sub_levels/GameRendererMixin.class')
+        def mappedGameRendererMixin = SableStandaloneUserdevMapper.classMembers(
+                mappedSableJar,
+                'dev/ryanhcode/sable/mixin/entity/entities_turn_with_sub_levels/GameRendererMixin.class')
+        if (!finalGameRendererMixin.fields.contains('f_109059_') || finalGameRendererMixin.fields.contains('minecraft')) {
+            throw new GradleException("Final Sable GameRendererMixin does not prove production namespace: "
+                    + finalGameRendererMixin.fields)
+        }
+        if (!mappedGameRendererMixin.fields.contains('minecraft')
+                || mappedGameRendererMixin.fields.contains('f_109059_')) {
+            throw new GradleException("Standalone mapped GameRendererMixin does not expose userdev field minecraft: "
+                    + mappedGameRendererMixin.fields)
+        }
+        String reloadDescriptor = '(Lnet/minecraft/server/packs/resources/ResourceManager;)V'
+        def jarHasEntry = { File jar, String entryName ->
+            JarFile jarFile = new JarFile(jar)
+            try {
+                jarFile.getJarEntry(entryName) != null
+            } finally {
+                jarFile.close()
+            }
+        }
+        def retainedReloadDispatchers = [
+                'dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.class'
+        ]
+        [
+                'dev/ryanhcode/sable/sublevel/render/dispatcher/FancySubLevelRenderDispatcher.class'
+        ].each { optionalEntry ->
+            if (jarHasEntry(productionSableJar, optionalEntry) || jarHasEntry(mappedSableJar, optionalEntry)) {
+                retainedReloadDispatchers.add(optionalEntry)
+            }
+        }
+        retainedReloadDispatchers.each { classEntry ->
+            def finalDispatcher = SableStandaloneUserdevMapper.classMembers(productionSableJar, classEntry)
+            def mappedDispatcher = SableStandaloneUserdevMapper.classMembers(mappedSableJar, classEntry)
+            if (!finalDispatcher.methods.contains('m_6213_' + reloadDescriptor)
+                    || finalDispatcher.methods.contains('onResourceManagerReload' + reloadDescriptor)) {
+                throw new GradleException("Final ${classEntry} does not prove production reload namespace: "
+                        + finalDispatcher.methods)
+            }
+            if (!mappedDispatcher.methods.contains('onResourceManagerReload' + reloadDescriptor)
+                    || mappedDispatcher.methods.contains('m_6213_' + reloadDescriptor)) {
+                throw new GradleException("Standalone mapped ${classEntry} did not remap reload callback: "
+                        + mappedDispatcher.methods)
+            }
+            def mappedReferences = SableStandaloneUserdevMapper.classReferences(mappedSableJar, classEntry)
+            if (mappedReferences.methods.any { it.contains('.m_6213_' + reloadDescriptor) }) {
+                throw new GradleException("Standalone mapped ${classEntry} has stale reload self reference: "
+                        + mappedReferences.methods)
+            }
+        }
+        String reachAroundEntry = 'dev/ryanhcode/sable/sublevel/render/dispatcher/ReachAroundSubLevelRenderDispatcher.class'
+        if (jarHasEntry(mappedSableJar, reachAroundEntry)) {
+            def reachAroundDispatcher = SableStandaloneUserdevMapper.classMembers(mappedSableJar, reachAroundEntry)
+            if (reachAroundDispatcher.methods.contains('m_6213_' + reloadDescriptor)) {
+                throw new GradleException("ReachAroundSubLevelRenderDispatcher declares stale reload callback: "
+                        + reachAroundDispatcher.methods)
+            }
+        }
+        String reloadApplyTypedDescriptor = (
+                '(Ljava/util/Map;Lnet/minecraft/server/packs/resources/ResourceManager;'
+                        + 'Lnet/minecraft/util/profiling/ProfilerFiller;)V')
+        String reloadApplyErasedDescriptor = (
+                '(Ljava/lang/Object;Lnet/minecraft/server/packs/resources/ResourceManager;'
+                        + 'Lnet/minecraft/util/profiling/ProfilerFiller;)V')
+        [
+                'dev/ryanhcode/sable/physics/config/FloatingBlockMaterialDataHandler$ReloadListener.class',
+                'dev/ryanhcode/sable/physics/config/dimension_physics/DimensionPhysicsData$ReloadListener.class',
+                'dev/ryanhcode/sable/physics/config/block_properties/PhysicsBlockPropertiesDefinitionLoader.class'
+        ].each { classEntry ->
+            def finalReloadListener = SableStandaloneUserdevMapper.classMembers(productionSableJar, classEntry)
+            def mappedReloadListener = SableStandaloneUserdevMapper.classMembers(mappedSableJar, classEntry)
+            if (!finalReloadListener.methods.contains('apply' + reloadApplyTypedDescriptor)
+                    || !finalReloadListener.methods.contains('m_5787_' + reloadApplyErasedDescriptor)) {
+                throw new GradleException("Final ${classEntry} does not prove production reload apply bridge shape: "
+                        + finalReloadListener.methods)
+            }
+            if (!mappedReloadListener.methods.contains('apply' + reloadApplyTypedDescriptor)
+                    || !mappedReloadListener.methods.contains('apply' + reloadApplyErasedDescriptor)
+                    || mappedReloadListener.methods.contains('m_5787_' + reloadApplyErasedDescriptor)) {
+                throw new GradleException("Standalone mapped ${classEntry} lacks named erased reload apply bridge: "
+                        + mappedReloadListener.methods)
+            }
+            def mappedReloadReferences = SableStandaloneUserdevMapper.classReferences(mappedSableJar, classEntry)
+            if (mappedReloadReferences.methods.any { it.contains('.m_5787_' + reloadApplyErasedDescriptor) }) {
+                throw new GradleException("Standalone mapped ${classEntry} has stale reload apply bridge reference: "
+                        + mappedReloadReferences.methods)
+            }
+        }
+        def standaloneHierarchyClasspath = configurations.compileClasspath.files.findAll {
+            it.isFile() && it.name.endsWith('.jar')
+        }
+        def staleHierarchyDeclarations = SableStandaloneUserdevMapper.staleHierarchyMethodDeclarations(
+                mappedSableJar,
+                layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile,
+                standaloneHierarchyClasspath)
+        if (!staleHierarchyDeclarations.isEmpty()) {
+            throw new GradleException("Standalone mapped Sable has stale hierarchy method declarations: "
+                    + staleHierarchyDeclarations)
+        }
+        def staleHierarchyReferences = SableStandaloneUserdevMapper.staleHierarchyMethodReferences(
+                mappedSableJar,
+                layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile,
+                standaloneHierarchyClasspath)
+        if (!staleHierarchyReferences.isEmpty()) {
+            throw new GradleException("Standalone mapped Sable has stale hierarchy method references: "
+                    + staleHierarchyReferences)
+        }
+        def serverLevelPlotRefs = SableStandaloneUserdevMapper.classReferences(
+                mappedSableJar,
+                'dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.class')
+        if (!serverLevelPlotRefs.handles.any {
+            it == 'net/minecraft/server/level/ChunkHolder.getFullStatus()Lnet/minecraft/server/level/FullChunkStatus;'
+        } || serverLevelPlotRefs.handles.any { it.contains('ChunkHolder.m_287213_') }) {
+            throw new GradleException("Standalone mapped ServerLevelPlot bootstrap handles did not remap "
+                    + "ChunkHolder.m_287213_ -> getFullStatus: ${serverLevelPlotRefs.handles}")
+        }
+        String expectedPacketSendHandle = ('net/minecraft/server/network/ServerGamePacketListenerImpl.send'
+                + '(Lnet/minecraft/network/protocol/Packet;)V')
+        if (!serverLevelPlotRefs.handles.any {
+            it == expectedPacketSendHandle
+        } || serverLevelPlotRefs.handles.any {
+            it.contains('ServerGamePacketListenerImpl.m_9829_')
+        }) {
+            throw new GradleException("Standalone mapped ServerLevelPlot bootstrap handles did not remap "
+                    + "ServerGamePacketListenerImpl.m_9829_ -> send: ${serverLevelPlotRefs.handles}")
+        }
+        def staleMemberReferences = SableStandaloneUserdevMapper.staleKnownMemberReferences(
+                mappedSableJar,
+                layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile,
+                standaloneHierarchyClasspath)
+        if (!staleMemberReferences.references.isEmpty()) {
+            throw new GradleException("Standalone mapped Sable has stale known remappable member references: "
+                    + staleMemberReferences.references)
+        }
+        logger.lifecycle("Verified standalone mapped Sable stale member scan: ordinary="
+                + "${staleMemberReferences.ordinaryInstructionReferences}, handles="
+                + "${staleMemberReferences.handleReferences}, constantDynamicOrLdcHandles="
+                + "${staleMemberReferences.constantDynamicOrLdcHandleReferences}, remaining=0")
+        def argumentTypeInfosMixin = SableStandaloneUserdevMapper.classMembers(
+                mappedSableJar,
+                'dev/ryanhcode/sable/mixin/command/ArgumentTypeInfosMixin.class')
+        def argumentTypeInfosRefs = SableStandaloneUserdevMapper.classReferences(
+                mappedSableJar,
+                'dev/ryanhcode/sable/mixin/command/ArgumentTypeInfosMixin.class')
+        String argumentTypeRegisterDescriptor = (
+                '(Lnet/minecraft/core/Registry;Ljava/lang/String;Ljava/lang/Class;'
+                        + 'Lnet/minecraft/commands/synchronization/ArgumentTypeInfo;)'
+                        + 'Lnet/minecraft/commands/synchronization/ArgumentTypeInfo;')
+        if (!argumentTypeInfosMixin.methods.contains('register' + argumentTypeRegisterDescriptor)
+                || argumentTypeInfosMixin.methods.any { it.startsWith('m_235386_') }) {
+            throw new GradleException("Standalone mapped ArgumentTypeInfosMixin declaration is stale: "
+                    + argumentTypeInfosMixin.methods)
+        }
+        if (!argumentTypeInfosRefs.methods.contains(
+                'dev/ryanhcode/sable/mixin/command/ArgumentTypeInfosMixin.register'
+                        + argumentTypeRegisterDescriptor)
+                || argumentTypeInfosRefs.methods.any { it.contains('ArgumentTypeInfosMixin.m_235386_') }) {
+            throw new GradleException("Standalone mapped ArgumentTypeInfosMixin self-call is stale: "
+                    + argumentTypeInfosRefs.methods)
+        }
+        if (!argumentTypeInfosRefs.methods.any {
+            it.contains('net/minecraft/commands/synchronization/SingletonArgumentInfo.contextFree')
+        }) {
+            throw new GradleException('Standalone mapped ArgumentTypeInfosMixin lost external contextFree remap')
+        }
+        def plotMinecraftRefs = SableStandaloneUserdevMapper.classReferences(
+                mappedSableJar,
+                'dev/ryanhcode/sable/mixin/plot/MinecraftMixin.class')
+        if (!plotMinecraftRefs.fields.contains(
+                'dev/ryanhcode/sable/mixin/plot/MinecraftMixin.level:'
+                        + 'Lnet/minecraft/client/multiplayer/ClientLevel;')
+                || plotMinecraftRefs.fields.any { it.contains('MinecraftMixin.f_91073_') }) {
+            throw new GradleException("Standalone mapped plot.MinecraftMixin field self-reference is stale: "
+                    + plotMinecraftRefs.fields)
+        }
+        def itemInvokerRefs = SableStandaloneUserdevMapper.classReferences(
+                mappedSableJar,
+                'dev/ryanhcode/sable/mixin/punching/ItemInvoker.class')
+        if (!itemInvokerRefs.annotationValues.contains('getPlayerPOVHitResult')
+                || itemInvokerRefs.annotationValues.contains('m_41435_')) {
+            throw new GradleException("Standalone mapped ItemInvoker annotation target is stale: "
+                    + itemInvokerRefs.annotationValues)
+        }
+        def mappedFlywheelMinecraftMixin = SableStandaloneUserdevMapper.classMembers(
+                mappedFlywheel,
+                'dev/engine_room/flywheel/impl/mixin/MinecraftMixin.class')
+        if (!mappedFlywheelMinecraftMixin.fields.contains('resourceManager')
+                || mappedFlywheelMinecraftMixin.fields.contains('f_91036_')) {
+            throw new GradleException("Standalone Flywheel is not mapped for userdev MinecraftMixin: "
+                    + mappedFlywheelMinecraftMixin.fields)
+        }
+        def expectedStandaloneMods = [
+                mappedSableJar.name,
+                createDevelopmentRuntime.get().asFile.name,
+                mappedFlywheel.name,
+                mappedPonder.name,
+                veilDevelopmentRuntime.get().asFile.name
+        ] as Set
+        def actualStandaloneMods = (modsDir.listFiles()?.findAll { it.isFile() }*.name ?: []) as Set
+        if (actualStandaloneMods != expectedStandaloneMods) {
+            throw new GradleException(
+                    "Standalone mods directory has unexpected contents: ${actualStandaloneMods}; "
+                            + "expected ${expectedStandaloneMods}"
+            )
+        }
+        def standaloneRegistrateMods = actualStandaloneMods.findAll {
+            it.toLowerCase(Locale.ROOT).contains('registrate')
+        }
+        if (!standaloneRegistrateMods.isEmpty()) {
+            throw new GradleException("Standalone mods directory must not contain standalone Registrate: "
+                    + standaloneRegistrateMods)
+        }
+        def managedModFiles = modsDir.listFiles()?.findAll { it.isFile() } ?: []
+        def intendedModNames = managedModFiles*.name as Set
+        def requiredIntendedModNames = [
+                mappedSableJar.name,
+                createDevelopmentRuntime.get().asFile.name,
+                mappedFlywheel.name,
+                mappedPonder.name,
+                veilDevelopmentRuntime.get().asFile.name
+        ] as Set
+        if (intendedModNames != requiredIntendedModNames) {
+            throw new GradleException("Standalone intended mods mismatch: ${intendedModNames}")
+        }
+        if (actualStandaloneMods.contains(productionSableJar.name)) {
+            throw new GradleException("Standalone userdev mods directory must not contain production Sable jar: "
+                    + productionSableJar.name)
+        }
+        JarFile mappedSableZip = new JarFile(mappedSableJar)
+        try {
+            [
+                    'META-INF/mods.toml',
+                    'sable.refmap.json',
+                    'sable-common-forge.mixins.json',
+                    'sable-forge.mixins.json',
+                    'META-INF/accesstransformer-forge.cfg',
+                    'META-INF/services/dev.ryanhcode.sable.companion.SableCompanion',
+                    'META-INF/jarjar/metadata.json',
+                    'META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar',
+                    'META-INF/jarjar/mixinextras-forge-0.5.3.jar'
+            ].each { entry ->
+                if (mappedSableZip.getJarEntry(entry) == null) {
+                    throw new GradleException("Standalone mapped Sable artifact lost required entry ${entry}")
+                }
+            }
+            def companionOuterClasses = mappedSableZip.entries().toList().findAll { entry ->
+                entry.name.startsWith('dev/ryanhcode/sable/companion/') && entry.name.endsWith('.class')
+            }
+            if (!companionOuterClasses.isEmpty()) {
+                throw new GradleException("Standalone mapped Sable leaked Companion classes outside JarJar: "
+                        + companionOuterClasses*.name)
+            }
+            def smokeEntry = mappedSableZip.getJarEntry(
+                    'dev/ryanhcode/sable/forge/SableForgeStandaloneRuntimeSmoke.class')
+            if (smokeEntry == null) {
+                throw new GradleException('Standalone mapped Sable artifact is missing standalone smoke harness')
+            }
+            String smokeClassText = new String(
+                    mappedSableZip.getInputStream(smokeEntry).readAllBytes(),
+                    java.nio.charset.StandardCharsets.ISO_8859_1)
+            def parseStandaloneSmokeResourceUrl = { String rawUrl ->
+                String path = java.net.URLDecoder.decode(
+                        rawUrl,
+                        java.nio.charset.StandardCharsets.UTF_8
+                ).replace('\\', '/')
+                if (path.startsWith('jar:')) {
+                    path = path.substring('jar:'.length())
+                }
+                if (path.startsWith('union:')) {
+                    path = path.substring('union:'.length())
+                }
+                if (path.startsWith('file:')) {
+                    path = path.substring('file:'.length())
+                }
+                if (path.length() >= 3 && path.charAt(0) == '/' && path.charAt(2) == ':') {
+                    path = path.substring(1)
+                }
+                def findJarEnd = { String candidatePath, int fromIndex ->
+                    int jarName = candidatePath.indexOf('.jar', fromIndex)
+                    while (jarName >= 0) {
+                        int jarEnd = jarName + '.jar'.length()
+                        if (jarEnd == candidatePath.length()
+                                || candidatePath.charAt(jarEnd) == '#'
+                                || candidatePath.charAt(jarEnd) == '!'
+                                || candidatePath.charAt(jarEnd) == '/') {
+                            return jarEnd
+                        }
+                        jarName = candidatePath.indexOf('.jar', jarEnd)
+                    }
+                    throw new GradleException("Standalone smoke URL canary did not contain a jar artifact: ${rawUrl}")
+                }
+                def stripSecureJarId = { String suffix ->
+                    if (!suffix.startsWith('#')) {
+                        return suffix
+                    }
+                    int index = 1
+                    while (index < suffix.length() && Character.isDigit(suffix.charAt(index))) {
+                        index++
+                    }
+                    if (index <= 1 || index >= suffix.length()
+                            || !(suffix.charAt(index) == '!' || suffix.charAt(index) == '_')) {
+                        throw new GradleException("Standalone smoke URL canary has invalid SecureJar id: ${rawUrl}")
+                    }
+                    suffix.charAt(index) == '_' ? suffix.substring(index + 1) : suffix.substring(index)
+                }
+                int outerJarEnd = findJarEnd(path, 0)
+                String outerArtifact = path.substring(0, outerJarEnd)
+                String suffix = stripSecureJarId(path.substring(outerJarEnd))
+                if (suffix.startsWith('!/')) {
+                    return [outer: outerArtifact, nested: null, resource: suffix.substring('!/'.length())]
+                }
+                if (suffix.startsWith('/')) {
+                    String nestedAndResource = suffix.substring(1)
+                    int nestedJarEnd = findJarEnd(nestedAndResource, 0)
+                    String nestedEntry = nestedAndResource.substring(0, nestedJarEnd)
+                    suffix = stripSecureJarId(nestedAndResource.substring(nestedJarEnd))
+                    if (!suffix.startsWith('!/')) {
+                        throw new GradleException("Standalone smoke nested URL canary lacks resource separator: ${rawUrl}")
+                    }
+                    return [outer: outerArtifact, nested: nestedEntry, resource: suffix.substring('!/'.length())]
+                }
+                throw new GradleException("Unsupported standalone smoke URL canary shape: ${rawUrl}")
+            }
+            String unionCanary = ('union:/C:/work/run/standalone-client/mods/'
+                    + 'sable-forge-1.20.1-2.0.0-all-userdev.jar%23198!/dev/example/Class.class')
+            def parsedUnionCanary = parseStandaloneSmokeResourceUrl(unionCanary)
+            String expectedUnionCanary = ('C:/work/run/standalone-client/mods/'
+                    + 'sable-forge-1.20.1-2.0.0-all-userdev.jar')
+            if (parsedUnionCanary.outer != expectedUnionCanary
+                    || parsedUnionCanary.nested != null
+                    || parsedUnionCanary.resource != 'dev/example/Class.class') {
+                throw new GradleException(
+                        "Standalone smoke union URL canary parsed to ${parsedUnionCanary}, "
+                                + "expected outer=${expectedUnionCanary}, nested=null, resource=dev/example/Class.class"
+                )
+            }
+            String nestedUnionCanary = ('union:/C:/x/outer.jar%23198_/'
+                    + 'META-INF/jarjar/inner.jar%23218!/dev/Y.class')
+            def parsedNestedUnionCanary = parseStandaloneSmokeResourceUrl(nestedUnionCanary)
+            if (parsedNestedUnionCanary.outer != 'C:/x/outer.jar'
+                    || parsedNestedUnionCanary.nested != 'META-INF/jarjar/inner.jar'
+                    || parsedNestedUnionCanary.resource != 'dev/Y.class') {
+                throw new GradleException(
+                        "Standalone smoke nested union URL canary parsed to ${parsedNestedUnionCanary}, "
+                                + 'expected outer=C:/x/outer.jar, nested=META-INF/jarjar/inner.jar, '
+                                + 'resource=dev/Y.class'
+                )
+            }
+            if (!smokeClassText.contains('META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar')
+                    || !smokeClassText.contains('nested Companion JarJar inside the staged Sable artifact')) {
+                throw new GradleException('Standalone smoke harness no longer verifies nested Companion JarJar provenance')
+            }
+            if (!smokeClassText.contains('normalizeResourceUrl')
+                    || !smokeClassText.contains('parseRuntimeResourceUrl')
+                    || !smokeClassText.contains('ParsedRuntimeResource')
+                    || !smokeClassText.contains('union:')
+                    || !smokeClassText.contains('#')) {
+                throw new GradleException(
+                        'Standalone smoke harness no longer normalizes Forge/SecureJar union resource URLs'
+                )
+            }
+            if (smokeClassText.contains('did not resolve from the final Sable all-jar')) {
+                throw new GradleException('Standalone smoke harness still requires literal final all-jar filename')
+            }
+            def staleSelfReferences = []
+            mappedSableZip.entries().toList().findAll { entry ->
+                entry.name.startsWith('dev/ryanhcode/sable/mixin/')
+                        && entry.name.endsWith('.class')
+                        && !entry.name.contains('$')
+            }.each { entry ->
+                String owner = entry.name.substring(0, entry.name.length() - '.class'.length())
+                def references = SableStandaloneUserdevMapper.classReferences(mappedSableJar, entry.name)
+                references.fields.findAll { reference ->
+                    reference.startsWith(owner + '.f_')
+                }.each { reference ->
+                    staleSelfReferences.add("${entry.name}: ${reference}")
+                }
+                references.methods.findAll { reference ->
+                    reference.startsWith(owner + '.m_')
+                }.each { reference ->
+                    staleSelfReferences.add("${entry.name}: ${reference}")
+                }
+            }
+            if (!staleSelfReferences.isEmpty()) {
+                throw new GradleException(
+                        'Standalone mapped Sable contains stale intra-Mixin SRG member references: '
+                                + staleSelfReferences
+                )
+            }
+        } finally {
+            mappedSableZip.close()
+        }
+        File stagedCreate = new File(modsDir, createDevelopmentRuntime.get().asFile.name)
+        int effectiveRegistrateSuppliers = 0
+        String effectiveRegistrateSupplier = null
+        JarFile stagedCreateJar = new JarFile(stagedCreate)
+        try {
+            String registratePath = expectedTargetArtifacts.registrate.path
+            def nestedRegistrate = stagedCreateJar.getJarEntry(registratePath)
+            if (nestedRegistrate == null) {
+                throw new GradleException("Standalone Create runtime is missing nested ${registratePath}")
+            }
+            effectiveRegistrateSuppliers += 1
+            effectiveRegistrateSupplier = "${stagedCreate.absolutePath}!/${registratePath}"
+            ZipInputStream registrateZip = new ZipInputStream(stagedCreateJar.getInputStream(nestedRegistrate))
+            try {
+                boolean foundRegistrateLoot = false
+                boolean foundAbstractRegistrate = false
+                def entry
+                while ((entry = registrateZip.nextEntry) != null) {
+                    foundRegistrateLoot |= entry.name == 'com/tterrag/registrate/providers/loot/RegistrateLootTables.class'
+                    foundAbstractRegistrate |= entry.name == 'com/tterrag/registrate/AbstractRegistrate.class'
+                }
+                if (!foundAbstractRegistrate || !foundRegistrateLoot) {
+                    throw new GradleException(
+                            "Nested Create Registrate lacks expected canaries: AbstractRegistrate="
+                                    + "${foundAbstractRegistrate}, loot=${foundRegistrateLoot}"
+                    )
+                }
+            } finally {
+                registrateZip.close()
+            }
+        } finally {
+            stagedCreateJar.close()
+        }
+        def unexpectedRegistrateFiles = (
+                standaloneClasspath
+                        + legacyClasspathEntries
+                        + sourceSets.standaloneRuntimeLauncher.compileClasspath.files
+                        + sourceSets.standaloneRuntimeLauncher.runtimeClasspath.files
+        ).findAll { file ->
+            file.name.toLowerCase(Locale.ROOT).contains('registrate')
+        }
+        if (!unexpectedRegistrateFiles.isEmpty()) {
+            throw new GradleException("Unexpected standalone Registrate suppliers outside Create JarJar: "
+                    + unexpectedRegistrateFiles*.absolutePath)
+        }
+        if (effectiveRegistrateSuppliers != 1) {
+            throw new GradleException("Expected one effective Registrate supplier, found "
+                    + effectiveRegistrateSuppliers)
+        }
+        logger.lifecycle("Verified standalone run configuration: main=${runConfig.main}, sources=${sourceNames}, "
+                + "launchTarget=forgeclientuserdev, empty MOD_CLASSES roots exist, "
+                + "mapped Sable userdev artifact derived from final all-jar sha256=${productionSableSha}, "
+                + "no external Companion or target-mod classpath, legacy classpath clean, "
+                + "Create-owned nested Registrate is the only standalone Registrate supplier: "
+                + effectiveRegistrateSupplier)
+    }
+}
+
+tasks.matching { it.name == 'runStandaloneClient' }.configureEach {
+    dependsOn tasks.named('verifyStandaloneRunConfiguration')
+    dependsOn tasks.named('prepareStandaloneRuntimeSmoke')
 }
 
 tasks.named('check') {
