@@ -2,7 +2,9 @@ package dev.ryanhcode.sable.forge;
 
 import dev.ryanhcode.sable.ActiveSableCompanion;
 import dev.ryanhcode.sable.Sable;
-import dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer;
+import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
+import dev.ryanhcode.sable.api.physics.PhysicsPipelineProvider;
+import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SableCompanion;
@@ -10,11 +12,14 @@ import dev.ryanhcode.sable.companion.impl.DefaultSableCompanion;
 import dev.ryanhcode.sable.network.udp.SableUDPServer;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.sublevel.storage.SubLevelRemovalReason;
+import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -27,31 +32,60 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.fml.ModList;
+import org.joml.Vector3d;
 
-/** Short standalone artifact smoke for the final Forge jar with Companion packaged by JarJar. */
+/** M8 standalone packaged-artifact smoke for the final Forge jar with real Rapier physics packaged by JarJar. */
 final class SableForgeStandaloneRuntimeSmoke {
 
     private static final boolean ENABLED = Boolean.getBoolean("sable.standaloneRuntimeSmoke");
     private static final String WORLD_NAME = "M6_Smoke_Empty";
-    private static final String SUB_LEVEL_NAME = "create6_runtime_smoke";
+    private static final String SUB_LEVEL_NAME = "m8_rapier_gravity_smoke";
     private static final String PACKAGED_COMPANION =
             "META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar";
-    private static final int WORLD_STABILITY_TICKS = 40;
+    private static final String PACKAGED_RAPIER =
+            "META-INF/jarjar/sable-rapier-common-1.20.1-2.0.0.jar";
+    private static final String PACKAGED_LZ4 = "META-INF/jarjar/lz4-java-1.11.0.jar";
+    private static final String RAPIER_PROVIDER =
+            "dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipelineProvider";
+    private static final String RAPIER_PIPELINE =
+            "dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipeline";
+    private static final String RAPIER_3D = "dev.ryanhcode.sable.physics.impl.rapier.Rapier3D";
+    private static final int WORLD_STABILITY_TICKS = 20;
     private static final int PHASE_TIMEOUT_TICKS = 2400;
+    private static final int PHYSICS_TIMEOUT_TICKS = 600;
+    private static final int COLLISION_STABLE_TICKS = 20;
+    private static final double SPAWN_X = 0.5;
+    private static final double SPAWN_Y = 88.0;
+    private static final double SPAWN_Z = 0.5;
+    private static final int PLATFORM_Y = 80;
+    private static final double GRAVITY_EPSILON = 0.05;
+    private static final double INITIAL_VELOCITY_EPSILON = 0.25;
+    private static final double DOWNWARD_VELOCITY_EPSILON = -0.01;
+    private static final double REST_VELOCITY_EPSILON = 0.15;
+    private static final double REST_POSITION_EPSILON = 0.02;
 
     private static Phase phase = Phase.INITIAL_TITLE;
     private static int phaseTicks;
     private static int stableTicks;
     private static volatile int stoppedServers;
-    private static volatile boolean serverReady;
+    private static volatile boolean physicsGateComplete;
     private static volatile Throwable serverFailure;
     private static MinecraftServer activeServer;
     private static UUID expectedId;
+    private static ServerSubLevel observedSubLevel;
+    private static PhysicsSample initialSample;
+    private static PhysicsSample previousSample;
+    private static int physicsTicks;
+    private static int collisionStableTicks;
+    private static double minObservedY = Double.POSITIVE_INFINITY;
+    private static boolean sawDownwardMotion;
+    private static boolean sawDownwardVelocity;
 
     private SableForgeStandaloneRuntimeSmoke() {
     }
@@ -61,8 +95,9 @@ final class SableForgeStandaloneRuntimeSmoke {
             return;
         }
         MinecraftForge.EVENT_BUS.addListener(SableForgeStandaloneRuntimeSmoke::onClientTick);
+        MinecraftForge.EVENT_BUS.addListener(SableForgeStandaloneRuntimeSmoke::onServerTick);
         MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST, SableForgeStandaloneRuntimeSmoke::onServerStopped);
-        pass("bootstrap", "standalone packaged-artifact smoke installed");
+        pass("bootstrap", "M8 Rapier packaged-artifact smoke installed");
     }
 
     private static void onClientTick(final TickEvent.ClientTickEvent event) {
@@ -72,7 +107,7 @@ final class SableForgeStandaloneRuntimeSmoke {
 
         try {
             if (serverFailure != null) {
-                throw new IllegalStateException("Standalone server gate failed", serverFailure);
+                throw new IllegalStateException("M8 Rapier server gate failed", serverFailure);
             }
             phaseTicks++;
             require(phaseTicks <= PHASE_TIMEOUT_TICKS, "Timed out in phase " + phase);
@@ -81,7 +116,7 @@ final class SableForgeStandaloneRuntimeSmoke {
             switch (phase) {
                 case INITIAL_TITLE -> initialTitle(minecraft);
                 case OPENING_WORLD -> openingWorld(minecraft);
-                case CLIENT_SYNC -> clientSync(minecraft);
+                case PHYSICS_OBSERVE -> physicsObserve(minecraft);
                 case SERVER_STOP -> serverStop(minecraft);
                 default -> throw new IllegalStateException("Unexpected phase " + phase);
             }
@@ -91,7 +126,24 @@ final class SableForgeStandaloneRuntimeSmoke {
             if (throwable instanceof final RuntimeException runtimeException) {
                 throw runtimeException;
             }
-            throw new IllegalStateException("Standalone runtime smoke failed", throwable);
+            throw new IllegalStateException("M8 Rapier standalone runtime smoke failed", throwable);
+        }
+    }
+
+    private static void onServerTick(final TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || phase != Phase.PHYSICS_OBSERVE || activeServer == null
+                || event.getServer() != activeServer || physicsGateComplete || serverFailure != null) {
+            return;
+        }
+        try {
+            if (observedSubLevel == null) {
+                startPhysicsGate(event.getServer());
+            } else {
+                observePhysicsGate();
+            }
+        } catch (final Throwable throwable) {
+            serverFailure = throwable;
+            Sable.LOGGER.error("SABLE_STANDALONE_RUNTIME phase=m8-physics-server status=FAIL", throwable);
         }
     }
 
@@ -104,10 +156,10 @@ final class SableForgeStandaloneRuntimeSmoke {
         }
 
         verifyRuntimeVersions();
-        verifyPackagedCompanion();
+        verifyPackagedLibraries();
         require(new File(minecraft.gameDirectory, "saves/" + WORLD_NAME).isDirectory(),
                 "Disposable smoke world is missing: " + WORLD_NAME);
-        pass("gate1", "title reached with final Sable artifact and exact Create 6 runtime stack");
+        pass("gate1", "title reached with mapped-from-final Sable artifact, nested Rapier, nested LZ4, and exact Create 6 runtime stack");
 
         transition(Phase.OPENING_WORLD);
         minecraft.createWorldOpenFlows().loadLevel(minecraft.screen, WORLD_NAME);
@@ -120,12 +172,11 @@ final class SableForgeStandaloneRuntimeSmoke {
         }
 
         activeServer = server;
-        transition(Phase.CLIENT_SYNC);
-        server.execute(() -> runServerGate(server));
+        transition(Phase.PHYSICS_OBSERVE);
     }
 
-    private static void clientSync(final Minecraft minecraft) {
-        if (!serverReady || !clientObjectMatches(minecraft)) {
+    private static void physicsObserve(final Minecraft minecraft) {
+        if (!physicsGateComplete) {
             stableTicks = 0;
             return;
         }
@@ -133,7 +184,7 @@ final class SableForgeStandaloneRuntimeSmoke {
             return;
         }
 
-        pass("gate2-3", "world joined; /sable present; packaged Companion active; persisted stone mass=2.0");
+        pass("gate2-3", "Rapier provider/native/gravity/collision smoke passed for fresh " + SUB_LEVEL_NAME);
         transition(Phase.SERVER_STOP);
         disconnectToTitle(minecraft);
     }
@@ -145,63 +196,146 @@ final class SableForgeStandaloneRuntimeSmoke {
         }
 
         require(SableUDPServer.getServer(activeServer) == null, "Integrated-server UDP endpoint survived stop");
-        pass("gate5", "standalone artifact smoke saved, quit to title, and cleaned up server/UDP state");
+        pass("gate5", "M8 Rapier standalone smoke saved, quit to title, and cleaned up server/UDP state");
         phase = Phase.COMPLETE;
-        pass("complete", "standalone packaged-artifact runtime smoke passed; requesting clean client exit");
+        pass("complete", "M8 Rapier packaged-artifact runtime smoke passed; requesting clean client exit");
         minecraft.stop();
     }
 
-    private static void runServerGate(final MinecraftServer server) {
-        try {
-            final List<ServerPlayer> players = server.getPlayerList().getPlayers();
-            require(players.size() == 1, "Expected one integrated-server player, found " + players.size());
-            final ServerPlayer player = players.get(0);
-            final ServerSubLevelContainer container = SubLevelContainer.getContainer(player.serverLevel());
-            require(container != null, "Server sublevel container is unavailable");
-            require(server.getCommands().getDispatcher().getRoot().getChild("sable") != null,
-                    "/sable is absent from the command dispatcher");
-            require(server.getCommands().performPrefixedCommand(player.createCommandSourceStack(), "sable info @l") == 1,
-                    "Exact Sable info command failed");
+    private static void startPhysicsGate(final MinecraftServer server) {
+        final List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        require(players.size() == 1, "Expected one integrated-server player, found " + players.size());
+        final ServerPlayer player = players.get(0);
+        final ServerSubLevelContainer container = SubLevelContainer.getContainer(player.serverLevel());
+        require(container != null, "Server sublevel container is unavailable");
+        require(server.getCommands().getDispatcher().getRoot().getChild("sable") != null,
+                "/sable is absent from the command dispatcher");
 
-            final ServerSubLevel subLevel = requireSingleServerObject(container);
-            expectedId = subLevel.getUniqueId();
-            serverReady = true;
-        } catch (final Throwable throwable) {
-            serverFailure = throwable;
-            Sable.LOGGER.error("SABLE_STANDALONE_RUNTIME phase=server status=FAIL", throwable);
+        final String providerName = PhysicsPipelineProvider.INSTANCE.getClass().getName();
+        require(RAPIER_PROVIDER.equals(providerName), "PhysicsPipelineProvider selected " + providerName);
+        final SubLevelPhysicsSystem physicsSystem = container.physicsSystem();
+        final PhysicsPipeline pipeline = physicsSystem.getPipeline();
+        require(RAPIER_PIPELINE.equals(pipeline.getClass().getName()),
+                "SubLevelPhysicsSystem pipeline is " + pipeline.getClass().getName());
+        rapierPass("provider", "provider=RapierPhysicsPipelineProvider pipeline=" + pipeline.getClass().getName());
+        rapierPass("native", "Rapier pipeline initialized; native/JNI init completed before first server tick");
+
+        cleanupPreviousM8Object(container);
+        prepareCollisionPlatform(player);
+        require(server.getCommands().performPrefixedCommand(
+                        player.createCommandSourceStack(), "tp @s " + SPAWN_X + " " + SPAWN_Y + " " + SPAWN_Z) == 1,
+                "Failed to teleport player to deterministic M8 spawn point");
+        require(server.getCommands().performPrefixedCommand(
+                        player.createCommandSourceStack(), "sable spawn block minecraft:stone " + SUB_LEVEL_NAME) == 1,
+                "Failed to spawn fresh M8 Rapier stone sublevel");
+
+        observedSubLevel = requireNamedM8Object(container);
+        expectedId = observedSubLevel.getUniqueId();
+        final RigidBodyHandle handle = physicsSystem.getPhysicsHandle(observedSubLevel);
+        initialSample = sample(observedSubLevel, handle);
+        previousSample = initialSample;
+        minObservedY = initialSample.y;
+        require(initialSample.mass == 2.0, "Expected M8 stone mass 2.0, found " + initialSample.mass);
+        require(initialSample.finite(), "Initial M8 physics sample contains non-finite values: " + initialSample);
+        require(initialSample.approximatelyStationary(INITIAL_VELOCITY_EPSILON),
+                "Fresh M8 object was not approximately stationary before gravity observation: " + initialSample);
+        rapierPass("spawn", "freshObject=" + SUB_LEVEL_NAME + " initial=" + initialSample);
+    }
+
+    private static void observePhysicsGate() {
+        final ServerSubLevelContainer container = SubLevelContainer.getContainer(observedSubLevel.getLevel());
+        require(container != null, "Container disappeared while observing M8 Rapier physics");
+        final SubLevel raw = container.getSubLevel(expectedId);
+        require(raw instanceof ServerSubLevel, "Fresh M8 sublevel disappeared before physics completion");
+        final ServerSubLevel subLevel = (ServerSubLevel) raw;
+        final SubLevelPhysicsSystem physicsSystem = container.physicsSystem();
+        final RigidBodyHandle handle = physicsSystem.getPhysicsHandle(subLevel);
+        final PhysicsSample current = sample(subLevel, handle);
+        require(current.finite(), "M8 physics sample contains non-finite values: " + current);
+        require(current.y > PLATFORM_Y - 4.0, "M8 sublevel fell through the collision region: " + current);
+
+        physicsTicks++;
+        minObservedY = Math.min(minObservedY, current.y);
+        sawDownwardMotion |= current.y < initialSample.y - GRAVITY_EPSILON;
+        sawDownwardVelocity |= current.linearVelocityY < DOWNWARD_VELOCITY_EPSILON;
+
+        final boolean nearCollisionRegion = current.y <= PLATFORM_Y + 3.0;
+        final boolean lowVelocity = Math.abs(current.linearVelocityY) <= REST_VELOCITY_EPSILON;
+        final boolean locallyStable = Math.abs(current.y - previousSample.y) <= REST_POSITION_EPSILON;
+        collisionStableTicks = nearCollisionRegion && lowVelocity && locallyStable ? collisionStableTicks + 1 : 0;
+        previousSample = current;
+
+        if (sawDownwardMotion && sawDownwardVelocity && collisionStableTicks >= COLLISION_STABLE_TICKS) {
+            rapierPass("gravity", "initialY=" + initialSample.y + " minY=" + minObservedY
+                    + " currentY=" + current.y + " velocityY=" + current.linearVelocityY);
+            rapierPass("collision", "platformY=" + PLATFORM_Y + " stableTicks=" + collisionStableTicks
+                    + " final=" + current);
+            physicsGateComplete = true;
+            return;
+        }
+        require(physicsTicks <= PHYSICS_TIMEOUT_TICKS,
+                "M8 Rapier gravity/collision did not complete within " + PHYSICS_TIMEOUT_TICKS
+                        + " server ticks; downwardMotion=" + sawDownwardMotion
+                        + ", downwardVelocity=" + sawDownwardVelocity
+                        + ", stableTicks=" + collisionStableTicks
+                        + ", initial=" + initialSample
+                        + ", current=" + current);
+    }
+
+    private static void cleanupPreviousM8Object(final ServerSubLevelContainer container) {
+        for (final ServerSubLevel subLevel : new ArrayList<>(container.getAllSubLevels())) {
+            if (SUB_LEVEL_NAME.equals(subLevel.getName())) {
+                container.removeSubLevel(subLevel, SubLevelRemovalReason.REMOVED);
+            }
+        }
+        require(container.getAllSubLevels().stream().noneMatch(subLevel -> SUB_LEVEL_NAME.equals(subLevel.getName())),
+                "Previous M8 sublevel survived cleanup");
+    }
+
+    private static void prepareCollisionPlatform(final ServerPlayer player) {
+        final BlockState platform = Blocks.STONE.defaultBlockState();
+        final BlockState air = Blocks.AIR.defaultBlockState();
+        final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = -4; x <= 4; x++) {
+            for (int z = -4; z <= 4; z++) {
+                for (int y = PLATFORM_Y + 1; y <= SPAWN_Y + 2; y++) {
+                    player.serverLevel().setBlock(pos.set(x, y, z), air, 3);
+                }
+                player.serverLevel().setBlock(pos.set(x, PLATFORM_Y, z), platform, 3);
+            }
         }
     }
 
-    private static ServerSubLevel requireSingleServerObject(final ServerSubLevelContainer container) {
-        require(container.getLoadedCount() == 1,
-                "Expected exactly one persisted object, found " + container.getLoadedCount());
-        final SubLevel rawSubLevel = container.getAllSubLevels().get(0);
-        require(rawSubLevel instanceof ServerSubLevel, "Loaded object is not a ServerSubLevel");
-        final ServerSubLevel subLevel = (ServerSubLevel) rawSubLevel;
-        require(SUB_LEVEL_NAME.equals(subLevel.getName()), "Unexpected sublevel name: " + subLevel.getName());
+    private static ServerSubLevel requireNamedM8Object(final ServerSubLevelContainer container) {
+        final List<ServerSubLevel> matches = container.getAllSubLevels().stream()
+                .filter(subLevel -> SUB_LEVEL_NAME.equals(subLevel.getName()))
+                .toList();
+        require(matches.size() == 1, "Expected exactly one fresh M8 object, found " + matches.size());
+        final ServerSubLevel subLevel = matches.get(0);
         require(subLevel.getPlot().getEmbeddedLevelAccessor().getBlockState(BlockPos.ZERO).is(Blocks.STONE),
-                "Expected minecraft:stone at the sublevel origin");
-        require(subLevel.getMassTracker().getMass() == 2.0,
-                "Expected stationary stone mass 2.0, found " + subLevel.getMassTracker().getMass());
-        require(subLevel.latestLinearVelocity.lengthSquared() == 0.0,
-                "Sublevel has nonzero linear velocity: " + subLevel.latestLinearVelocity);
-        require(subLevel.latestAngularVelocity.lengthSquared() == 0.0,
-                "Sublevel has nonzero angular velocity: " + subLevel.latestAngularVelocity);
+                "Expected minecraft:stone at the M8 sublevel origin");
         return subLevel;
     }
 
-    private static boolean clientObjectMatches(final Minecraft minecraft) {
-        if (minecraft.level == null || expectedId == null) {
-            return false;
-        }
-        final ClientSubLevelContainer container = SubLevelContainer.getContainer(minecraft.level);
-        if (container == null || container.getLoadedCount() != 1) {
-            return false;
-        }
-        final SubLevel subLevel = container.getAllSubLevels().get(0);
-        return subLevel.getUniqueId().equals(expectedId)
-                && SUB_LEVEL_NAME.equals(subLevel.getName())
-                && subLevel.getPlot().getEmbeddedLevelAccessor().getBlockState(BlockPos.ZERO).is(Blocks.STONE);
+    private static PhysicsSample sample(final ServerSubLevel subLevel, final RigidBodyHandle handle) {
+        final Vector3d position = new Vector3d(subLevel.logicalPose().position());
+        final Vector3d linearVelocity = handle.getLinearVelocity(new Vector3d());
+        final Vector3d angularVelocity = handle.getAngularVelocity(new Vector3d());
+        return new PhysicsSample(
+                subLevel.getMassTracker().getMass(),
+                position.x,
+                position.y,
+                position.z,
+                subLevel.logicalPose().orientation().x(),
+                subLevel.logicalPose().orientation().y(),
+                subLevel.logicalPose().orientation().z(),
+                subLevel.logicalPose().orientation().w(),
+                linearVelocity.x,
+                linearVelocity.y,
+                linearVelocity.z,
+                angularVelocity.x,
+                angularVelocity.y,
+                angularVelocity.z);
     }
 
     private static MinecraftServer readyIntegratedServer(final Minecraft minecraft) {
@@ -237,19 +371,28 @@ final class SableForgeStandaloneRuntimeSmoke {
                 "Java feature version=" + Runtime.version().feature() + ", expected=17");
     }
 
-    private static void verifyPackagedCompanion() throws IOException {
+    private static void verifyPackagedLibraries() throws IOException {
         SableForgeRuntimeSmoke.verifyCompanionSelection();
         final ClassLoader loader = SableForgeStandaloneRuntimeSmoke.class.getClassLoader();
         final URL api = verifyUniqueRuntimeClass(loader, SableCompanion.class.getName());
         final URL active = verifyUniqueRuntimeClass(loader, ActiveSableCompanion.class.getName());
         final URL fallback = verifyUniqueRuntimeClass(loader, DefaultSableCompanion.class.getName());
         final URL smoke = verifyUniqueRuntimeClass(loader, SableForgeStandaloneRuntimeSmoke.class.getName());
+        final URL rapierProvider = verifyUniqueRuntimeClass(loader, RAPIER_PROVIDER);
+        final URL rapier3d = verifyUniqueRuntimeClass(loader, RAPIER_3D);
+        final URL lz4 = verifyUniqueRuntimeClass(loader, "net.jpountz.lz4.LZ4FrameInputStream");
         final String outerArtifact = requireStandaloneSableOuterArtifact("Sable standalone smoke", smoke);
-        requireNestedCompanionSource("SableCompanion", api, outerArtifact, SableCompanion.class.getName());
+        requireNestedJarSource("SableCompanion", api, outerArtifact, PACKAGED_COMPANION,
+                SableCompanion.class.getName());
         requireOuterSableSource("ActiveSableCompanion", active, outerArtifact, ActiveSableCompanion.class.getName());
-        requireNestedCompanionSource("DefaultSableCompanion", fallback, outerArtifact,
+        requireNestedJarSource("DefaultSableCompanion", fallback, outerArtifact, PACKAGED_COMPANION,
                 DefaultSableCompanion.class.getName());
-        pass("companion", "packaged sources api=" + api + " active=" + active + " default=" + fallback);
+        requireNestedJarSource("RapierPhysicsPipelineProvider", rapierProvider, outerArtifact, PACKAGED_RAPIER,
+                RAPIER_PROVIDER);
+        requireNestedJarSource("Rapier3D", rapier3d, outerArtifact, PACKAGED_RAPIER, RAPIER_3D);
+        requireNestedJarSource("LZ4FrameInputStream", lz4, outerArtifact, PACKAGED_LZ4,
+                "net.jpountz.lz4.LZ4FrameInputStream");
+        pass("provenance", "companion=" + api + " rapier=" + rapierProvider + " lz4=" + lz4);
     }
 
     private static URL verifyUniqueRuntimeClass(final ClassLoader loader, final String className) throws IOException {
@@ -283,23 +426,23 @@ final class SableForgeStandaloneRuntimeSmoke {
                 label + " did not resolve from the staged Sable outer artifact: " + source);
     }
 
-    private static void requireNestedCompanionSource(
+    private static void requireNestedJarSource(
             final String label,
             final URL source,
             final String outerArtifact,
+            final String nestedJar,
             final String className) {
         final ParsedRuntimeResource parsed = parseRuntimeResourceUrl(source.toString());
         requireNoDevelopmentSource(label, parsed.normalizedUrl, source);
         require(parsed.outerArtifact.equals(outerArtifact)
-                        && PACKAGED_COMPANION.equals(parsed.nestedEntry)
+                        && nestedJar.equals(parsed.nestedEntry)
                         && parsed.resource.equals(className.replace('.', '/') + ".class"),
-                label + " did not resolve from the nested Companion JarJar inside the staged Sable artifact: "
-                        + source);
+                label + " did not resolve from " + nestedJar + " inside the staged Sable artifact: " + source);
     }
 
     private static void requireNoDevelopmentSource(final String label, final String path, final URL source) {
         require(!path.contains("/build/classes/") && !path.contains("/sable_companion_1_20/build/")
-                        && !path.contains("/forge/build/classes/"),
+                        && !path.contains("/forge/build/classes/") && !path.contains("/rapierBackport/"),
                 label + " resolved from development output instead of packaged artifact: " + source);
     }
 
@@ -395,6 +538,11 @@ final class SableForgeStandaloneRuntimeSmoke {
 
     private static void onServerStopped(final ServerStoppedEvent event) {
         stoppedServers++;
+        if (phase == Phase.FAILED) {
+            Sable.LOGGER.info("SABLE_STANDALONE_RUNTIME phase=lifecycle status=SKIP after failed M8 gate cycle={}",
+                    stoppedServers);
+            return;
+        }
         pass("lifecycle", "observed integrated server stop cycle=" + stoppedServers);
     }
 
@@ -419,12 +567,59 @@ final class SableForgeStandaloneRuntimeSmoke {
         Sable.LOGGER.info("SABLE_STANDALONE_RUNTIME phase={} status=PASS {}", gate, detail);
     }
 
+    private static void rapierPass(final String gate, final String detail) {
+        Sable.LOGGER.info("SABLE_RAPIER_SMOKE phase={} status=PASS {}", gate, detail);
+    }
+
     private enum Phase {
         INITIAL_TITLE,
         OPENING_WORLD,
-        CLIENT_SYNC,
+        PHYSICS_OBSERVE,
         SERVER_STOP,
         COMPLETE,
         FAILED
+    }
+
+    private record PhysicsSample(
+            double mass,
+            double x,
+            double y,
+            double z,
+            double orientationX,
+            double orientationY,
+            double orientationZ,
+            double orientationW,
+            double linearVelocityX,
+            double linearVelocityY,
+            double linearVelocityZ,
+            double angularVelocityX,
+            double angularVelocityY,
+            double angularVelocityZ) {
+
+        boolean finite() {
+            return Double.isFinite(this.mass)
+                    && Double.isFinite(this.x)
+                    && Double.isFinite(this.y)
+                    && Double.isFinite(this.z)
+                    && Double.isFinite(this.orientationX)
+                    && Double.isFinite(this.orientationY)
+                    && Double.isFinite(this.orientationZ)
+                    && Double.isFinite(this.orientationW)
+                    && Double.isFinite(this.linearVelocityX)
+                    && Double.isFinite(this.linearVelocityY)
+                    && Double.isFinite(this.linearVelocityZ)
+                    && Double.isFinite(this.angularVelocityX)
+                    && Double.isFinite(this.angularVelocityY)
+                    && Double.isFinite(this.angularVelocityZ);
+        }
+
+        boolean approximatelyStationary(final double epsilon) {
+            return Math.abs(this.linearVelocityX) <= epsilon
+                    && Math.abs(this.linearVelocityY) <= epsilon
+                    && Math.abs(this.linearVelocityZ) <= epsilon
+                    && Math.abs(this.angularVelocityX) <= epsilon
+                    && Math.abs(this.angularVelocityY) <= epsilon
+                    && Math.abs(this.angularVelocityZ) <= epsilon;
+        }
     }
 }

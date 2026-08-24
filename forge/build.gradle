@@ -369,6 +369,10 @@ def rapierBackportJarName = "${rapierBackportArtifact}-${version}.jar"
 def rapierBackportNamedJar = layout.buildDirectory.file("rapierBackport/${rapierBackportArtifact}-${version}-named.jar")
 def rapierBackportProductionJar = layout.buildDirectory.file("rapierBackport/${rapierBackportJarName}")
 def rapierBackportJarJarPath = "META-INF/jarjar/${rapierBackportJarName}"
+def standaloneRapierProductionNestedJar = layout.buildDirectory.file(
+        "standaloneRuntime/${rapierBackportArtifact}-${version}-nested-production.jar")
+def standaloneRapierUserdevNestedJar = layout.buildDirectory.file(
+        "standaloneRuntime/${rapierBackportArtifact}-${version}-nested-userdev.jar")
 def rapierLz4Version = '1.11.0'
 def rapierLz4JarJarPath = 'META-INF/jarjar/lz4-java-1.11.0.jar'
 def rapierLz4Sha256 = '535C5578CAB5DCD0A438E202DF80091632B873C0370C25D9B1C1AD1D73577207'
@@ -1375,6 +1379,7 @@ tasks.register('remapRapierBackportJarToProduction') {
     group = 'forge backport'
     description = 'Maps the isolated Rapier common library from named/userdev bytecode to Forge production SRG namespace.'
     dependsOn tasks.named('jarRapierBackportLibrary')
+    dependsOn tasks.named('createMcpToSrg')
 
     inputs.file(rapierBackportNamedJar)
     inputs.file(layout.buildDirectory.file('createMcpToSrg/output.tsrg'))
@@ -1414,6 +1419,7 @@ tasks.register('remapRapierBackportJarToProduction') {
 tasks.register('packageRapierIntoFinalForgeArtifact') {
     group = 'forge backport'
     description = 'Nests the production Rapier library and its LZ4 runtime dependency into the existing final Sable all-jar.'
+    dependsOn tasks.named('reobfJarJar')
     dependsOn tasks.named('remapRapierBackportJarToProduction')
 
     inputs.file(standaloneProductionSableArtifact)
@@ -2909,10 +2915,10 @@ tasks.register('verifyForgePackaging') {
 }
 
 def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSableUserdevArtifact') {
-    dependsOn tasks.named('createSrgToMcp')
-    dependsOn tasks.named('reobfJarJar')
     group = 'forge backport'
     description = 'Derives a forgeclientuserdev-mapped standalone Sable artifact from the final reobfuscated all-jar.'
+    dependsOn tasks.named('createSrgToMcp')
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
 
     inputs.file(standaloneProductionSableArtifact)
     inputs.file(layout.buildDirectory.file('createSrgToMcp/output.srg'))
@@ -2941,6 +2947,48 @@ def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSab
                 mappingsFile,
                 outputJar,
                 standaloneHierarchyClasspath)
+        File nestedProductionRapier = standaloneRapierProductionNestedJar.get().asFile
+        File nestedUserdevRapier = standaloneRapierUserdevNestedJar.get().asFile
+        nestedProductionRapier.parentFile.mkdirs()
+        JarFile mappedOuterJar = new JarFile(outputJar)
+        try {
+            def nestedRapierEntry = mappedOuterJar.getJarEntry(rapierBackportJarJarPath)
+            if (nestedRapierEntry == null) {
+                throw new GradleException(
+                        "Standalone userdev Sable artifact lacks nested Rapier JarJar ${rapierBackportJarJarPath}; "
+                                + 'run :forge:verifyRapierPackagedArtifact first'
+                )
+            }
+            Files.write(nestedProductionRapier.toPath(), mappedOuterJar.getInputStream(nestedRapierEntry).readAllBytes())
+        } finally {
+            mappedOuterJar.close()
+        }
+        def nestedRapierResult = SableStandaloneUserdevMapper.map(
+                nestedProductionRapier,
+                mappingsFile,
+                nestedUserdevRapier,
+                standaloneHierarchyClasspath)
+        File tempOutputJar = new File(outputJar.parentFile, outputJar.name + '.rapier-userdev.tmp')
+        ZipInputStream input = new ZipInputStream(new BufferedInputStream(new FileInputStream(outputJar)))
+        ZipOutputStream output = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tempOutputJar)))
+        try {
+            def entry
+            while ((entry = input.nextEntry) != null) {
+                ZipEntry outputEntry = new ZipEntry(entry.name)
+                outputEntry.time = 0L
+                output.putNextEntry(outputEntry)
+                if (entry.name == rapierBackportJarJarPath) {
+                    output.write(Files.readAllBytes(nestedUserdevRapier.toPath()))
+                } else {
+                    output.write(input.readAllBytes())
+                }
+                output.closeEntry()
+            }
+        } finally {
+            input.close()
+            output.close()
+        }
+        Files.move(tempOutputJar.toPath(), outputJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
         logger.lifecycle("Prepared standalone userdev Sable artifact ${outputJar.name} from "
                 + "${inputJar.absolutePath} sha256=${result.inputSha256}; transformedClasses="
                 + "${result.transformedClasses}, declarationRemaps=${result.declarationRemaps}, "
@@ -2954,6 +3002,14 @@ def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSab
                 + "constantDynamicHandleReferenceRemaps=${result.constantDynamicHandleReferenceRemaps}, "
                 + "unresolvedHierarchyDeclarations=${result.unresolvedHierarchyDeclarations}, "
                 + "unresolvedHierarchyReferences=${result.unresolvedHierarchyReferences}")
+        logger.lifecycle("Prepared standalone userdev nested Rapier ${rapierBackportJarJarPath}; "
+                + "inputSha256=${nestedRapierResult.inputSha256}, transformedClasses="
+                + "${nestedRapierResult.transformedClasses}, referenceRemaps="
+                + "${nestedRapierResult.referenceRemaps}, handleReferenceRemaps="
+                + "${nestedRapierResult.handleReferenceRemaps}, constantDynamicHandleReferenceRemaps="
+                + "${nestedRapierResult.constantDynamicHandleReferenceRemaps}, "
+                + "unresolvedHierarchyDeclarations=${nestedRapierResult.unresolvedHierarchyDeclarations}, "
+                + "unresolvedHierarchyReferences=${nestedRapierResult.unresolvedHierarchyReferences}")
     }
 }
 
@@ -3620,7 +3676,13 @@ tasks.register('verifyStandaloneRunConfiguration') {
                 )
             }
             if (!smokeClassText.contains('META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar')
-                    || !smokeClassText.contains('nested Companion JarJar inside the staged Sable artifact')) {
+                    || !smokeClassText.contains('requireNestedJarSource')
+                    || !smokeClassText.contains('requireNoDevelopmentSource')
+                    || !smokeClassText.contains(' did not resolve from ')
+                    || !smokeClassText.contains(' inside the staged Sable artifact: ')
+                    || !smokeClassText.contains('resolved from development output instead of packaged artifact')
+                    || !smokeClassText.contains('SableCompanion')
+                    || !smokeClassText.contains('DefaultSableCompanion')) {
                 throw new GradleException('Standalone smoke harness no longer verifies nested Companion JarJar provenance')
             }
             if (!smokeClassText.contains('normalizeResourceUrl')
@@ -3718,6 +3780,218 @@ tasks.register('verifyStandaloneRunConfiguration') {
                 + "no external Companion or target-mod classpath, legacy classpath clean, "
                 + "Create-owned nested Registrate is the only standalone Registrate supplier: "
                 + effectiveRegistrateSupplier)
+    }
+}
+
+tasks.register('verifyRapierRuntimeSmokePreparation') {
+    group = 'verification'
+    description = 'Statically verifies M8.4 standalone Rapier userdev mapping, provenance, and smoke-probe wiring.'
+    dependsOn prepareStandaloneSableUserdevArtifact
+    dependsOn tasks.named('prepareStandaloneRuntimeLauncherRoots')
+
+    doLast {
+        File smokeSource = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeStandaloneRuntimeSmoke.java')
+        String smokeSourceText = smokeSource.getText('UTF-8')
+        [
+                'm8_rapier_gravity_smoke',
+                'SABLE_RAPIER_SMOKE phase={} status=PASS',
+                'provider=RapierPhysicsPipelineProvider',
+                'Rapier pipeline initialized; native/JNI init completed',
+                'freshObject=',
+                'rapierPass("gravity"',
+                'rapierPass("collision"',
+                'status=SKIP after failed M8 gate',
+                'approximatelyStationary'
+        ].each { canary ->
+            if (!smokeSourceText.contains(canary)) {
+                throw new GradleException("M8 Rapier smoke source lacks canary: ${canary}")
+            }
+        }
+        [
+                'requireSingleServerObject',
+                'runServerGate',
+                'create6_runtime_smoke',
+                'Sublevel has nonzero linear velocity',
+                'Sublevel has nonzero angular velocity',
+                'phase=lifecycle status=PASS observed integrated server stop cycle='
+        ].each { forbidden ->
+            if (smokeSourceText.contains(forbidden)) {
+                throw new GradleException("M8 Rapier smoke source still contains old M7 invariant/path: ${forbidden}")
+            }
+        }
+
+        File productionSableJar = standaloneProductionSableArtifact.get().asFile
+        File mappedSableJar = standaloneMappedSableRuntime.get().asFile
+        File productionNestedRapier = standaloneRapierProductionNestedJar.get().asFile
+        File userdevNestedRapier = standaloneRapierUserdevNestedJar.get().asFile
+        File mappingsFile = layout.buildDirectory.file('createMcpToSrg/output.tsrg').get().asFile
+        if (!productionSableJar.isFile() || !mappedSableJar.isFile()) {
+            throw new GradleException('M8.4 requires final and standalone mapped Sable artifacts to exist')
+        }
+        if (!productionNestedRapier.isFile() || !userdevNestedRapier.isFile()) {
+            throw new GradleException('M8.4 nested Rapier production/userdev artifacts were not prepared')
+        }
+        def verifyJarSmokeText = { String label, String smokeText ->
+            [
+                    'm8_rapier_gravity_smoke',
+                    'SABLE_RAPIER_SMOKE',
+                    'dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipelineProvider',
+                    'dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipeline',
+                    'dev.ryanhcode.sable.physics.impl.rapier.Rapier3D',
+                    'META-INF/jarjar/sable-rapier-common-1.20.1-2.0.0.jar',
+                    'META-INF/jarjar/lz4-java-1.11.0.jar',
+                    'freshObject=',
+                    'gravity',
+                    'collision',
+                    'Rapier pipeline initialized; native/JNI init completed',
+                    'M8 Rapier gravity/collision did not complete'
+            ].each { canary ->
+                if (!smokeText.contains(canary)) {
+                    throw new GradleException("${label} lacks M8 canary: ${canary}")
+                }
+            }
+            [
+                    'create6_runtime_smoke',
+                    'requireSingleServerObject',
+                    'runServerGate',
+                    'Sublevel has nonzero linear velocity',
+                    'Sublevel has nonzero angular velocity'
+            ].each { forbidden ->
+                if (smokeText.contains(forbidden)) {
+                    throw new GradleException("${label} still contains old M7 invariant/path: ${forbidden}")
+                }
+            }
+        }
+        JarFile productionOuter = new JarFile(productionSableJar)
+        try {
+            def productionSmokeEntry = productionOuter.getJarEntry(
+                    'dev/ryanhcode/sable/forge/SableForgeStandaloneRuntimeSmoke.class')
+            if (productionSmokeEntry == null) {
+                throw new GradleException('Final production Sable artifact is missing standalone smoke harness')
+            }
+            verifyJarSmokeText('Final production standalone smoke harness',
+                    new String(productionOuter.getInputStream(productionSmokeEntry).readAllBytes(),
+                            java.nio.charset.StandardCharsets.ISO_8859_1))
+        } finally {
+            productionOuter.close()
+        }
+        def standaloneHierarchyClasspath = configurations.compileClasspath.files.findAll {
+            it.isFile() && it.name.endsWith('.jar')
+        }
+
+        def productionRapierReport = RapierProductionJarMapper.referenceReport(productionNestedRapier, mappingsFile)
+        if (productionRapierReport.productionMinecraftMemberReferences.isEmpty()
+                || !productionRapierReport.namedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException("Production nested Rapier namespace proof failed: productionRefs="
+                    + "${productionRapierReport.productionMinecraftMemberReferences.size()}, namedRefs="
+                    + "${productionRapierReport.namedMinecraftMemberReferences.take(20)}")
+        }
+        def userdevRapierReport = RapierProductionJarMapper.referenceReport(userdevNestedRapier, mappingsFile)
+        def userdevSrgLookingProductionRefs = userdevRapierReport.productionMinecraftMemberReferences.findAll {
+            it.contains('.m_') || it.contains('.f_')
+        }
+        if (userdevRapierReport.namedMinecraftMemberReferences.isEmpty()
+                || !userdevSrgLookingProductionRefs.isEmpty()) {
+            throw new GradleException("Standalone userdev nested Rapier namespace proof failed: namedRefs="
+                    + "${userdevRapierReport.namedMinecraftMemberReferences.size()}, staleSrgLookingProductionRefs="
+                    + "${userdevSrgLookingProductionRefs.take(20)}")
+        }
+        def staleRapierRefs = SableStandaloneUserdevMapper.staleKnownMemberReferences(
+                userdevNestedRapier,
+                layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile,
+                standaloneHierarchyClasspath)
+        if (!staleRapierRefs.references.isEmpty()) {
+            throw new GradleException("Standalone userdev nested Rapier has stale SRG member references: "
+                    + staleRapierRefs.references.take(30))
+        }
+
+        JarFile mappedOuter = new JarFile(mappedSableJar)
+        try {
+            def mappedOuterEntries = mappedOuter.entries().toList()
+            def mappedRapierEntry = mappedOuter.getJarEntry(rapierBackportJarJarPath)
+            if (mappedRapierEntry == null) {
+                throw new GradleException("Standalone mapped Sable lacks nested Rapier ${rapierBackportJarJarPath}")
+            }
+            if (sha256Bytes(mappedOuter.getInputStream(mappedRapierEntry).readAllBytes())
+                    != sha256(userdevNestedRapier)) {
+                throw new GradleException('Standalone mapped outer Sable does not contain the prepared userdev Rapier jar bytes')
+            }
+            def lz4Entry = mappedOuter.getJarEntry(rapierLz4JarJarPath)
+            if (lz4Entry == null || sha256Bytes(mappedOuter.getInputStream(lz4Entry).readAllBytes()) != rapierLz4Sha256) {
+                throw new GradleException('Standalone mapped Sable lost the exact nested LZ4 runtime jar')
+            }
+            [
+                    'META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar',
+                    'META-INF/jarjar/mixinextras-forge-0.5.3.jar'
+            ].each { entry ->
+                if (mappedOuter.getJarEntry(entry) == null) {
+                    throw new GradleException("Standalone mapped Sable lost nested ${entry}")
+                }
+            }
+            def outerRapierClasses = mappedOuterEntries.findAll { entry ->
+                entry.name.startsWith('dev/ryanhcode/sable/physics/impl/rapier/') && entry.name.endsWith('.class')
+            }
+            if (!outerRapierClasses.isEmpty()) {
+                throw new GradleException("Rapier classes leaked into standalone outer Sable: ${outerRapierClasses*.name}")
+            }
+            def smokeEntry = mappedOuter.getJarEntry(
+                    'dev/ryanhcode/sable/forge/SableForgeStandaloneRuntimeSmoke.class')
+            if (smokeEntry == null) {
+                throw new GradleException('Standalone mapped Sable artifact is missing standalone smoke harness')
+            }
+            String smokeClassText = new String(
+                    mappedOuter.getInputStream(smokeEntry).readAllBytes(),
+                    java.nio.charset.StandardCharsets.ISO_8859_1)
+            verifyJarSmokeText('Standalone mapped smoke harness', smokeClassText)
+        } finally {
+            mappedOuter.close()
+        }
+
+        def launcherSurfaces = [
+                'runStandaloneClient.classpath'                     : tasks.named('runStandaloneClient').get().classpath.files,
+                'standaloneRuntimeLauncher.compileClasspath'        : sourceSets.standaloneRuntimeLauncher.compileClasspath.files,
+                'standaloneRuntimeLauncher.runtimeClasspath'        : sourceSets.standaloneRuntimeLauncher.runtimeClasspath.files
+        ]
+        launcherSurfaces.each { surface, files ->
+            def leaks = files.findAll { file ->
+                String path = file.absolutePath.replace('\\', '/').toLowerCase(Locale.ROOT)
+                path.contains('/classes/java/rapierbackport')
+                        || path.contains('/resources/rapierbackport')
+                        || path.contains('/rapierbackport/')
+                        || path.contains('/sable_rapier/build/')
+            }
+            if (!leaks.isEmpty()) {
+                throw new GradleException("${surface} leaks Rapier development output: ${leaks*.absolutePath}")
+            }
+        }
+        File legacyClasspathFile = layout.buildDirectory.file(
+                'classpath/forge_runStandaloneClient_minecraftClasspath.txt').get().asFile
+        if (legacyClasspathFile.isFile()) {
+            def legacyLeaks = legacyClasspathFile.getText('UTF-8')
+                    .readLines()
+                    .collectMany { line -> line.split(';') as List }
+                    .collect { it.trim() }
+                    .findAll { !it.isEmpty() }
+                    .findAll { entry ->
+                        String lower = entry.replace('\\', '/').toLowerCase(Locale.ROOT)
+                        lower.contains('/classes/java/rapierbackport')
+                                || lower.contains('/resources/rapierbackport')
+                                || lower.contains('/rapierbackport/')
+                                || lower.contains('/sable_rapier/build/')
+                    }
+            if (!legacyLeaks.isEmpty()) {
+                throw new GradleException("Standalone legacy classpath leaks Rapier development output: ${legacyLeaks}")
+            }
+        }
+
+        logger.lifecycle("verifyRapierRuntimeSmokePreparation PASS: productionRapierRefs="
+                + "${productionRapierReport.productionMinecraftMemberReferences.size()}, "
+                + "userdevNamedRefs=${userdevRapierReport.namedMinecraftMemberReferences.size()}, "
+                + "staleRapierRefs=0, ordinary=${staleRapierRefs.ordinaryInstructionReferences}, "
+                + "handles=${staleRapierRefs.handleReferences}, constantDynamicOrLdcHandles="
+                + "${staleRapierRefs.constantDynamicOrLdcHandleReferences}, "
+                + "rapierProvenance=${rapierBackportJarJarPath}, lz4=${rapierLz4JarJarPath}, "
+                + "probe=m8_rapier_gravity_smoke")
     }
 }
 

@@ -96,6 +96,36 @@ stone sublevel with Rapier selected, still without Create/Flywheel deferred
 Mixins or advanced rendering. Runtime proof remains a later one-launch
 milestone.
 
+## M8 Rapier Runtime Acceptance Complete (2026-08-24)
+
+M8.4 standalone preparation and M8.5 packaged-artifact runtime acceptance are
+closed. The accepted one-process standalone runtime proved packaged nested
+Rapier provenance, nested LZ4 provenance, Rapier provider selection over Static
+fallback, native/JNI initialization, fresh dynamic sublevel creation, gravity,
+collision/settling, finite state, clean save, and clean shutdown.
+
+Accepted runtime markers:
+
+```text
+SABLE_STANDALONE_RUNTIME phase=provenance status=PASS
+SABLE_STANDALONE_RUNTIME phase=gate1 status=PASS
+SABLE_RAPIER_SMOKE phase=provider status=PASS provider=RapierPhysicsPipelineProvider
+SABLE_RAPIER_SMOKE phase=native status=PASS
+SABLE_RAPIER_SMOKE phase=spawn status=PASS freshObject=m8_rapier_gravity_smoke initialY=88.0 mass=2.0 initial linear/angular velocity=0
+SABLE_RAPIER_SMOKE phase=gravity status=PASS initialY=88.0 minY=81.3507080078125 currentY=81.49720764160156
+SABLE_RAPIER_SMOKE phase=collision status=PASS platformY=80 stableTicks=20 finalY=81.49720764160156 finalVy=6.769740593881579E-6
+SABLE_STANDALONE_RUNTIME phase=gate2-3 status=PASS
+SABLE_STANDALONE_RUNTIME phase=lifecycle status=PASS
+SABLE_STANDALONE_RUNTIME phase=gate5 status=PASS
+SABLE_STANDALONE_RUNTIME phase=complete status=PASS
+BUILD SUCCESSFUL
+```
+
+Non-blocking observation: the run logged three early
+`Received a sub-level movement packet for a non-existent sub-level` messages.
+They did not prevent provider/native/gravity/collision/lifecycle acceptance.
+Do not fix them unless later evidence shows a user-visible runtime issue.
+
 ## Standalone InvokeDynamic Handle Userdev Remap Fix (2026-08-23)
 
 No Minecraft client or server was launched during this follow-up.

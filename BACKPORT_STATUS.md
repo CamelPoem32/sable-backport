@@ -164,6 +164,29 @@ The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain a
 > `downloadMcpConfig/output.zip` lock through an unnecessary MixinGradle hook on
 > an intermediate `Jar` task. The final verifier uses a plain deterministic ZIP
 > task over already-compiled Rapier outputs, so it remains cheap and isolated.
+>
+> **M8 Rapier real-physics milestone CLOSED/PASS (2026-08-24):** M8.4
+> standalone preparation and M8.5 runtime acceptance are complete. The final
+> packaged standalone runtime proved nested Rapier provenance, nested LZ4
+> provenance, Rapier provider selection over the Static fallback, native/JNI
+> initialization, fresh dynamic sublevel creation, gravity, collision/settling,
+> finite state, clean save, and clean shutdown.
+>
+> Accepted one-process runtime evidence: standalone provenance and gate1 passed;
+> `SABLE_RAPIER_SMOKE` provider passed with
+> `RapierPhysicsPipelineProvider`; native initialization passed; fresh
+> `m8_rapier_gravity_smoke` spawned at `initialY=88.0`, `mass=2.0`, and zero
+> initial linear/angular velocity; gravity passed with
+> `minY=81.3507080078125` and `currentY=81.49720764160156`; collision passed
+> on the deterministic `platformY=80` with `stableTicks=20`,
+> `finalY=81.49720764160156`, and `finalVy=6.769740593881579E-6`; gate2-3,
+> lifecycle, gate5, and complete all passed; Gradle reported `BUILD SUCCESSFUL`.
+>
+> Non-blocking observation: the run logged three early
+> `Received a sub-level movement packet for a non-existent sub-level` messages.
+> They did not prevent provider/native/gravity/collision/lifecycle acceptance
+> and should not be fixed unless later evidence shows a user-visible runtime
+> issue.
 
 ## Canonical Workflow
 
