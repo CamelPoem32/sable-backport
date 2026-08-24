@@ -247,6 +247,7 @@ sourceSets {
             include 'dev/ryanhcode/sable/physics/config/block_properties/PhysicsBlockPropertiesDefinition.java'
             include 'dev/ryanhcode/sable/physics/config/block_properties/PhysicsBlockPropertyTypes.java'
             include 'dev/ryanhcode/sable/physics/floating_block/FloatingBlockMaterial.java'
+            include 'dev/ryanhcode/sable/registry/SableRegistryObject.java'
             include 'dev/ryanhcode/sable/util/SableBufferUtils.java'
             include 'dev/ryanhcode/sable/forge/network/ForgeSablePacketDispatcher.java'
             include 'dev/ryanhcode/sable/companion/**/*.java'
@@ -831,8 +832,6 @@ dependencies {
     targetRuntimeMapped fg.deobf("local.target:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
     targetRuntimeMapped fg.deobf("local.target:Ponder-Forge-${forge_minecraft_version}:${forge_ponder_version}")
 
-    compileOnly fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}:slim")
-    runtimeOnly files(prepareVeilDevelopmentRuntime)
     veilMapped fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}:slim")
     veilRuntimeMapped fg.deobf("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}")
     veilRaw("foundry.veil:Veil-forge-${forge_minecraft_version}:${forge_veil_version}:slim") {
@@ -4099,6 +4098,347 @@ tasks.named('jarJar') {
 
 tasks.named('sourcesJar') {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register('verifyLithiumSableCompatibility') {
+    group = 'forge backport'
+    description = 'Verifies the M9.1 Sable/Radium-Lithium Entity#getFeetBlockState mixin compatibility boundary.'
+
+    dependsOn tasks.named('syncMixinRefmap')
+    dependsOn tasks.named('compileJava')
+
+    inputs.file(rootProject.file('../target_modpack/mods/radium-mc1.20.1-0.12.4+git.26c9d8e.jar'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_sublevel_collision/EntityMixin.java'))
+    inputs.files(sourceSets.main.output.classesDirs)
+
+    doLast {
+        File lithiumJar = rootProject.file('../target_modpack/mods/radium-mc1.20.1-0.12.4+git.26c9d8e.jar')
+        if (!lithiumJar.isFile()) {
+            throw new GradleException("Missing target Lithium/Radium jar: ${lithiumJar}")
+        }
+        String lithiumSha = sha256(lithiumJar)
+        if (lithiumSha != 'B42584E2672D6B5329959EC2B0F342395B19389FED0EE4D86EA71072F42F77A0') {
+            throw new GradleException("Unexpected Lithium/Radium SHA-256: ${lithiumSha}")
+        }
+
+        String lithiumConfigText
+        String lithiumMixinText
+        String lithiumModsToml
+        JarFile lithiumZip = new JarFile(lithiumJar)
+        try {
+            def configEntry = lithiumZip.getJarEntry('lithium.mixins.json')
+            def mixinEntry = lithiumZip.getJarEntry(
+                    'me/jellysquid/mods/lithium/mixin/entity/collisions/unpushable_cramming/EntityMixin.class')
+            def modsEntry = lithiumZip.getJarEntry('META-INF/mods.toml')
+            if (configEntry == null || mixinEntry == null || modsEntry == null) {
+                throw new GradleException('Target Lithium/Radium jar is missing required config, mods.toml, or EntityMixin')
+            }
+            lithiumConfigText = new String(lithiumZip.getInputStream(configEntry).readAllBytes(), StandardCharsets.UTF_8)
+            lithiumMixinText = new String(lithiumZip.getInputStream(mixinEntry).readAllBytes(), StandardCharsets.ISO_8859_1)
+            lithiumModsToml = new String(lithiumZip.getInputStream(modsEntry).readAllBytes(), StandardCharsets.UTF_8)
+        } finally {
+            lithiumZip.close()
+        }
+        if (!lithiumModsToml.contains('modId = "radium"')
+                || !lithiumModsToml.contains('version = "0.12.4+git.26c9d8e"')
+                || !lithiumModsToml.contains('provides=["lithium"]')) {
+            throw new GradleException('Target Radium metadata no longer proves the accepted Lithium provider/version')
+        }
+        if (!lithiumConfigText.contains('entity.collisions.unpushable_cramming.EntityMixin')) {
+            throw new GradleException('Lithium unpushable_cramming EntityMixin is not enabled by the target config')
+        }
+        [
+                'onPositionChanged',
+                'setPos(DDD)V',
+                'ChunkSectionPos;getSectionCoord',
+                'onBaseTick',
+                'baseTick()V',
+                'hasVehicle()Z',
+                'onBlockCached',
+                'getBlockStateAtPos()Lnet/minecraft/block/BlockState;',
+                'INVOKE_ASSIGN',
+                'World;getBlockState',
+                'BlockCachingEntity',
+                'getCachedFeetBlockState',
+                'lithiumOnBlockCacheSet',
+                'f_185934_'
+        ].each { canary ->
+            if (!lithiumMixinText.contains(canary)) {
+                throw new GradleException("Lithium EntityMixin lost expected canary: ${canary}")
+            }
+        }
+
+        File sableSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_sublevel_collision/EntityMixin.java')
+        String sableSourceText = sableSource.getText('UTF-8')
+        if (sableSourceText.contains('@Overwrite')
+                || sableSourceText.contains('public BlockState getFeetBlockState()')) {
+            throw new GradleException('Sable EntityMixin still overwrites/replaces getFeetBlockState')
+        }
+        [
+                '@ModifyExpressionValue',
+                'method = "getFeetBlockState"',
+                'value = "FIELD"',
+                'feetBlockState:Lnet/minecraft/world/level/block/state/BlockState;',
+                'opcode = Opcodes.GETFIELD',
+                'value = "INVOKE"',
+                'Level;getBlockState(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                'sable$refreshFeetBlockStateWhileTracking',
+                'sable$resolveSubLevelFeetBlockState',
+                'sable$trackingSubLevel != null ? null : cachedState',
+                'Sable.HELPER.getAllIntersecting',
+                'sable$inBlockStatePos'
+        ].each { canary ->
+            if (!sableSourceText.contains(canary)) {
+                throw new GradleException("Sable EntityMixin source lost compatibility canary: ${canary}")
+            }
+        }
+
+        File sableMixinClass = sourceSets.main.output.classesDirs.files.collect {
+            new File(it, 'dev/ryanhcode/sable/mixin/entity/entity_sublevel_collision/EntityMixin.class')
+        }.find { it.isFile() }
+        if (sableMixinClass == null) {
+            throw new GradleException('Compiled Sable entity_sublevel_collision EntityMixin class was not found')
+        }
+        String sableClassText = new String(Files.readAllBytes(sableMixinClass.toPath()), StandardCharsets.ISO_8859_1)
+        [
+                'sable$refreshFeetBlockStateWhileTracking',
+                'sable$resolveSubLevelFeetBlockState',
+                'getFeetBlockState',
+                'ModifyExpressionValue',
+                'Level;getBlockState',
+                'feetBlockState',
+                'sable$trackingSubLevel',
+                'sable$inBlockStatePos'
+        ].each { canary ->
+            if (!sableClassText.contains(canary)) {
+                throw new GradleException("Compiled Sable EntityMixin lost compatibility canary: ${canary}")
+            }
+        }
+        if (sableClassText.contains('Lorg/spongepowered/asm/mixin/Overwrite;')) {
+            throw new GradleException('Compiled Sable EntityMixin still carries an @Overwrite annotation')
+        }
+
+        logger.lifecycle('verifyLithiumSableCompatibility PASS: '
+                + "lithium=radium-mc1.20.1-0.12.4+git.26c9d8e.jar sha256=${lithiumSha}; "
+                + 'Lithium onBlockCached INVOKE_ASSIGN canary present; '
+                + 'Sable getFeetBlockState overwrite removed; expression modifiers preserve vanilla lookup shape; '
+                + 'neighbor hooks setPos/baseTick present')
+    }
+}
+
+tasks.register('verifyAttributeRegistrationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M9.3 Forge attribute registration uses EntityAttributeModificationEvent, not AttributeSupplier internals.'
+
+    inputs.file('src/main/java/dev/ryanhcode/sable/index/SableAttributes.java')
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+    inputs.file('src/main/resources/META-INF/accesstransformer-forge.cfg')
+    inputs.dir(layout.buildDirectory.dir('classes/java/main'))
+    inputs.file(layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}.jar"))
+    inputs.file(layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}-all.jar"))
+
+    doLast {
+        File attributesSource = file('src/main/java/dev/ryanhcode/sable/index/SableAttributes.java')
+        File forgeSource = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+        File accessTransformer = file('src/main/resources/META-INF/accesstransformer-forge.cfg')
+
+        String attributesText = attributesSource.getText('UTF-8')
+        String compactAttributesText = attributesText.replaceAll(/\s+/, '')
+        String forgeText = forgeSource.getText('UTF-8')
+        String atText = accessTransformer.getText('UTF-8')
+
+        if (!attributesText.contains('EntityAttributeModificationEvent')) {
+            throw new GradleException('SableAttributes no longer registers through EntityAttributeModificationEvent')
+        }
+        if (!compactAttributesText.contains('event.add(EntityType.PLAYER,PUNCH_STRENGTH,1.0);')) {
+            throw new GradleException('SableAttributes no longer adds PUNCH_STRENGTH to EntityType.PLAYER with base 1.0')
+        }
+        if (!compactAttributesText.contains('event.add(EntityType.PLAYER,PUNCH_COOLDOWN,0.0);')) {
+            throw new GradleException('SableAttributes no longer adds PUNCH_COOLDOWN to EntityType.PLAYER with base 0.0')
+        }
+        [
+                'AttributeSupplier',
+                'DefaultAttributes',
+                '.instances',
+                'f_22241_',
+                'getDeclaredField',
+                'setAccessible'
+        ].each { forbidden ->
+            if (attributesText.contains(forbidden)) {
+                throw new GradleException("SableAttributes still contains forbidden private-field registration canary: ${forbidden}")
+            }
+        }
+
+        if (!forgeText.contains('modBus.addListener(SableAttributes::register);')) {
+            throw new GradleException('SableForge does not register SableAttributes on the Forge mod event bus')
+        }
+        if (forgeText.contains('SableAttributes.register();')) {
+            throw new GradleException('SableForge commonSetup still calls the obsolete private-field attribute mutation')
+        }
+        if (atText.contains('AttributeSupplier') || atText.contains('f_22241_')) {
+            throw new GradleException('Forge access transformer still exposes AttributeSupplier.instances/f_22241_')
+        }
+
+        def checkClassBytes = { String label, byte[] bytes ->
+            String text = new String(bytes, StandardCharsets.ISO_8859_1)
+            [
+                    'net/minecraft/world/entity/ai/attributes/AttributeSupplier',
+                    'f_22241_',
+                    'instances',
+                    'getDeclaredField',
+                    'setAccessible'
+            ].each { forbidden ->
+                if (text.contains(forbidden)) {
+                    throw new GradleException("${label} still contains forbidden AttributeSupplier private access canary: ${forbidden}")
+                }
+            }
+            [
+                    'net/minecraftforge/event/entity/EntityAttributeModificationEvent',
+                    'player.sub_level_punch_strength',
+                    'player.sub_level_punch_cooldown'
+            ].each { required ->
+                if (!text.contains(required)) {
+                    throw new GradleException("${label} lost required Forge event/attribute canary: ${required}")
+                }
+            }
+        }
+
+        File classesDir = layout.buildDirectory.dir('classes/java/main').get().asFile
+        File compiledAttributes = new File(classesDir, 'dev/ryanhcode/sable/index/SableAttributes.class')
+        if (compiledAttributes.isFile()) {
+            checkClassBytes('Compiled SableAttributes', Files.readAllBytes(compiledAttributes.toPath()))
+        }
+
+        [
+                layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}.jar").get().asFile,
+                layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}-all.jar").get().asFile
+        ].each { jar ->
+            if (!jar.isFile()) {
+                throw new GradleException("Missing Forge production artifact for attribute-boundary verification: ${jar}")
+            }
+            JarFile jarFile = new JarFile(jar)
+            try {
+                def attributesEntry = jarFile.getJarEntry('dev/ryanhcode/sable/index/SableAttributes.class')
+                if (attributesEntry == null) {
+                    throw new GradleException("${jar.name} does not contain SableAttributes.class")
+                }
+                checkClassBytes("${jar.name}:SableAttributes", jarFile.getInputStream(attributesEntry).readAllBytes())
+
+                def atEntry = jarFile.getJarEntry('META-INF/accesstransformer-forge.cfg')
+                if (atEntry == null) {
+                    throw new GradleException("${jar.name} does not contain the Forge access transformer")
+                }
+                String jarAtText = new String(jarFile.getInputStream(atEntry).readAllBytes(), StandardCharsets.UTF_8)
+                if (jarAtText.contains('AttributeSupplier') || jarAtText.contains('f_22241_')) {
+                    throw new GradleException("${jar.name} still ships the obsolete AttributeSupplier.instances AT entry")
+                }
+            } finally {
+                jarFile.close()
+            }
+        }
+
+        logger.lifecycle('verifyAttributeRegistrationBoundary PASS: EntityType.PLAYER receives '
+                + 'PUNCH_STRENGTH=1.0 and PUNCH_COOLDOWN=0.0 via EntityAttributeModificationEvent; '
+                + 'AttributeSupplier.instances/f_22241_ private access and AT entry absent')
+    }
+}
+
+tasks.register('verifyVeilRuntimeBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M9.2 retained Forge runtime no longer requires Veil.'
+
+    inputs.dir(layout.buildDirectory.dir('classes/java/main'))
+    inputs.file('src/main/resources/META-INF/mods.toml')
+    inputs.files(fileTree('src/main/resources') { include '*.mixins.json' })
+    inputs.files(fileTree(rootProject.file('common/src/main/resources')) { include '*.mixins.json' })
+    inputs.file(layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}.jar"))
+
+    doLast {
+        def activeVeilClassRefs = []
+        File classesDir = layout.buildDirectory.dir('classes/java/main').get().asFile
+        [classesDir].findAll { it.isDirectory() }.each { dir ->
+            fileTree(dir) { include '**/*.class' }.files.each { classFile ->
+                String text = new String(Files.readAllBytes(classFile.toPath()), StandardCharsets.ISO_8859_1)
+                if (text.contains('foundry/veil')) {
+                    activeVeilClassRefs.add(dir.toPath().relativize(classFile.toPath()).toString().replace('\\', '/'))
+                }
+            }
+        }
+        if (!activeVeilClassRefs.isEmpty()) {
+            throw new GradleException("Active compiled Sable classes still reference Veil: ${activeVeilClassRefs}")
+        }
+
+        String modsToml = file('src/main/resources/META-INF/mods.toml').getText('UTF-8')
+        if (modsToml.contains('modId = "veil"') || modsToml.contains('mandatory = true') && modsToml.contains('veil')) {
+            throw new GradleException('Forge mods.toml still declares a Veil runtime dependency')
+        }
+
+        def enabledMixinVeilRefs = []
+        [
+                file('src/main/resources/sable-common-forge.mixins.json'),
+                file('src/main/resources/sable-forge.mixins.json')
+        ].findAll { it.isFile() }.each { mixinConfig ->
+            String text = mixinConfig.getText('UTF-8')
+            if (text.contains('foundry.veil') || text.contains('foundry/veil')) {
+                enabledMixinVeilRefs.add(mixinConfig.name)
+            }
+            def parsed = new JsonSlurper().parse(mixinConfig)
+            ((parsed.mixins ?: []) + (parsed.client ?: [])).each { mixinName ->
+                String path = "dev/ryanhcode/sable/mixin/${mixinName.toString().replace('.', '/')}.class"
+                [classesDir].findAll { it.isDirectory() }.each { dir ->
+                    File classFile = new File(dir, path)
+                    if (classFile.isFile()) {
+                        String classText = new String(Files.readAllBytes(classFile.toPath()), StandardCharsets.ISO_8859_1)
+                        if (classText.contains('foundry/veil')) {
+                            enabledMixinVeilRefs.add("${mixinConfig.name}:${mixinName}")
+                        }
+                    }
+                }
+            }
+        }
+        if (!enabledMixinVeilRefs.isEmpty()) {
+            throw new GradleException("Enabled Sable mixins still reference Veil: ${enabledMixinVeilRefs}")
+        }
+
+        def normalClasspathVeil = ['implementation', 'compileOnly', 'runtimeOnly'].collectMany { configurationName ->
+            configurations.named(configurationName).get().dependencies.collect { dependency ->
+                "${configurationName}:${dependency.group}:${dependency.name}:${dependency.version}"
+            }
+        }.findAll { it.toLowerCase(Locale.ROOT).contains('veil') }
+        if (!normalClasspathVeil.isEmpty()) {
+            throw new GradleException("Normal Forge compile/runtime classpath still includes Veil: ${normalClasspathVeil}")
+        }
+
+        File finalJar = layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}.jar").get().asFile
+        if (finalJar.isFile()) {
+            def finalVeilRefs = []
+            JarFile jarFile = new JarFile(finalJar)
+            try {
+                jarFile.entries().toList().findAll { it.name.endsWith('.class') }.each { entry ->
+                    String text = new String(jarFile.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                    if (text.contains('foundry/veil')) {
+                        finalVeilRefs.add(entry.name)
+                    }
+                }
+                def modsEntry = jarFile.getJarEntry('META-INF/mods.toml')
+                if (modsEntry != null) {
+                    String finalModsToml = new String(jarFile.getInputStream(modsEntry).readAllBytes(), StandardCharsets.UTF_8)
+                    if (finalModsToml.contains('modId = "veil"')) {
+                        throw new GradleException('Current built Forge jar still declares a Veil dependency in mods.toml')
+                    }
+                }
+            } finally {
+                jarFile.close()
+            }
+            if (!finalVeilRefs.isEmpty()) {
+                throw new GradleException("Current built Forge jar still contains Veil class references: ${finalVeilRefs}")
+            }
+        }
+
+        logger.lifecycle('verifyVeilRuntimeBoundary PASS: activeVeilClassRefs=0, enabledVeilMixinRefs=0, '
+                + 'modsTomlVeilRequired=false, normalClasspathVeil=0')
+    }
 }
 
 apply from: rootProject.file('gradle/runtime-preflight.gradle')

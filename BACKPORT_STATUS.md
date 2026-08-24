@@ -187,6 +187,74 @@ The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain a
 > They did not prevent provider/native/gravity/collision/lifecycle acceptance
 > and should not be fixed unless later evidence shows a user-visible runtime
 > issue.
+>
+> **M9.1 Sable ↔ Lithium compatibility started (2026-08-24):** the target
+> modpack's Lithium provider is
+> `radium-mc1.20.1-0.12.4+git.26c9d8e.jar`, mod version
+> `0.12.4+git.26c9d8e`, `provides=["lithium"]`, SHA-256
+> `B42584E2672D6B5329959EC2B0F342395B19389FED0EE4D86EA71072F42F77A0`.
+> Its enabled
+> `entity.collisions.unpushable_cramming.EntityMixin` injects
+> `onBlockCached` into `Entity#getFeetBlockState`/production
+> `m_146900_()` at `INVOKE_ASSIGN` after the `Level#getBlockState(BlockPos)`
+> lookup, then records the cached `feetBlockState` through
+> `lithiumOnBlockCacheSet`; same-mixin neighbor hooks also clear the cache from
+> `setPos(DDD)V` and `baseTick()V`.
+>
+> Sable's conflict mechanism was an `@Overwrite` replacement of
+> `Entity#getFeetBlockState` in
+> `entity.entity_sublevel_collision.EntityMixin` priority `1100`, which removed
+> the vanilla lookup shape before Lithium's default-priority injector could
+> find it. The M9.1 source change removes that overwrite and uses
+> MixinExtras `@ModifyExpressionValue` instead: one modifier makes the vanilla
+> cached-state null check refresh while Sable is tracking a sublevel, and one
+> modifier adjusts the result of the preserved vanilla
+> `Level#getBlockState(BlockPos)` lookup to the Sable-aware sublevel block
+> state while recording `sable$inBlockStatePos`. Vanilla entities keep the
+> vanilla cache/lookup path; Sable collision context still resolves the
+> sublevel-correct feet block state.
+>
+> New `:forge:verifyLithiumSableCompatibility` statically inspects the exact
+> Radium/Lithium jar and compiled Sable mixin canaries. It passed when run
+> against the written class outputs with `compileJava` excluded after javac had
+> produced no source errors:
+> `.\gradlew.bat --offline :forge:verifyLithiumSableCompatibility -x :forge:compileJava`.
+> Full `compileJava`/`build` and refreshed production artifact verification are
+> still blocked by recurring Windows/ForgeGradle build-output locks, first on
+> `forge/build/downloadMcpConfig/output.zip` and once after javac on
+> `sable_companion_1_20/build/libs/sable-companion-common-1.20.1-1.6.0.jar`.
+>
+> **M9.2 Veil runtime-boundary minimization prepared (2026-08-24):** the
+> production crash moved into Veil shader bootstrap
+> (`could not preload blit shader`, `VeilRenderSystem.renderer() == null`) in a
+> target pack with Embeddium, Oculus, and an active shaderpack. Auditing the
+> current retained Forge graph showed that accepted Sable core/Rapier physics
+> does not require Veil's renderer/runtime. The only active unconditional Veil
+> class references were Veil's platform registry helpers in physics/core classes,
+> the mixin plugin's platform/mod-loaded checks, and vanilla sublevel renderer
+> bridge/frustum types; deferred debug UI, shader processors, water occlusion,
+> chunked/fancy rendering, Sodium/Embeddium reacharound rendering, and Veil
+> network packets remain excluded from the retained Forge source graph.
+>
+> M9.2 removes Veil from normal Forge compile/runtime dependencies and removes
+> the mandatory `mods.toml` Veil dependency. Physics block-property and force
+> group registration now use a small local `SableRegistryObject` holder instead
+> of Veil `RegistrationProvider`/`RegistryObject`; the mixin plugin uses
+> `SableLoaderPlatform` for mod presence/version checks; retained vanilla
+> sublevel renderer APIs no longer mention Veil `CullFrustum`/`MatrixStack`/
+> `VeilRenderBridge`. This preserves networking, Companion, Rapier packaging,
+> native payload, provider selection, mass/bounds, gravity, and collision
+> semantics while keeping advanced Veil visuals deferred.
+>
+> New `:forge:verifyVeilRuntimeBoundary` verifies the minimized boundary. The
+> current compiled class output has `activeCompiledVeilRefs=0`, enabled mixin
+> configs have `0` Veil references, and source `mods.toml` no longer declares
+> Veil. The current built jar is stale (`currentJarVeilRefs=11` and old
+> `mods.toml` still declares Veil), so the verifier correctly fails until a
+> refreshed artifact can be produced. `.\gradlew.bat --offline :forge:build`
+> remains blocked before javac by the recurring external
+> `forge/build/downloadMcpConfig/output.zip` AccessDenied; no Minecraft launch
+> or Veil/Oculus patch was attempted.
 
 ## Canonical Workflow
 

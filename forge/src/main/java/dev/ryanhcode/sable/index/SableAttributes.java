@@ -1,16 +1,12 @@
 package dev.ryanhcode.sable.index;
 
-import com.google.common.collect.ImmutableMap;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attribute;
-import net.minecraft.world.entity.ai.attributes.AttributeInstance;
-import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
-import net.minecraft.world.entity.ai.attributes.DefaultAttributes;
 import net.minecraft.world.entity.ai.attributes.RangedAttribute;
+import net.minecraftforge.event.entity.EntityAttributeModificationEvent;
 
-import java.util.Map;
 import java.util.Objects;
 
 public final class SableAttributes {
@@ -26,18 +22,9 @@ public final class SableAttributes {
     private SableAttributes() {
     }
 
-    public static void register() {
-        final AttributeSupplier supplier = DefaultAttributes.getSupplier(EntityType.PLAYER);
-        final Map<Attribute, AttributeInstance> additionalInstances = AttributeSupplier.builder()
-                .add(PUNCH_STRENGTH)
-                .add(PUNCH_COOLDOWN)
-                .build()
-                .instances;
-
-        supplier.instances = ImmutableMap.<Attribute, AttributeInstance>builder()
-                .putAll(supplier.instances)
-                .putAll(additionalInstances)
-                .buildKeepingLast();
+    public static void register(final EntityAttributeModificationEvent event) {
+        event.add(EntityType.PLAYER, PUNCH_STRENGTH, 1.0);
+        event.add(EntityType.PLAYER, PUNCH_COOLDOWN, 0.0);
     }
 
     public static int getPushCooldownTicks(final LivingEntity entity) {

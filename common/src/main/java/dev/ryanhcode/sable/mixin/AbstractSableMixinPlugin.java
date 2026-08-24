@@ -3,7 +3,6 @@ package dev.ryanhcode.sable.mixin;
 import com.mojang.logging.LogUtils;
 import dev.ryanhcode.sable.annotation.MixinModVersionConstraint;
 import dev.ryanhcode.sable.platform.SableLoaderPlatform;
-import foundry.veil.Veil;
 import it.unimi.dsi.fastutil.objects.Object2BooleanMap;
 import it.unimi.dsi.fastutil.objects.Object2BooleanOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
@@ -31,7 +30,8 @@ public abstract class AbstractSableMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public void onLoad(final String mixinPackage) {
-        this.sodiumPresent = Veil.platform().isSodiumLoaded();
+        this.sodiumPresent = SableLoaderPlatform.INSTANCE.isModLoaded("sodium")
+                || SableLoaderPlatform.INSTANCE.isModLoaded("embeddium");
 
         LOGGER.info("Using {} renderer mixins", this.sodiumPresent ? "Sodium" : "Vanilla");
     }
@@ -59,7 +59,8 @@ public abstract class AbstractSableMixinPlugin implements IMixinConfigPlugin {
 
             final String modId = parts[3].equals("mixin") ? parts[5] : parts[6];
             
-            final boolean isModLoaded = this.modLoadedCache.computeIfAbsent(modId, x -> Veil.platform().isModLoaded(modId));
+            final boolean isModLoaded = this.modLoadedCache.computeIfAbsent(
+                    modId, SableLoaderPlatform.INSTANCE::isModLoaded);
             return isModLoaded && MixinConstraints.handleClassAnnotation(mixinClassName, modId);
         }
 

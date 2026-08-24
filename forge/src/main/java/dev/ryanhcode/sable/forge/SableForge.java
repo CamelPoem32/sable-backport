@@ -38,6 +38,7 @@ public final class SableForge {
         MinecraftForge.EVENT_BUS.addListener(this::registerCommand);
         MinecraftForge.EVENT_BUS.addListener(this::registerReloadListeners);
         MinecraftForge.EVENT_BUS.addListener(this::syncDataPack);
+        modBus.addListener(SableAttributes::register);
         modBus.addListener(this::commonSetup);
 
         SubLevelSelectorModifiers.registerModifiers();
@@ -55,7 +56,6 @@ public final class SableForge {
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
-            SableAttributes.register();
             SableForgeRuntimeSmoke.commonSetup();
         });
     }

@@ -9,9 +9,6 @@ import dev.ryanhcode.sable.mixinterface.BlockEntityRenderDispatcherExtension;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
 import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaSingleSubLevelRenderData;
-import foundry.veil.api.client.render.CullFrustum;
-import foundry.veil.api.client.render.MatrixStack;
-import foundry.veil.api.client.render.VeilRenderBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.ShaderInstance;
@@ -81,7 +78,7 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
     }
 
     @Override
-    public void updateCulling(final Iterable<ClientSubLevel> sublevels, final double cameraX, final double cameraY, final double cameraZ, final CullFrustum cullFrustum, final boolean isSpectator) {
+    public void updateCulling(final Iterable<ClientSubLevel> sublevels, final double cameraX, final double cameraY, final double cameraZ, final Object cullFrustum, final boolean isSpectator) {
         // TODO
     }
 
@@ -144,11 +141,10 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
         final Matrix4f transformation = new Matrix4f();
         final Matrix4f transformationInverse = new Matrix4f();
         final BlockEntityRenderDispatcherExtension dispatcher = (BlockEntityRenderDispatcherExtension) blockEntityRenderer.getBlockEntityRenderDispatcher();
-        final PoseStack matrices = new PoseStack();
-        final MatrixStack matrixStack = VeilRenderBridge.create(matrices);
 
         for (final ClientSubLevel sublevel : sublevels) {
             final SubLevelRenderData data = sublevel.getRenderData();
+            final PoseStack matrices = new PoseStack();
 
             sublevel.renderPose().rotationPoint().negate(chunkOffset.zero());
             data.getTransformation(cameraX, cameraY, cameraZ, transformation);
@@ -156,9 +152,8 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
             transformation.invert(transformationInverse).transformPosition(cameraPosition.zero());
             dispatcher.sable$setCameraPosition(new Vec3(cameraPosition.x - chunkOffset.x(), cameraPosition.y - chunkOffset.y(), cameraPosition.z - chunkOffset.z()));
 
-            matrixStack.clear();
-            matrixStack.position().mul(transformation);
-            matrixStack.normal().mul(new Matrix3f(transformation));
+            matrices.last().pose().mul(transformation);
+            matrices.last().normal().mul(new Matrix3f(transformation));
             if (data instanceof final VanillaSingleSubLevelRenderData singleRenderData) {
                 final BlockEntity renderBlockEntity = singleRenderData.getRenderBlockEntity();
                 if (renderBlockEntity != null) {

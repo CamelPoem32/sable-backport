@@ -126,6 +126,73 @@ Non-blocking observation: the run logged three early
 They did not prevent provider/native/gravity/collision/lifecycle acceptance.
 Do not fix them unless later evidence shows a user-visible runtime issue.
 
+## M9.1 Sable ↔ Lithium Static Compatibility Status (2026-08-24)
+
+No Minecraft client/server was launched. The actual Lithium provider in the
+target modpack is `radium-mc1.20.1-0.12.4+git.26c9d8e.jar`
+(`version = "0.12.4+git.26c9d8e"`, `provides=["lithium"]`,
+SHA-256 `B42584E2672D6B5329959EC2B0F342395B19389FED0EE4D86EA71072F42F77A0`).
+
+Radium/Lithium's enabled
+`entity.collisions.unpushable_cramming.EntityMixin` injects
+`onBlockCached` into `Entity#getFeetBlockState`/production `m_146900_()` at
+`@At(value="INVOKE_ASSIGN", target=Level/World#getBlockState(BlockPos),
+shift=AFTER)` and calls `lithiumOnBlockCacheSet` with the cached
+`feetBlockState`. Neighbor hooks in the same mixin clear that cache from
+`setPos(DDD)V` and `baseTick()V`.
+
+Sable's conflict was its priority-1100 `@Overwrite` of
+`Entity#getFeetBlockState`, which replaced the vanilla method before Lithium's
+default-priority injection could find the expected lookup/assignment. M9.1
+removes that overwrite and preserves the vanilla lookup using two MixinExtras
+`@ModifyExpressionValue` handlers: one forces a cache refresh only while Sable
+is tracking a sublevel, and one substitutes the Sable-aware sublevel block
+state after the vanilla `Level#getBlockState(BlockPos)` call while maintaining
+`sable$inBlockStatePos`.
+
+`.\gradlew.bat --offline :forge:verifyLithiumSableCompatibility -x :forge:compileJava`
+passed against the current class outputs and exact Radium jar, proving the
+Lithium `INVOKE_ASSIGN` canary, Sable overwrite removal, Sable expression
+modifiers, and same-mixin neighbor hooks. Full `compileJava`/`build` and a
+fresh production artifact check remain blocked by recurring Windows/ForgeGradle
+generated-output locks on `forge/build/downloadMcpConfig/output.zip` and
+`sable_companion_1_20/build/libs/sable-companion-common-1.20.1-1.6.0.jar`.
+
+## M9.2 Veil Runtime Boundary Static Status (2026-08-24)
+
+No Minecraft client/server was launched. The production pack's new crash is
+inside Veil shader bootstrap (`could not preload blit shader` because
+`VeilRenderSystem.renderer()` is null) with Embeddium, Oculus, and an active
+shaderpack present. The retained Sable Forge core/Rapier graph does not require
+Veil's renderer/runtime for the accepted feature set.
+
+Current retained Veil references were classified as:
+
+- active mandatory runtime before M9.2: Veil platform registry helper types in
+  physics block-property and force-group holders;
+- active client-only before M9.2: mixin-plugin platform/mod checks and retained
+  vanilla sublevel render dispatcher bridge/frustum types;
+- deferred/excluded: debug UI, Veil network gizmo packets, shader processors,
+  water occlusion, fancy/chunked rendering, Sodium/Embeddium reacharound
+  rendering, and Veil-specific shader/framebuffer code;
+- enabled Mixin configs: no direct Veil target/reference.
+
+M9.2 removes Veil from normal Forge compile/runtime dependencies and removes the
+mandatory `mods.toml` Veil dependency. Core physics now uses local
+`SableRegistryObject` holders instead of Veil `RegistrationProvider`/
+`RegistryObject`; `AbstractSableMixinPlugin` uses `SableLoaderPlatform`;
+retained vanilla rendering no longer exposes Veil `CullFrustum`, `MatrixStack`,
+or `VeilRenderBridge` types. Rapier implementation/mapper/native payload,
+Companion, and Create/Flywheel/Ponder staging are unchanged.
+
+Static evidence from current outputs: `activeCompiledVeilRefs=0`,
+source `mods.toml` has no Veil dependency, and enabled mixin configs have `0`
+Veil references. `:forge:verifyVeilRuntimeBoundary` exists and correctly fails
+on the currently stale built jar because it still has `currentJarVeilRefs=11`
+and old Veil dependency metadata. A refreshed production artifact is still
+blocked by recurring Windows/ForgeGradle `downloadMcpConfig/output.zip`
+AccessDenied; no Veil/Oculus compatibility patch was attempted.
+
 ## Standalone InvokeDynamic Handle Userdev Remap Fix (2026-08-23)
 
 No Minecraft client or server was launched during this follow-up.

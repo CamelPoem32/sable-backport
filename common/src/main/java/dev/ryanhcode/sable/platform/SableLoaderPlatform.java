@@ -6,5 +6,7 @@ import org.jetbrains.annotations.ApiStatus;
 public interface SableLoaderPlatform {
 	SableLoaderPlatform INSTANCE = SablePlatformUtil.load(SableLoaderPlatform.class);
 	
+	boolean isModLoaded(String modId);
+
 	String getModVersion(String modId);
 }

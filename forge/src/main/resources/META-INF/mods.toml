@@ -45,10 +45,3 @@ mandatory = false
 versionRange = "${create_version_range}"
 ordering = "AFTER"
 side = "BOTH"
-
-[[dependencies.sable]]
-modId = "veil"
-mandatory = true
-versionRange = "${veil_version_range}"
-ordering = "AFTER"
-side = "BOTH"

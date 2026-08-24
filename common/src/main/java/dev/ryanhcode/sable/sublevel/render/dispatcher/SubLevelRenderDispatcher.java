@@ -4,7 +4,6 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderer;
-import foundry.veil.api.client.render.CullFrustum;
 import net.minecraft.client.Camera;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.ShaderInstance;
@@ -69,7 +68,7 @@ public interface SubLevelRenderDispatcher extends NativeResource, ResourceManage
      * @param cullFrustum The current frustum used for culling
      * @param isSpectator Whether the player is in spectator mode
      */
-    void updateCulling(final Iterable<ClientSubLevel> sublevels, final double cameraX, final double cameraY, final double cameraZ, final CullFrustum cullFrustum, boolean isSpectator);
+    void updateCulling(final Iterable<ClientSubLevel> sublevels, final double cameraX, final double cameraY, final double cameraZ, final Object cullFrustum, boolean isSpectator);
 
     /**
      * Renders all sub-levels into the specified section layer.

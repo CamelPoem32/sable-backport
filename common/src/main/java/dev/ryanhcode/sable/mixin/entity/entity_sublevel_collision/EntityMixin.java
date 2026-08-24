@@ -1,5 +1,6 @@
 package dev.ryanhcode.sable.mixin.entity.entity_sublevel_collision;
 
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.ryanhcode.sable.ActiveSableCompanion;
@@ -27,8 +28,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
+import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -256,30 +257,38 @@ public abstract class EntityMixin implements EntityMovementExtension {
         return this.sable$inBlockStatePos;
     }
 
-    /**
-     * @author RyanH
-     * @reason Take into account sub-levels
-     */
-    @Overwrite
-    public BlockState getFeetBlockState() {
-        final Level level = this.level();
+    @ModifyExpressionValue(
+            method = "getFeetBlockState",
+            at = @At(
+                    value = "FIELD",
+                    target = "Lnet/minecraft/world/entity/Entity;feetBlockState:Lnet/minecraft/world/level/block/state/BlockState;",
+                    opcode = Opcodes.GETFIELD,
+                    ordinal = 0))
+    private BlockState sable$refreshFeetBlockStateWhileTracking(final BlockState cachedState) {
+        return this.sable$trackingSubLevel != null ? null : cachedState;
+    }
 
-        if (this.feetBlockState == null || this.sable$trackingSubLevel != null) {
-            this.feetBlockState = level.getBlockState(this.blockPosition);
-            this.sable$inBlockStatePos = this.blockPosition;
+    @ModifyExpressionValue(
+            method = "getFeetBlockState",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/world/level/Level;getBlockState(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;"))
+    private BlockState sable$resolveSubLevelFeetBlockState(final BlockState vanillaState) {
+        BlockState resolvedState = vanillaState;
+        this.sable$inBlockStatePos = this.blockPosition;
 
-            final Iterable<SubLevel> intersecting = Sable.HELPER.getAllIntersecting(this.level, new BoundingBox3d(this.blockPosition));
-
-            final Iterator<SubLevel> iter = intersecting.iterator();
-            while (this.feetBlockState.isAir() && iter.hasNext()) {
-                final SubLevel subLevel = iter.next();
-                final BlockPos localBlockPos = BlockPos.containing(subLevel.logicalPose().transformPositionInverse(this.position.add(0.0, 0.001, 0.0)));
-                this.feetBlockState = level.getBlockState(localBlockPos);
-                this.sable$inBlockStatePos = localBlockPos;
-            }
+        final Iterable<SubLevel> intersecting = Sable.HELPER.getAllIntersecting(
+                this.level, new BoundingBox3d(this.blockPosition));
+        final Iterator<SubLevel> iter = intersecting.iterator();
+        while (resolvedState.isAir() && iter.hasNext()) {
+            final SubLevel subLevel = iter.next();
+            final BlockPos localBlockPos = BlockPos.containing(
+                    subLevel.logicalPose().transformPositionInverse(this.position.add(0.0, 0.001, 0.0)));
+            resolvedState = this.level().getBlockState(localBlockPos);
+            this.sable$inBlockStatePos = localBlockPos;
         }
 
-        return this.feetBlockState;
+        return resolvedState;
     }
 
     /**
