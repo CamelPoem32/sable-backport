@@ -2,6 +2,48 @@
 
 Date: 2026-08-23
 
+## Standalone Packaged-Artifact Runtime Acceptance Complete (2026-08-23)
+
+The final M7 standalone packaged-artifact smoke is complete. The accepted run
+logged:
+
+```text
+SABLE_STANDALONE_RUNTIME phase=gate2-3 status=PASS
+SABLE_STANDALONE_RUNTIME phase=lifecycle status=PASS
+SABLE_STANDALONE_RUNTIME phase=gate5 status=PASS
+SABLE_STANDALONE_RUNTIME phase=complete status=PASS
+BUILD SUCCESSFUL
+```
+
+Treat M7 as closed. Do not change the standalone mapper, provenance parser, or
+packaged-artifact harness unless new evidence requires it. The next milestone is
+M8 Rapier / real Sable physics planning and static staging; no Minecraft launch
+belongs to that planning task.
+
+## M8.2 Rapier Native/JNI Static Acceptance (2026-08-24)
+
+No Minecraft client/server was launched, no native library was loaded, and no
+Rust build/regeneration was performed. The new
+`.\gradlew.bat --offline :forge:verifyRapierNativeBackportStatic` task passed.
+
+The verifier statically decompresses
+`natives/sable_rapier/sable_rapier_binaries.zip.l4z`, proves the exact six
+Windows/Linux/macOS x86_64/aarch64 native binaries, validates deterministic
+sizes/SHA-256 inventory, checks `53` Java `Rapier3D` native methods against
+`53/53` JNI symbol coverage in every packaged binary, verifies matching Rust JNI
+export names and static `JNIEnv`/`JClass` receiver shape, and confirms the loader
+resource path `/natives/sable_rapier/sable_rapier_binaries.zip.l4z` plus
+extraction directory `.sable/natives`.
+
+Packaging remains disabled for runtime selection: Rapier is isolated from
+`sourceSets.main`, the common service descriptor still selects
+`StaticPhysicsPipelineProvider`, the Rapier service descriptor remains owned by
+`sable_rapier`, the native payload has one source owner, and no
+Create/Flywheel/Ponder/Veil jars are bundled by Rapier resources. M8.3 should
+package the already-staged Rapier Java/resources/native payload as a distinct
+Forge JarJar/common-library boundary and statically prove ServiceLoader selects
+Rapier while Static remains fallback, before any runtime smoke.
+
 ## Standalone InvokeDynamic Handle Userdev Remap Fix (2026-08-23)
 
 No Minecraft client or server was launched during this follow-up.

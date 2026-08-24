@@ -535,16 +535,18 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
             throw new IllegalArgumentException("Constraint validation failed", e);
         }
 
-        final T constraint = switch (configuration) {
-            case final RotaryConstraintConfiguration config ->
-                    (T) RapierRotaryConstraintHandle.create(this.level, bodyA, bodyB, config);
-            case final FixedConstraintConfiguration config ->
-                    (T) RapierFixedConstraintHandle.create(this.level, bodyA, bodyB, config);
-            case final FreeConstraintConfiguration config ->
-                    (T) RapierFreeConstraintHandle.create(this.level, bodyA, bodyB, config);
-            case final GenericConstraintConfiguration config ->
-                    (T) RapierGenericConstraintHandle.create(this.level, bodyA, bodyB, config);
-        };
+        final T constraint;
+        if (configuration instanceof final RotaryConstraintConfiguration config) {
+            constraint = (T) RapierRotaryConstraintHandle.create(this.level, bodyA, bodyB, config);
+        } else if (configuration instanceof final FixedConstraintConfiguration config) {
+            constraint = (T) RapierFixedConstraintHandle.create(this.level, bodyA, bodyB, config);
+        } else if (configuration instanceof final FreeConstraintConfiguration config) {
+            constraint = (T) RapierFreeConstraintHandle.create(this.level, bodyA, bodyB, config);
+        } else if (configuration instanceof final GenericConstraintConfiguration config) {
+            constraint = (T) RapierGenericConstraintHandle.create(this.level, bodyA, bodyB, config);
+        } else {
+            throw new IllegalArgumentException("Unsupported constraint configuration: " + configuration.getClass().getName());
+        }
 
         if (!constraint.isValid()) {
             return null;

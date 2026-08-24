@@ -46,6 +46,17 @@ sourceSets {
         compileClasspath = files()
         runtimeClasspath = output
     }
+    rapierBackport {
+        java {
+            srcDir rootProject.file('sable_rapier/src/main/java')
+        }
+        resources {
+            srcDir rootProject.file('sable_rapier/src/main/resources')
+        }
+        compileClasspath += sourceSets.main.output
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath = output + compileClasspath
+    }
 }
 
 minecraft {
@@ -267,6 +278,7 @@ def mixinRefmapOutputFile = layout.buildDirectory.file('classes/java/main/sable.
 def syncMixinRefmap = tasks.register('syncMixinRefmap') {
     group = 'forge backport'
     description = 'Publishes MixinGradle output even when compileJava stops at the source backport frontier.'
+    dependsOn tasks.named('compileJava')
     inputs.file(mixinRefmapWorkFile).optional()
     outputs.file(mixinRefmapOutputFile)
     onlyIf { mixinRefmapWorkFile.get().asFile.isFile() }
@@ -350,6 +362,14 @@ def standaloneProductionSableArtifact = layout.buildDirectory.file(
         "libs/${mod_id}-forge-${forge_minecraft_version}-${version}-all.jar")
 def standaloneMappedSableRuntime = layout.buildDirectory.file(
         "standaloneRuntime/${mod_id}-forge-${forge_minecraft_version}-${version}-all-userdev.jar")
+def rapierLz4JarCandidates = [
+        new File(System.getProperty('user.home'),
+                '.gradle/caches/modules-2/files-2.1/at.yawk.lz4/lz4-java/1.11.0/'
+                        + 'b9669fb5e3ccf50a579c9a4f750cab37ce8fce1b/lz4-java-1.11.0.jar'),
+        file('C:/Users/camel/.gradle/caches/modules-2/files-2.1/at.yawk.lz4/lz4-java/1.11.0/'
+                + 'b9669fb5e3ccf50a579c9a4f750cab37ce8fce1b/lz4-java-1.11.0.jar')
+]
+def rapierLz4Jar = rapierLz4JarCandidates.find { it.isFile() }
 
 def expectedTargetArtifacts = [
         create    : [
@@ -778,6 +798,12 @@ dependencies {
 
     implementation 'org.apache.maven:maven-artifact:3.8.5'
 
+    rapierBackportImplementation files(rapierLz4Jar ?: file('missing-lz4-java-1.11.0.jar'))
+    rapierBackportImplementation('org.apache.maven:maven-artifact:3.8.5') {
+        transitive = false
+    }
+    rapierBackportCompileOnly files(project(':sable_companion_1_20').sourceSets.main.output.classesDirs)
+
     compileOnly fg.deobf("local.target:create-${forge_minecraft_version}:${forge_create_version}")
     compileOnly fg.deobf("local.target:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
     compileOnly fg.deobf("local.target:Registrate:${forge_registrate_version}")
@@ -802,6 +828,13 @@ dependencies {
     networkTestRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
 }
 
+tasks.named('compileRapierBackportJava') {
+    dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('classes')
+    dependsOn syncMixinRefmap
+    options.release = Integer.parseInt(forge_java_version)
+}
+
 tasks.register('networkTest', Test) {
     group = 'verification'
     description = 'Compiles and tests the isolated production Sable packet protocol slice.'
@@ -809,6 +842,462 @@ tasks.register('networkTest', Test) {
     classpath = sourceSets.networkTest.runtimeClasspath
     dependsOn tasks.named('compileNetworkProtocolJava')
     useJUnitPlatform()
+}
+
+tasks.register('verifyRapierBackportStatic') {
+    group = 'verification'
+    description = 'Compiles and verifies the isolated Java 17 Rapier backport staging boundary.'
+    dependsOn tasks.named('rapierBackportClasses')
+
+    doLast {
+        File rapierJavaRoot = rootProject.file('sable_rapier/src/main/java')
+        File rapierResourcesRoot = rootProject.file('sable_rapier/src/main/resources')
+        File companionClassesRoot = project(':sable_companion_1_20').sourceSets.main.output.classesDirs.singleFile
+        String physicsProviderService = 'META-INF/services/dev.ryanhcode.sable.api.physics.PhysicsPipelineProvider'
+        String rapierProvider = 'dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipelineProvider'
+        String rapierProviderClass = rapierProvider.replace('.', '/') + '.class'
+        File nativePayload = new File(rapierResourcesRoot, 'natives/sable_rapier/sable_rapier_binaries.zip.l4z')
+
+        def sourceFiles = fileTree(rapierJavaRoot).matching { include '**/*.java' }.files.sort()
+        if (sourceFiles.size() != 14) {
+            throw new GradleException("Expected 14 staged Rapier Java source files, found ${sourceFiles.size()}")
+        }
+
+        def forbiddenSourcePatterns = [
+                ~/case\s+final\s+/,
+                ~/\bSequenced(Collection|Map|Set)?\b/,
+                ~/\.reversed\s*\(/,
+                ~/\.getFirst\s*\(/,
+                ~/\.getLast\s*\(/,
+                ~/\.removeFirst\s*\(/,
+                ~/\.removeLast\s*\(/
+        ]
+        def java21Hits = []
+        def neoforgeHits = []
+        sourceFiles.each { sourceFile ->
+            String relative = rapierJavaRoot.toPath().relativize(sourceFile.toPath()).toString().replace('\\', '/')
+            String text = sourceFile.getText('UTF-8')
+            forbiddenSourcePatterns.each { pattern ->
+                def matcher = text =~ pattern
+                if (matcher.find()) {
+                    java21Hits << "${relative}: ${matcher.group()}"
+                }
+            }
+            def platformMatcher = text =~ /\b(net\.neoforged|NeoForge|neoforge)\b/
+            if (platformMatcher.find()) {
+                neoforgeHits << "${relative}: ${platformMatcher.group()}"
+            }
+        }
+        if (!java21Hits.isEmpty()) {
+            throw new GradleException("Java 21-only Rapier source constructs remain: ${java21Hits}")
+        }
+        if (!neoforgeHits.isEmpty()) {
+            throw new GradleException("NeoForge-only references remain in staged Rapier Java: ${neoforgeHits}")
+        }
+        if (rapierLz4Jar == null || !rapierLz4Jar.isFile()) {
+            throw new GradleException("Cached at.yawk.lz4:lz4-java:1.11.0 jar is missing; checked ${rapierLz4JarCandidates}")
+        }
+        String rapierLz4Sha = sha256(rapierLz4Jar)
+        if (rapierLz4Sha != '535C5578CAB5DCD0A438E202DF80091632B873C0370C25D9B1C1AD1D73577207') {
+            throw new GradleException("Unexpected at.yawk.lz4:lz4-java:1.11.0 SHA-256: ${rapierLz4Sha}")
+        }
+
+        def rapierClassFiles = sourceSets.rapierBackport.output.classesDirs.files.collectMany { classesDir ->
+            if (!classesDir.isDirectory()) {
+                return []
+            }
+            fileTree(classesDir).matching { include '**/*.class' }.files.collect { classFile ->
+                [root: classesDir, file: classFile]
+            }
+        }
+        if (!rapierClassFiles.any { row ->
+            row.root.toPath().relativize(row.file.toPath()).toString().replace('\\', '/') == rapierProviderClass
+        }) {
+            throw new GradleException("Staged Rapier provider class is missing: ${rapierProviderClass}")
+        }
+        def incompatibleRapierClasses = rapierClassFiles.findAll { row ->
+            byte[] bytes = Files.readAllBytes(row.file.toPath())
+            if (bytes.length < 8) {
+                throw new GradleException("Staged Rapier class has no class header: ${row.file}")
+            }
+            int major = ((bytes[6] & 0xFF) << 8) | (bytes[7] & 0xFF)
+            major != 61
+        }.collect { row -> row.root.toPath().relativize(row.file.toPath()).toString().replace('\\', '/') }
+        if (!incompatibleRapierClasses.isEmpty()) {
+            throw new GradleException("Staged Rapier classes are not Java 17 major 61: ${incompatibleRapierClasses}")
+        }
+
+        File stagedService = new File(sourceSets.rapierBackport.output.resourcesDir, physicsProviderService)
+        if (!stagedService.isFile()) {
+            throw new GradleException("Staged Rapier service descriptor is missing: ${stagedService}")
+        }
+        def serviceProviders = stagedService.getText('UTF-8')
+                .readLines()
+                .collect { it.trim() }
+                .findAll { !it.isEmpty() && !it.startsWith('#') }
+        if (serviceProviders != [rapierProvider]) {
+            throw new GradleException("Unexpected staged Rapier service descriptor providers: ${serviceProviders}")
+        }
+
+        File providerApiSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/PhysicsPipelineProvider.java')
+        File rapierProviderSource = new File(rapierJavaRoot, 'dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipelineProvider.java')
+        File staticProviderSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/physics/impl/none/StaticPhysicsPipelineProvider.java')
+        if (!providerApiSource.getText('UTF-8').contains('int value() default 1000;')) {
+            throw new GradleException('PhysicsPipelineProvider default priority is no longer 1000')
+        }
+        if (!rapierProviderSource.getText('UTF-8').contains('@PhysicsPipelineProvider.LoadPriority()')) {
+            throw new GradleException('RapierPhysicsPipelineProvider no longer uses default priority 1000')
+        }
+        if (!staticProviderSource.getText('UTF-8').contains('@PhysicsPipelineProvider.LoadPriority(900)')) {
+            throw new GradleException('StaticPhysicsPipelineProvider no longer declares fallback priority 900')
+        }
+
+        if (!nativePayload.isFile()) {
+            throw new GradleException("Opaque Rapier native payload is missing: ${nativePayload}")
+        }
+        File stagedNativePayload = new File(sourceSets.rapierBackport.output.resourcesDir, 'natives/sable_rapier/sable_rapier_binaries.zip.l4z')
+        if (!stagedNativePayload.isFile()) {
+            throw new GradleException("Staged Rapier native payload is missing: ${stagedNativePayload}")
+        }
+        if (sha256(nativePayload) != sha256(stagedNativePayload)) {
+            throw new GradleException('Staged Rapier native payload differs from upstream opaque payload')
+        }
+
+        def packagesInClassRoots = { Collection<File> roots ->
+            roots.collectMany { classesDir ->
+                if (!classesDir.isDirectory()) {
+                    return []
+                }
+                fileTree(classesDir).matching { include '**/*.class' }.files.collect { classFile ->
+                    String relative = classesDir.toPath().relativize(classFile.toPath()).toString().replace('\\', '/')
+                    int slash = relative.lastIndexOf('/')
+                    slash < 0 ? '<default>' : relative.substring(0, slash).replace('/', '.')
+                }
+            }.toSet()
+        }
+        def rapierPackages = packagesInClassRoots(sourceSets.rapierBackport.output.classesDirs.files)
+        def mainPackages = packagesInClassRoots(sourceSets.main.output.classesDirs.files)
+        def companionPackages = packagesInClassRoots([companionClassesRoot])
+        def mainSplit = rapierPackages.intersect(mainPackages).sort()
+        def companionSplit = rapierPackages.intersect(companionPackages).sort()
+        if (!mainSplit.isEmpty()) {
+            throw new GradleException("Staged Rapier and outer Sable share Java packages: ${mainSplit}")
+        }
+        if (!companionSplit.isEmpty()) {
+            throw new GradleException("Staged Rapier and Companion share Java packages: ${companionSplit}")
+        }
+
+        def rapierOutputRoots = (sourceSets.rapierBackport.output.classesDirs.files
+                + [sourceSets.rapierBackport.output.resourcesDir])
+                .findAll { it != null }
+                .collect { it.canonicalFile }
+                .toSet()
+        def mainOutputLeaks = sourceSets.main.output.files
+                .collect { it.canonicalFile }
+                .findAll { rapierOutputRoots.contains(it) }
+        if (!mainOutputLeaks.isEmpty()) {
+            throw new GradleException("Rapier staging output leaked into sourceSets.main output: ${mainOutputLeaks}")
+        }
+        def mainRuntimeDependencyLeaks = configurations.runtimeClasspath.dependencies.findAll { dependency ->
+            String marker = "${dependency.group}:${dependency.name}:${dependency.version}".toLowerCase(Locale.ROOT)
+            marker.contains('sable_rapier') || marker.contains('rapierbackport')
+        }
+        if (!mainRuntimeDependencyLeaks.isEmpty()) {
+            throw new GradleException("Rapier staging dependency leaked into main runtimeClasspath: ${mainRuntimeDependencyLeaks}")
+        }
+        def mainSourceRoots = sourceSets.main.java.srcDirs.collect { it.canonicalFile }.toSet()
+        if (mainSourceRoots.contains(rapierJavaRoot.canonicalFile)) {
+            throw new GradleException('Rapier Java root is attached to sourceSets.main')
+        }
+        def mainRapierClasses = sourceSets.main.output.classesDirs.files.findAll { classesDir ->
+            new File(classesDir, rapierProviderClass).exists()
+        }
+        if (!mainRapierClasses.isEmpty()) {
+            throw new GradleException("Rapier provider leaked into sourceSets.main output: ${mainRapierClasses}")
+        }
+
+        logger.lifecycle("verifyRapierBackportStatic PASS: rapierSources=${sourceFiles.size()}, "
+                + "rapierClasses=${rapierClassFiles.size()}, providerPriority=1000, "
+                + "staticFallbackPriority=900, nativePayload=${nativePayload.length()} bytes, "
+                + "splitPackages=0")
+    }
+}
+
+tasks.register('verifyRapierNativeBackportStatic') {
+    group = 'verification'
+    description = 'Statically verifies the upstream Rapier native payload, JNI symbol surface, and packaging boundary.'
+
+    doLast {
+        File rapierJavaRoot = rootProject.file('sable_rapier/src/main/java')
+        File rapierRustRoot = rootProject.file('sable_rapier/src/main/rust')
+        File rapierResourcesRoot = rootProject.file('sable_rapier/src/main/resources')
+        File nativePayload = new File(rapierResourcesRoot, 'natives/sable_rapier/sable_rapier_binaries.zip.l4z')
+        File nativeReadme = new File(rapierResourcesRoot, 'natives/sable_rapier/README.md')
+        File rapierLicense = new File(rapierResourcesRoot, 'natives/sable_rapier/LICENSE-RAPIER')
+        File sableLicense = rootProject.file('LICENSE.md')
+        File rapier3DSource = new File(rapierJavaRoot, 'dev/ryanhcode/sable/physics/impl/rapier/Rapier3D.java')
+        File rapierCargo = new File(rapierRustRoot, 'rapier/Cargo.toml')
+        File rustToolchain = new File(rapierRustRoot, 'rust-toolchain.toml')
+        File cargoLock = new File(rapierRustRoot, 'Cargo.lock')
+        String nativePrefix = 'Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_'
+        String archiveResourcePath = '/natives/sable_rapier/sable_rapier_binaries.zip.l4z'
+        def expectedNativeFiles = [
+                'sable_rapier_x86_64_windows.dll',
+                'sable_rapier_aarch64_windows.dll',
+                'sable_rapier_x86_64_linux.so',
+                'sable_rapier_aarch64_linux.so',
+                'sable_rapier_x86_64_macos.dylib',
+                'sable_rapier_aarch64_macos.dylib'
+        ]
+
+        if (!nativePayload.isFile()) {
+            throw new GradleException("Rapier native payload is missing: ${nativePayload}")
+        }
+        if (rapierLz4Jar == null || !rapierLz4Jar.isFile()) {
+            throw new GradleException("Cached at.yawk.lz4:lz4-java:1.11.0 jar is missing; checked ${rapierLz4JarCandidates}")
+        }
+
+        def readNativeArchive = {
+            URLClassLoader loader = new URLClassLoader([rapierLz4Jar.toURI().toURL()] as URL[], (ClassLoader) null)
+            try {
+                Class<?> lz4InputType = loader.loadClass('net.jpountz.lz4.LZ4FrameInputStream')
+                InputStream fileInput = Files.newInputStream(nativePayload.toPath())
+                InputStream lz4Input = (InputStream) lz4InputType
+                        .getConstructor(InputStream)
+                        .newInstance(fileInput)
+                Map<String, byte[]> entries = new LinkedHashMap<>()
+                try (ZipInputStream zipInput = new ZipInputStream(lz4Input)) {
+                    ZipEntry entry
+                    while ((entry = zipInput.nextEntry) != null) {
+                        if (entry.directory) {
+                            continue
+                        }
+                        ByteArrayOutputStream output = new ByteArrayOutputStream()
+                        byte[] buffer = new byte[8192]
+                        int read
+                        while ((read = zipInput.read(buffer)) >= 0) {
+                            if (read > 0) {
+                                output.write(buffer, 0, read)
+                            }
+                        }
+                        if (entries.put(entry.name, output.toByteArray()) != null) {
+                            throw new GradleException("Duplicate native archive entry: ${entry.name}")
+                        }
+                    }
+                }
+                return entries
+            } finally {
+                loader.close()
+            }
+        }
+
+        def nativeEntries = readNativeArchive()
+        if ((nativeEntries.keySet() as Set) != (expectedNativeFiles as Set)) {
+            throw new GradleException(
+                    "Unexpected Rapier native archive entries. expected=${expectedNativeFiles}, actual=${nativeEntries.keySet().sort()}"
+            )
+        }
+
+        String rapier3DText = rapier3DSource.getText('UTF-8')
+        Set<String> javaNativeMethods = new TreeSet<>()
+        def nativeLines = rapier3DText.readLines().findAll { it.contains(' native ') }
+        nativeLines.each { String line ->
+            def matcher = line =~ /\bnative\s+[A-Za-z0-9_<>\[\].?]+\s+([A-Za-z0-9_]+)\s*\(/
+            if (!matcher.find()) {
+                throw new GradleException("Could not parse Rapier3D native declaration: ${line}")
+            }
+            javaNativeMethods.add(matcher.group(1))
+        }
+        int rawNativeKeywordCount = nativeLines.size()
+        if (javaNativeMethods.size() != rawNativeKeywordCount) {
+            throw new GradleException(
+                    "Rapier3D native method parser found ${javaNativeMethods.size()} static natives, "
+                            + "but source contains ${rawNativeKeywordCount} native keywords"
+            )
+        }
+        if (javaNativeMethods.size() != 53) {
+            throw new GradleException("Expected 53 Rapier3D native methods, found ${javaNativeMethods.size()}: ${javaNativeMethods}")
+        }
+
+        Set<String> expectedJniExports = javaNativeMethods.collect { ("${nativePrefix}${it}").toString() } as Set
+        String rustSourceText = fileTree(new File(rapierRustRoot, 'rapier/src'))
+                .matching { include '**/*.rs' }
+                .files
+                .sort()
+                .collect { it.getText('UTF-8') }
+                .join('\n')
+        Set<String> rustJniExports = new TreeSet<>()
+        (rustSourceText =~ /Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_[A-Za-z0-9_]+/)
+                .each { match -> rustJniExports.add(match.toString()) }
+        def missingRustExports = expectedJniExports - rustJniExports
+        def unexpectedRustExports = rustJniExports.findAll { it.startsWith(nativePrefix) && !expectedJniExports.contains(it) }.sort()
+        if (!missingRustExports.isEmpty()) {
+            throw new GradleException("Rust source is missing JNI exports: ${missingRustExports.sort()}")
+        }
+        if (!unexpectedRustExports.isEmpty()) {
+            throw new GradleException("Rust source declares unexpected Sable Rapier JNI exports: ${unexpectedRustExports}")
+        }
+        def receiverMismatches = []
+        expectedJniExports.each { String exportName ->
+            def signatureMatcher = rustSourceText =~ /(?s)pub\s+extern\s+"system"\s+fn\s+${java.util.regex.Pattern.quote(exportName)}(?:<[^>]+>)?\s*\((.*?)\)\s*(?:->|\{)/
+            if (!signatureMatcher.find()) {
+                receiverMismatches << "${exportName}: signature not found"
+                return
+            }
+            String params = signatureMatcher.group(1)
+                    .replace('\r', '')
+                    .replace('\n', ' ')
+                    .replaceAll(/\s+/, ' ')
+            if (!(params =~ /^\s*(?:mut\s+)?_?env\s*:\s*JNIEnv(?:<[^>]+>)?\s*,\s*_class\s*:\s*JClass(?:<[^>]+>)?\s*,/).find()) {
+                receiverMismatches << "${exportName}: ${params}"
+            }
+        }
+        if (!receiverMismatches.isEmpty()) {
+            throw new GradleException(
+                    "Rapier3D Java natives are static, but Rust JNI receiver signatures are unexpected: ${receiverMismatches}"
+            )
+        }
+
+        def extractJniSymbols = { byte[] bytes ->
+            StringBuilder current = new StringBuilder()
+            Set<String> symbols = new TreeSet<>()
+            Set<String> unexpected = new TreeSet<>()
+            def expectedByLength = expectedJniExports.sort { a, b -> b.length() <=> a.length() }
+            def flush = {
+                if (current.length() >= nativePrefix.length()) {
+                    String text = current.toString()
+                    int start = text.indexOf(nativePrefix)
+                    while (start >= 0) {
+                        String tail = text.substring(start)
+                        String matched = expectedByLength.find { tail.startsWith(it) }
+                        if (matched != null) {
+                            symbols.add(matched)
+                        } else {
+                            def matcher = tail =~ /Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_[A-Za-z0-9_]+/
+                            if (matcher.find()) {
+                                unexpected.add(matcher.group(0))
+                            }
+                        }
+                        start = text.indexOf(nativePrefix, start + nativePrefix.length())
+                    }
+                }
+                current.setLength(0)
+            }
+            bytes.each { byte raw ->
+                int value = raw & 0xFF
+                if (value >= 32 && value <= 126) {
+                    current.append((char) value)
+                } else {
+                    flush()
+                }
+            }
+            flush()
+            [expected: symbols, unexpected: unexpected]
+        }
+
+        def binaryCoverage = [:]
+        nativeEntries.each { name, bytes ->
+            def scan = extractJniSymbols(bytes)
+            def symbols = scan.expected
+            def missing = (expectedJniExports - symbols).sort()
+            def unexpected = scan.unexpected.sort()
+            if (!missing.isEmpty()) {
+                throw new GradleException("${name} is missing JNI exports: ${missing}")
+            }
+            if (!unexpected.isEmpty()) {
+                throw new GradleException("${name} contains unexpected Sable Rapier JNI exports: ${unexpected}")
+            }
+            binaryCoverage[name] = [
+                    size   : bytes.length,
+                    sha256 : sha256Bytes(bytes),
+                    exports: symbols.intersect(expectedJniExports).size()
+            ]
+        }
+
+        def requiredLoaderSnippets = [
+                "private static final String NATIVE_DIR = \".sable/natives\";",
+                "private static final String LIB_ZIP_NAME = \"sable_rapier_binaries.zip.l4z\";",
+                "private static final String LIB_NAME = \"sable_rapier\";",
+                "Rapier3D.class.getResourceAsStream(\"/natives/\" + LIB_NAME + \"/\" + LIB_ZIP_NAME)",
+                "System.getProperty(\"os.arch\").equals(\"arm\") || System.getProperty(\"os.arch\").startsWith(\"aarch64\")",
+                "LIB_NAME + \"_\" + arch + \"_windows.dll\"",
+                "LIB_NAME + \"_\" + arch + \"_macos.dylib\"",
+                "LIB_NAME + \"_\" + arch + \"_linux.so\"",
+                "Sable.LOGGER.error(\"Unknown platform",
+                'Files.copy(ti, tempFile, StandardCopyOption.REPLACE_EXISTING)',
+                "System.load(tempFile.toAbsolutePath().toString())"
+        ]
+        def missingLoaderSnippets = requiredLoaderSnippets.findAll { !rapier3DText.contains(it) }
+        if (!missingLoaderSnippets.isEmpty()) {
+            throw new GradleException("Rapier native loader no longer matches the audited static shape: ${missingLoaderSnippets}")
+        }
+
+        if (!sableLicense.isFile()) {
+            throw new GradleException("Sable license is missing: ${sableLicense}")
+        }
+        if (!rapierLicense.isFile()) {
+            throw new GradleException("Rapier native license is missing: ${rapierLicense}")
+        }
+        if (!nativeReadme.isFile() || !nativeReadme.getText('UTF-8').contains('LICENSE-RAPIER')) {
+            throw new GradleException("Rapier native README/provenance is missing LICENSE-RAPIER guidance")
+        }
+        if (!rapierCargo.getText('UTF-8').contains('rev = "38e92f117590862481a53df6fc69a5d893e29186"')) {
+            throw new GradleException('Rapier Cargo.toml no longer pins the expected Rapier git revision')
+        }
+        if (!rapierCargo.getText('UTF-8').contains('"simd-nightly"')
+                || !rapierCargo.getText('UTF-8').contains('"parallel"')) {
+            throw new GradleException('Rapier Cargo.toml no longer enables the expected Rapier features')
+        }
+        if (!rustToolchain.getText('UTF-8').contains('nightly-2026-01-29')) {
+            throw new GradleException('Rapier Rust toolchain no longer pins nightly-2026-01-29')
+        }
+        if (!cargoLock.getText('UTF-8').contains('git+https://github.com/ryanhcode/rapier?rev=38e92f117590862481a53df6fc69a5d893e29186')) {
+            throw new GradleException('Cargo.lock no longer records the expected pinned Rapier source')
+        }
+
+        String physicsProviderService = 'META-INF/services/dev.ryanhcode.sable.api.physics.PhysicsPipelineProvider'
+        File rapierService = new File(rapierResourcesRoot, physicsProviderService)
+        File staticService = rootProject.file("common/src/main/resources/${physicsProviderService}")
+        if (rapierService.getText('UTF-8').trim() != 'dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipelineProvider') {
+            throw new GradleException("Unexpected Rapier service descriptor: ${rapierService.getText('UTF-8')}")
+        }
+        if (!staticService.getText('UTF-8').contains('dev.ryanhcode.sable.physics.impl.none.StaticPhysicsPipelineProvider')
+                || staticService.getText('UTF-8').contains('RapierPhysicsPipelineProvider')) {
+            throw new GradleException('Final common service descriptor has already switched to Rapier or lost Static fallback ownership')
+        }
+        if (sourceSets.main.java.srcDirs.collect { it.canonicalFile }.contains(rapierJavaRoot.canonicalFile)) {
+            throw new GradleException('Rapier Java root is unexpectedly attached to sourceSets.main')
+        }
+        def duplicateNativePayloads = fileTree(rootProject.projectDir).matching {
+            include '**/sable_rapier_binaries.zip.l4z'
+            exclude '**/build/**'
+            exclude '**/.gradle/**'
+        }.files.collect { it.canonicalFile }.unique()
+        if (duplicateNativePayloads != [nativePayload.canonicalFile]) {
+            throw new GradleException("Unexpected Rapier native payload owners: ${duplicateNativePayloads}")
+        }
+        def forbiddenBundledModResources = fileTree(rapierResourcesRoot).matching {
+            include '**/*.jar'
+        }.files.findAll { File resource ->
+            String name = resource.name.toLowerCase(Locale.ROOT)
+            name.contains('create') || name.contains('flywheel') || name.contains('ponder') || name.contains('veil')
+        }
+        if (!forbiddenBundledModResources.isEmpty()) {
+            throw new GradleException("Rapier resources unexpectedly bundle target runtime mods: ${forbiddenBundledModResources}")
+        }
+
+        logger.lifecycle('verifyRapierNativeBackportStatic inventory:')
+        expectedNativeFiles.each { name ->
+            def row = binaryCoverage[name]
+            logger.lifecycle("  ${name} size=${row.size} sha256=${row.sha256} jniExports=${row.exports}/${javaNativeMethods.size()}")
+        }
+        logger.lifecycle("verifyRapierNativeBackportStatic PASS: archiveSha256=${sha256(nativePayload)}, "
+                + "archiveBytes=${nativePayload.length()}, nativeFiles=${nativeEntries.size()}, "
+                + "javaNativeMethods=${javaNativeMethods.size()}, rustJniExports=${rustJniExports.size()}, "
+                + "loaderResource=${archiveResourcePath}, extractionDir=.sable/natives, "
+                + "rapierRevision=38e92f117590862481a53df6fc69a5d893e29186, "
+                + "rustToolchain=nightly-2026-01-29, serviceRuntimeStillStatic=true")
+    }
 }
 
 tasks.named('processM6SableRunResources') {

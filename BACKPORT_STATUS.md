@@ -21,33 +21,114 @@
 
 The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 added the Java 17/1.20.1 Companion library, official Veil 1.20, selected Java 17 rewrites, and the minimal Forge source graph. M4 replaced the missing modern Veil/Minecraft packet surface with a tested Forge 47 transport. M5 ported the selected Minecraft core/Mixins, added the Forge bootstrap and eight platform providers, and produced a statically verified Forge package. M6 now passes the Forge main-menu, empty-world, runtime-boundary, persistence, and stationary single-block smoke gates. Deferred advanced rendering, full physics/Sable Rapier, Create/Flywheel integration, Simulated, and Aeronautics remain unported.
 
-> **Standalone packaging milestone status (2026-08-23):** the final
-> reobfuscated Forge all-jar packages `:sable_companion_1_20` via Forge JarJar
-> as `META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar`. Companion
-> remains a common library, not a Forge mod. Static artifact, module-boundary,
-> network, compile, reobf, Checkstyle, and Spotless gates pass. Previously
-> exposed standalone blockers are fixed statically: Sable/Companion split
-> package, standalone Registrate leakage through ForgeGradle launch surfaces,
-> production-to-userdev Sable Mixin/member/hierarchy remapping, staged target
-> mod AT namespace remapping, mapped Flywheel/Ponder staging, and standalone
-> smoke provenance false negatives for Forge/SecureJar `union:` URLs. The
-> current verifier parses both `outer.jar#id!/resource` and nested
-> `outer.jar#id_/META-INF/jarjar/inner.jar#id!/resource` forms, proves the
-> staged `all-userdev.jar` under `run/standalone-client/mods`, keeps Companion
-> provenance strict for the nested Companion JarJar, and remaps proved
-> Minecraft hierarchy bridge/synthetic declarations in the standalone userdev
-> artifact. This fixes the server-data reload `SimplePreparableReloadListener`
-> erased `apply(Object, ResourceManager, ProfilerFiller)` bridge while leaving
-> the production all-jar reobfuscated. The standalone userdev mapper also now
-> remaps ASM `Handle` values in `invokedynamic`, LDC, and recursive
-> `ConstantDynamic` metadata; `ServerLevelPlot` canaries prove
-> `ChunkHolder.m_287213_ -> getFullStatus` and
-> `ServerGamePacketListenerImpl.m_9829_ -> send`, with the whole mapped Sable
-> artifact stale-known-reference scan at zero.
-> `.\gradlew.bat --offline :forge:build
-> :forge:verifyStandaloneRunConfiguration` passes. Packaged-artifact runtime
-> PASS remains the next blocker and must be proven by one later
-> `runStandaloneClient` process.
+> **M7 standalone packaged-artifact runtime acceptance complete (2026-08-23):**
+> the final packaged Sable artifact now boots through Forge/ModLauncher without
+> Gradle development Sable or Companion outputs. The accepted runtime logged
+> `SABLE_STANDALONE_RUNTIME phase=gate2-3 status=PASS`,
+> `phase=lifecycle status=PASS`, `phase=gate5 status=PASS`, and
+> `phase=complete status=PASS`, followed by `BUILD SUCCESSFUL`. Treat the
+> standalone mapper, provenance parser, packaged Companion JarJar, module
+> boundary, AT remapping, and harness work as closed unless new evidence appears.
+
+> **M8 Rapier / real-physics planning status (2026-08-23):** upstream real
+> physics lives in `:sable_rapier`, which provides
+> `dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipelineProvider`,
+> `RapierPhysicsPipeline`, Java JNI bridge `Rapier3D`, Rapier handle/collider
+> classes, and Rust natives under `sable_rapier/src/main/rust`. The provider is
+> discovered through
+> `META-INF/services/dev.ryanhcode.sable.api.physics.PhysicsPipelineProvider`;
+> `RapierPhysicsPipelineProvider` has default priority `1000`, so it wins over
+> `StaticPhysicsPipelineProvider` priority `900` once the Rapier service entry
+> and classes are packaged. Current Forge backport mode includes only `:forge`
+> and `:sable_companion_1_20`; `:sable_rapier` is not configured, its Java
+> sources/resources are not in the Forge source set, and the common service file
+> still selects the static fallback.
+>
+> Rapier dependencies to stage for M8 are: Java-side `at.yawk.lz4:lz4-java:1.11.0`
+> or equivalent `net.jpountz.lz4` provider for `LZ4FrameInputStream`,
+> `org.apache.maven:maven-artifact:3.8.5`, Companion common `1.6.0`, existing
+> JOML/fastutil/Minecraft dependencies, and the bundled Rust/JNI native archive
+> `natives/sable_rapier/sable_rapier_binaries.zip.l4z`. Rust native inputs are
+> workspace crates `marten` and `sable_rapier`, `jni 0.21.1`, `rapier3d` from
+> `https://github.com/ryanhcode/rapier` at
+> `38e92f117590862481a53df6fc69a5d893e29186` with `simd-nightly` and
+> `parallel`, `rayon 1.10.0`, `dashmap 7.0.0-rc2`, `log 0.4.22`, `fern 0.6.2`,
+> `colored 2.1.0`, and `humantime 2.1.0`, built with Rust
+> `nightly-2026-01-29` / edition 2024. Runtime native loading extracts the
+> LZ4-compressed zip to `.sable/natives` and `System.load`s
+> `sable_rapier_x86_64_windows.dll` or `sable_rapier_aarch64_windows.dll` on
+> Windows, and `sable_rapier_x86_64_linux.so` or
+> `sable_rapier_aarch64_linux.so` on Linux.
+>
+> Java 17 risk is narrow: `RapierPhysicsPipeline` uses Java 21 pattern-switch
+> syntax in its constraint factory and must be rewritten to Java 17 `instanceof`
+> logic; records/local records are Java 17-compatible. Forge 1.20.1 risks are
+> mostly packaging and namespace/plumbing: do not apply NeoForge ModDev to the
+> backport, do not enable deferred Create/Flywheel/rendering Mixins, keep
+> Companion nested exactly once, merge/verify ServiceLoader descriptors so
+> Rapier wins while Static remains fallback, preserve native resources/licenses,
+> and statically prove the Rapier classes compile against the current retained
+> 1.20.1 API. No repo-local or cached compatible Java 17 / MC 1.20.1 published
+> Rapier artifact is present; plan to backport/package the upstream binding from
+> source and existing native archive first.
+>
+> M8 checkpoints: (1) add an isolated Forge Rapier staging source set/library
+> from `sable_rapier`, rewrite only Java 17-incompatible syntax, add exact Java
+> dependencies, merge service descriptors, and end with
+> `verifyRapierBackportStatic`, `compileJava`, and `build` only; (2) verify
+> native archive contents, platform-name selection, extraction target, license
+> provenance, JarJar/module split-package safety, and no dev-output leaks; (3)
+> package Rapier as a Forge JarJar game library in Sable and prove
+> ServiceLoader selects `RapierPhysicsPipelineProvider` while Static remains a
+> lower-priority fallback; (4) add static smoke probes for a single
+> gravity-enabled sublevel without Create/rendering feature scope; (5) only in a
+> later runtime milestone, launch one client and prove one named stone sublevel
+> moves/responds to gravity/collision in the existing smoke world.
+
+> **M8.1 isolated Rapier Java staging closed (2026-08-24):**
+> `.\gradlew.bat --offline :forge:verifyRapierBackportStatic` passed with
+> `rapierSources=14`, `rapierClasses=16`, provider priority `1000`, Static
+> fallback priority `900`, native payload `9046307` bytes, and
+> `splitPackages=0`. The later post-clean retry was blocked before Rapier javac
+> by the recurring Windows/ForgeGradle
+> `forge/build/downloadMcpConfig/output.zip` lock and is treated as external
+> build-infrastructure noise unless new evidence ties it to Rapier.
+>
+> **M8.2 Rapier native payload/JNI static acceptance complete (2026-08-24):**
+> `.\gradlew.bat --offline :forge:verifyRapierNativeBackportStatic` passed
+> without launching Minecraft, loading natives, compiling Rust, or regenerating
+> the archive. The verifier LZ4-decompresses
+> `natives/sable_rapier/sable_rapier_binaries.zip.l4z`
+> (`SHA-256 427CAA80B6B7D365703C3196B20AA29097EBF7FE5A61E20ED8C57B2A71BA0401`)
+> and proves the exact six-file matrix:
+> `sable_rapier_x86_64_windows.dll` `1652224`
+> `6096095D71DE3D9FA8EBBF495FC145CE023D2E2D74CA25AFCAB98FEE101E7480`;
+> `sable_rapier_aarch64_windows.dll` `1335296`
+> `B760BB8EA1965A88DE6C3D27F0FB46E9367EA8BE14234549EA9A4F757C33E477`;
+> `sable_rapier_x86_64_linux.so` `1882016`
+> `10A5F47C5BAE19F0D1C3222F914F6C480D65A7939AD1CD6815896803CEEAC7D8`;
+> `sable_rapier_aarch64_linux.so` `1589048`
+> `51A004C2D9FFE20E873978EDD3A760A4CB769DABF8B5631717A3AF912A1FD51D`;
+> `sable_rapier_x86_64_macos.dylib` `4671896`
+> `7549A775D2B7496CBAEB731F3AC0D5230F6BE7BC10538BC758B1BF779C511D65`;
+> `sable_rapier_aarch64_macos.dylib` `4239008`
+> `A28402FF298AE9D9F97AD9ED8264F75011B9B2C04C724FFE3793F0AC60959EC0`.
+> `Rapier3D` has `53` static Java native methods; all six binaries expose
+> `53/53` expected JNI names by static symbol-string scan, and Rust source
+> declares the same `53` exports with static `JNIEnv` + `JClass` receivers. The
+> loader maps `arm`/`aarch64` to `aarch64`, all other architectures to
+> `x86_64`, selects Windows/macOS/Linux filenames, falls back to Linux with a
+> logged error for unknown OSes, reads
+> `/natives/sable_rapier/sable_rapier_binaries.zip.l4z`, extracts to
+> `.sable/natives`, overwrites the selected native every load, and has no
+> post-extraction hash validation. License/provenance files present:
+> repository `LICENSE.md`, native `LICENSE-RAPIER`, and native README pointing
+> at the modified Rapier source/license; no separate native third-party NOTICE
+> bundle is present. Packaging boundary remains static-only: Rapier is not in
+> `sourceSets.main`, common runtime service still selects Static fallback, Rapier
+> service ownership is isolated to `sable_rapier` resources, the native payload
+> has one source owner, and no Create/Flywheel/Ponder/Veil jars are bundled by
+> Rapier resources.
 
 ## Canonical Workflow
 
