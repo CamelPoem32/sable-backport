@@ -129,6 +129,41 @@ The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain a
 > service ownership is isolated to `sable_rapier` resources, the native payload
 > has one source owner, and no Create/Flywheel/Ponder/Veil jars are bundled by
 > Rapier resources.
+>
+> **M8.3 Rapier packaged-artifact static acceptance complete (2026-08-24):**
+> `.\gradlew.bat --offline :forge:verifyRapierPackagedArtifact` passed without
+> launching Minecraft, loading natives, compiling Rust, or regenerating the
+> Forge runtime graph. Rapier is now packaged as one distinct nested production
+> JarJar library,
+> `dev.ryanhcode.sable-rapier:sable-rapier-common-1.20.1:2.0.0`, at
+> `META-INF/jarjar/sable-rapier-common-1.20.1-2.0.0.jar`. The nested library
+> contains `16` Rapier classes, the Rapier
+> `PhysicsPipelineProvider` service descriptor, native README/license resources,
+> and the opaque native archive exactly once. Rapier classes are absent from the
+> outer Sable jar, Companion and Rapier have no class/package split, and
+> Create/Flywheel/Ponder/Registrate/Veil remain external.
+>
+> Because Rapier bytecode references Minecraft members, M8.3 derives the nested
+> production Rapier jar from the accepted named/userdev Rapier staging jar using
+> `RapierProductionJarMapper` and the existing `createMcpToSrg/output.tsrg`
+> mapping. The verifier proves `46` production/SRG Minecraft member references,
+> `0` named Minecraft member references remaining, and unchanged production
+> outer-Sable reobf semantics. The native archive remains
+> `SHA-256 427CAA80B6B7D365703C3196B20AA29097EBF7FE5A61E20ED8C57B2A71BA0401`.
+> Rapier requires `net.jpountz.lz4.LZ4FrameInputStream` at runtime, so
+> `at.yawk.lz4:lz4-java:1.11.0` is deliberately nested once at
+> `META-INF/jarjar/lz4-java-1.11.0.jar`
+> (`SHA-256 535C5578CAB5DCD0A438E202DF80091632B873C0370C25D9B1C1AD1D73577207`).
+> `org.apache.maven:maven-artifact:3.8.5` remains compile-only for this boundary:
+> Rapier runtime bytecode has no Maven Artifact references and it is not bundled.
+>
+> The effective static provider set is now Rapier priority `1000` plus Static
+> fallback priority `900`; current max-priority ServiceLoader semantics select
+> `RapierPhysicsPipelineProvider` while retaining `StaticPhysicsPipelineProvider`.
+> The first M8.3 attempt exposed the known Windows/ForgeGradle
+> `downloadMcpConfig/output.zip` lock through an unnecessary MixinGradle hook on
+> an intermediate `Jar` task. The final verifier uses a plain deterministic ZIP
+> task over already-compiled Rapier outputs, so it remains cheap and isolated.
 
 ## Canonical Workflow
 

@@ -1,6 +1,7 @@
 import groovy.json.JsonSlurper
 import org.gradle.api.attributes.LibraryElements
 
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
@@ -362,6 +363,16 @@ def standaloneProductionSableArtifact = layout.buildDirectory.file(
         "libs/${mod_id}-forge-${forge_minecraft_version}-${version}-all.jar")
 def standaloneMappedSableRuntime = layout.buildDirectory.file(
         "standaloneRuntime/${mod_id}-forge-${forge_minecraft_version}-${version}-all-userdev.jar")
+def rapierBackportGroup = 'dev.ryanhcode.sable-rapier'
+def rapierBackportArtifact = "sable-rapier-common-${forge_minecraft_version}"
+def rapierBackportJarName = "${rapierBackportArtifact}-${version}.jar"
+def rapierBackportNamedJar = layout.buildDirectory.file("rapierBackport/${rapierBackportArtifact}-${version}-named.jar")
+def rapierBackportProductionJar = layout.buildDirectory.file("rapierBackport/${rapierBackportJarName}")
+def rapierBackportJarJarPath = "META-INF/jarjar/${rapierBackportJarName}"
+def rapierLz4Version = '1.11.0'
+def rapierLz4JarJarPath = 'META-INF/jarjar/lz4-java-1.11.0.jar'
+def rapierLz4Sha256 = '535C5578CAB5DCD0A438E202DF80091632B873C0370C25D9B1C1AD1D73577207'
+def rapierNativeSha256 = '427CAA80B6B7D365703C3196B20AA29097EBF7FE5A61E20ED8C57B2A71BA0401'
 def rapierLz4JarCandidates = [
         new File(System.getProperty('user.home'),
                 '.gradle/caches/modules-2/files-2.1/at.yawk.lz4/lz4-java/1.11.0/'
@@ -898,7 +909,7 @@ tasks.register('verifyRapierBackportStatic') {
             throw new GradleException("Cached at.yawk.lz4:lz4-java:1.11.0 jar is missing; checked ${rapierLz4JarCandidates}")
         }
         String rapierLz4Sha = sha256(rapierLz4Jar)
-        if (rapierLz4Sha != '535C5578CAB5DCD0A438E202DF80091632B873C0370C25D9B1C1AD1D73577207') {
+        if (rapierLz4Sha != rapierLz4Sha256) {
             throw new GradleException("Unexpected at.yawk.lz4:lz4-java:1.11.0 SHA-256: ${rapierLz4Sha}")
         }
 
@@ -1297,6 +1308,456 @@ tasks.register('verifyRapierNativeBackportStatic') {
                 + "loaderResource=${archiveResourcePath}, extractionDir=.sable/natives, "
                 + "rapierRevision=38e92f117590862481a53df6fc69a5d893e29186, "
                 + "rustToolchain=nightly-2026-01-29, serviceRuntimeStillStatic=true")
+    }
+}
+
+tasks.register('jarRapierBackportLibrary') {
+    group = 'forge backport'
+    description = 'Packages the isolated Java 17 Rapier backport classes/resources as a named intermediate common library.'
+
+    outputs.file(rapierBackportNamedJar)
+
+    doLast {
+        File providerClass = sourceSets.rapierBackport.output.classesDirs.files
+                .collect { new File(it, 'dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipelineProvider.class') }
+                .find { it.isFile() }
+        if (providerClass == null) {
+            throw new GradleException(
+                    'Rapier backport classes are missing; run :forge:verifyRapierBackportStatic when ForgeGradle infrastructure is available'
+            )
+        }
+        File serviceDescriptor = new File(
+                sourceSets.rapierBackport.output.resourcesDir,
+                'META-INF/services/dev.ryanhcode.sable.api.physics.PhysicsPipelineProvider')
+        if (!serviceDescriptor.isFile()) {
+            throw new GradleException("Rapier backport service descriptor is missing: ${serviceDescriptor}")
+        }
+
+        File outputJar = rapierBackportNamedJar.get().asFile
+        outputJar.parentFile.mkdirs()
+        def entries = [:]
+        (sourceSets.rapierBackport.output.classesDirs.files + [sourceSets.rapierBackport.output.resourcesDir])
+                .findAll { it != null && it.isDirectory() }
+                .each { root ->
+                    fileTree(root).files.each { file ->
+                        String relative = root.toPath().relativize(file.toPath()).toString().replace('\\', '/')
+                        if (relative in [
+                                'META-INF/mods.toml',
+                                'META-INF/neoforge.mods.toml',
+                                'META-INF/accesstransformer.cfg',
+                                'fabric.mod.json'
+                        ]) {
+                            return
+                        }
+                        if (entries.containsKey(relative)) {
+                            throw new GradleException("Duplicate Rapier library entry while packaging ${relative}")
+                        }
+                        entries[relative] = Files.readAllBytes(file.toPath())
+                    }
+                }
+        ZipOutputStream output = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(outputJar)))
+        try {
+            entries.keySet().sort().each { name ->
+                ZipEntry outputEntry = new ZipEntry(name)
+                outputEntry.time = 0L
+                output.putNextEntry(outputEntry)
+                output.write(entries[name])
+                output.closeEntry()
+            }
+        } finally {
+            output.close()
+        }
+        logger.lifecycle("jarRapierBackportLibrary PASS: ${outputJar.name} entries=${entries.size()}")
+    }
+}
+
+tasks.register('remapRapierBackportJarToProduction') {
+    group = 'forge backport'
+    description = 'Maps the isolated Rapier common library from named/userdev bytecode to Forge production SRG namespace.'
+    dependsOn tasks.named('jarRapierBackportLibrary')
+
+    inputs.file(rapierBackportNamedJar)
+    inputs.file(layout.buildDirectory.file('createMcpToSrg/output.tsrg'))
+    outputs.file(rapierBackportProductionJar)
+
+    doLast {
+        File namedJar = rapierBackportNamedJar.get().asFile
+        File productionJar = rapierBackportProductionJar.get().asFile
+        File mappingsFile = layout.buildDirectory.file('createMcpToSrg/output.tsrg').get().asFile
+        if (!namedJar.isFile()) {
+            throw new GradleException("Named Rapier backport jar is missing: ${namedJar}")
+        }
+        if (!mappingsFile.isFile()) {
+            throw new GradleException("Rapier production remap requires ${mappingsFile}")
+        }
+        def result = RapierProductionJarMapper.mapNamedToProduction(namedJar, mappingsFile, productionJar)
+        if (!result.namedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException(
+                    "Rapier production jar still contains named Minecraft member references: "
+                            + result.namedMinecraftMemberReferences.take(20)
+            )
+        }
+        if (result.minecraftReferenceOwners.isEmpty() || result.productionMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException(
+                    'Rapier production remap did not prove any Minecraft member references; namespace check would be vacuous'
+            )
+        }
+        logger.lifecycle("remapRapierBackportJarToProduction PASS: inputSha256=${result.inputSha256}, "
+                + "outputSha256=${result.outputSha256}, transformedClasses=${result.transformedClasses}, "
+                + "memberReferenceRemaps=${result.memberReferenceRemaps}, "
+                + "handleReferenceRemaps=${result.invokedynamicHandleRemaps}, "
+                + "minecraftOwners=${result.minecraftReferenceOwners.size()}, "
+                + "productionMemberRefs=${result.productionMinecraftMemberReferences.size()}")
+    }
+}
+
+tasks.register('packageRapierIntoFinalForgeArtifact') {
+    group = 'forge backport'
+    description = 'Nests the production Rapier library and its LZ4 runtime dependency into the existing final Sable all-jar.'
+    dependsOn tasks.named('remapRapierBackportJarToProduction')
+
+    inputs.file(standaloneProductionSableArtifact)
+    inputs.file(rapierBackportProductionJar)
+    inputs.file(rapierLz4Jar ?: file('missing-lz4-java-1.11.0.jar'))
+    outputs.upToDateWhen { false }
+
+    doLast {
+        File finalJar = standaloneProductionSableArtifact.get().asFile
+        File rapierJar = rapierBackportProductionJar.get().asFile
+        if (!finalJar.isFile()) {
+            throw new GradleException(
+                    "M8.3 packaging requires the already-built final Sable all-jar: ${finalJar}"
+            )
+        }
+        if (!rapierJar.isFile()) {
+            throw new GradleException("Production Rapier nested jar is missing: ${rapierJar}")
+        }
+        if (rapierLz4Jar == null || !rapierLz4Jar.isFile()) {
+            throw new GradleException("Cached at.yawk.lz4:lz4-java:${rapierLz4Version} jar is missing")
+        }
+        if (sha256(rapierLz4Jar) != rapierLz4Sha256) {
+            throw new GradleException("Unexpected LZ4 runtime jar SHA-256: ${sha256(rapierLz4Jar)}")
+        }
+
+        File tempJar = new File(finalJar.parentFile, finalJar.name + '.m8.3.tmp')
+        def entries = [:]
+        def metadata = null
+        ZipInputStream input = new ZipInputStream(new BufferedInputStream(new FileInputStream(finalJar)))
+        try {
+            def entry
+            while ((entry = input.nextEntry) != null) {
+                if (entry.directory) {
+                    continue
+                }
+                byte[] contents = input.readAllBytes()
+                if (entry.name == rapierBackportJarJarPath || entry.name == rapierLz4JarJarPath) {
+                    continue
+                }
+                if (entry.name == 'META-INF/jarjar/metadata.json') {
+                    metadata = new JsonSlurper().parseText(new String(contents, 'UTF-8'))
+                    continue
+                }
+                entries[entry.name] = contents
+            }
+        } finally {
+            input.close()
+        }
+        if (metadata == null) {
+            throw new GradleException('Final Sable all-jar is missing META-INF/jarjar/metadata.json')
+        }
+
+        metadata.jars.removeAll { row ->
+            (row.identifier.group == rapierBackportGroup && row.identifier.artifact == rapierBackportArtifact)
+                    || (row.identifier.group == 'at.yawk.lz4' && row.identifier.artifact == 'lz4-java')
+        }
+        metadata.jars << [
+                identifier  : [group: rapierBackportGroup, artifact: rapierBackportArtifact],
+                version     : [range: "[${version},)", artifactVersion: version.toString()],
+                path        : rapierBackportJarJarPath,
+                isObfuscated: true
+        ]
+        metadata.jars << [
+                identifier  : [group: 'at.yawk.lz4', artifact: 'lz4-java'],
+                version     : [range: "[${rapierLz4Version},)", artifactVersion: rapierLz4Version],
+                path        : rapierLz4JarJarPath,
+                isObfuscated: false
+        ]
+
+        entries['META-INF/jarjar/metadata.json'] = groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson(metadata)).getBytes('UTF-8')
+        entries[rapierBackportJarJarPath] = Files.readAllBytes(rapierJar.toPath())
+        entries[rapierLz4JarJarPath] = Files.readAllBytes(rapierLz4Jar.toPath())
+
+        ZipOutputStream output = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tempJar)))
+        try {
+            entries.keySet().sort().each { name ->
+                ZipEntry outputEntry = new ZipEntry(name)
+                outputEntry.time = 0L
+                output.putNextEntry(outputEntry)
+                output.write(entries[name])
+                output.closeEntry()
+            }
+        } finally {
+            output.close()
+        }
+        Files.move(tempJar.toPath(), finalJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        logger.lifecycle("packageRapierIntoFinalForgeArtifact PASS: nested ${rapierBackportJarJarPath} "
+                + "and ${rapierLz4JarJarPath} into ${finalJar.name}")
+    }
+}
+
+tasks.register('verifyRapierPackagedArtifact') {
+    group = 'verification'
+    description = 'Verifies M8.3 Rapier JarJar packaging, provider selection, namespace, native ownership, and dependency boundary.'
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+
+    doLast {
+        File finalJar = standaloneProductionSableArtifact.get().asFile
+        File rapierJar = rapierBackportProductionJar.get().asFile
+        File mappingsFile = layout.buildDirectory.file('createMcpToSrg/output.tsrg').get().asFile
+        String physicsProviderService = 'META-INF/services/dev.ryanhcode.sable.api.physics.PhysicsPipelineProvider'
+        String rapierProvider = 'dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipelineProvider'
+        String staticProvider = 'dev.ryanhcode.sable.physics.impl.none.StaticPhysicsPipelineProvider'
+        String rapierProviderClass = rapierProvider.replace('.', '/') + '.class'
+        String staticProviderClass = staticProvider.replace('.', '/') + '.class'
+        String nativePayloadPath = 'natives/sable_rapier/sable_rapier_binaries.zip.l4z'
+
+        def readNestedJar = { JarFile outer, String path ->
+            def nestedEntry = outer.getJarEntry(path)
+            if (nestedEntry == null) {
+                throw new GradleException("Final artifact is missing nested jar ${path}")
+            }
+            byte[] nestedBytes = outer.getInputStream(nestedEntry).readAllBytes()
+            def nestedEntries = [:]
+            new java.util.jar.JarInputStream(new ByteArrayInputStream(nestedBytes)).withCloseable { nested ->
+                def entry
+                while ((entry = nested.nextJarEntry) != null) {
+                    if (!entry.directory) {
+                        nestedEntries[entry.name] = nested.readAllBytes()
+                    }
+                }
+            }
+            [bytes: nestedBytes, entries: nestedEntries]
+        }
+        def providersFrom = { byte[] bytes ->
+            new String(bytes, 'UTF-8')
+                    .readLines()
+                    .collect { it.trim() }
+                    .findAll { !it.isEmpty() && !it.startsWith('#') }
+        }
+        def packageOf = { String classEntry ->
+            int slash = classEntry.lastIndexOf('/')
+            slash < 0 ? '<default>' : classEntry.substring(0, slash).replace('/', '.')
+        }
+        def classPackages = { Collection<String> entries ->
+            entries.findAll { it.endsWith('.class') }.collect { packageOf(it) }.toSet()
+        }
+        def containsAnyText = { Map<String, byte[]> entries, List<String> needles ->
+            entries.findAll { name, bytes ->
+                if (!name.endsWith('.class')) {
+                    return false
+                }
+                String text = new String(bytes, StandardCharsets.ISO_8859_1)
+                needles.any { text.contains(it) }
+            }.keySet().sort()
+        }
+
+        JarFile outer = new JarFile(finalJar)
+        try {
+            def outerEntries = outer.entries().toList()
+            def outerEntryNames = outerEntries.collect { it.name }
+            def metadataEntry = outer.getJarEntry('META-INF/jarjar/metadata.json')
+            if (metadataEntry == null) {
+                throw new GradleException('Final artifact is missing JarJar metadata')
+            }
+            def metadata = new JsonSlurper().parse(outer.getInputStream(metadataEntry))
+            def nestedRows = metadata.jars ?: []
+            def rapierRows = nestedRows.findAll { row ->
+                row.identifier.group == rapierBackportGroup && row.identifier.artifact == rapierBackportArtifact
+            }
+            if (rapierRows.size() != 1 || rapierRows[0].path != rapierBackportJarJarPath
+                    || rapierRows[0].version.artifactVersion != version.toString()
+                    || rapierRows[0].isObfuscated != true) {
+                throw new GradleException("Unexpected Rapier JarJar metadata row: ${rapierRows}")
+            }
+            def lz4Rows = nestedRows.findAll { row ->
+                row.identifier.group == 'at.yawk.lz4' && row.identifier.artifact == 'lz4-java'
+            }
+            if (lz4Rows.size() != 1 || lz4Rows[0].path != rapierLz4JarJarPath
+                    || lz4Rows[0].version.artifactVersion != rapierLz4Version
+                    || lz4Rows[0].isObfuscated != false) {
+                throw new GradleException("Unexpected LZ4 JarJar metadata row: ${lz4Rows}")
+            }
+            if (nestedRows.findAll { it.identifier.group == 'dev.ryanhcode.sable-companion' }.size() != 1) {
+                throw new GradleException('Companion JarJar metadata row is no longer exactly one')
+            }
+            if (nestedRows.findAll { it.identifier.group == 'io.github.llamalad7'
+                    && it.identifier.artifact == 'mixinextras-forge' }.size() != 1) {
+                throw new GradleException('MixinExtras JarJar metadata row is no longer exactly one')
+            }
+            def forbiddenRows = nestedRows.findAll { row ->
+                String coordinates = "${row.identifier.group}:${row.identifier.artifact}:${row.version.artifactVersion}".toLowerCase(Locale.ROOT)
+                coordinates.contains('create') || coordinates.contains('flywheel')
+                        || coordinates.contains('ponder') || coordinates.contains('registrate')
+                        || coordinates.contains('veil')
+            }
+            if (!forbiddenRows.isEmpty()) {
+                throw new GradleException("Target runtime dependency was bundled into Sable: ${forbiddenRows}")
+            }
+
+            def rapierNested = readNestedJar(outer, rapierBackportJarJarPath)
+            def lz4Nested = readNestedJar(outer, rapierLz4JarJarPath)
+            def companionRow = nestedRows.find { it.identifier.group == 'dev.ryanhcode.sable-companion' }
+            def companionNested = readNestedJar(outer, companionRow.path as String)
+
+            def outerClasses = outerEntryNames.findAll {
+                it.endsWith('.class') && !it.startsWith('META-INF/jarjar/')
+            }
+            def rapierClasses = rapierNested.entries.keySet().findAll { it.endsWith('.class') }.sort()
+            if (rapierClasses.size() != 16) {
+                throw new GradleException("Expected 16 Rapier classes, found ${rapierClasses.size()}: ${rapierClasses}")
+            }
+            if (!rapierNested.entries.containsKey(rapierProviderClass)) {
+                throw new GradleException("Nested Rapier jar is missing provider class ${rapierProviderClass}")
+            }
+            if (outerClasses.contains(rapierProviderClass)
+                    || outerClasses.any { it.startsWith('dev/ryanhcode/sable/physics/impl/rapier/') }) {
+                throw new GradleException('Rapier classes leaked into the outer Sable jar')
+            }
+            if (outer.getJarEntry(staticProviderClass) == null) {
+                throw new GradleException("Outer Sable jar is missing static fallback provider ${staticProviderClass}")
+            }
+            if (companionNested.entries.keySet().any { it.startsWith('dev/ryanhcode/sable/physics/impl/rapier/') }) {
+                throw new GradleException('Rapier classes leaked into nested Companion jar')
+            }
+            if (rapierNested.entries.keySet().any { it.startsWith('dev/ryanhcode/sable/companion/') }) {
+                throw new GradleException('Companion classes leaked into nested Rapier jar')
+            }
+            if (rapierNested.entries.containsKey('META-INF/mods.toml')
+                    || rapierNested.entries.containsKey('META-INF/neoforge.mods.toml')) {
+                throw new GradleException('Nested Rapier library unexpectedly contains mod metadata')
+            }
+
+            def outerServiceEntry = outer.getJarEntry(physicsProviderService)
+            if (outerServiceEntry == null) {
+                throw new GradleException("Outer Sable jar is missing ${physicsProviderService}")
+            }
+            def outerProviders = providersFrom(outer.getInputStream(outerServiceEntry).readAllBytes())
+            if (outerProviders != [staticProvider]) {
+                throw new GradleException("Unexpected outer physics providers: ${outerProviders}")
+            }
+            if (!rapierNested.entries.containsKey(physicsProviderService)) {
+                throw new GradleException('Nested Rapier jar is missing physics provider service descriptor')
+            }
+            def rapierProviders = providersFrom(rapierNested.entries[physicsProviderService])
+            if (rapierProviders != [rapierProvider]) {
+                throw new GradleException("Unexpected nested Rapier physics providers: ${rapierProviders}")
+            }
+            def effectiveProviders = (outerProviders + rapierProviders).toSet()
+            if (effectiveProviders != ([staticProvider, rapierProvider] as Set)) {
+                throw new GradleException("Unexpected effective physics provider set: ${effectiveProviders}")
+            }
+            File providerApiSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/PhysicsPipelineProvider.java')
+            File rapierProviderSource = rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipelineProvider.java')
+            File staticProviderSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/physics/impl/none/StaticPhysicsPipelineProvider.java')
+            if (!providerApiSource.getText('UTF-8').contains('.stream().max(Comparator.comparingInt')) {
+                throw new GradleException('Physics provider selection is no longer max-priority based')
+            }
+            if (!rapierProviderSource.getText('UTF-8').contains('@PhysicsPipelineProvider.LoadPriority()')
+                    || !providerApiSource.getText('UTF-8').contains('int value() default 1000;')) {
+                throw new GradleException('Rapier provider priority 1000 is no longer statically proven')
+            }
+            if (!staticProviderSource.getText('UTF-8').contains('@PhysicsPipelineProvider.LoadPriority(900)')) {
+                throw new GradleException('Static fallback priority 900 is no longer statically proven')
+            }
+
+            def nativeOwners = []
+            if (outer.getJarEntry(nativePayloadPath) != null) {
+                nativeOwners << 'outer'
+            }
+            if (rapierNested.entries.containsKey(nativePayloadPath)) {
+                nativeOwners << 'rapier'
+            }
+            if (companionNested.entries.containsKey(nativePayloadPath)) {
+                nativeOwners << 'companion'
+            }
+            if (nativeOwners != ['rapier']) {
+                throw new GradleException("Rapier native archive owners were ${nativeOwners}, expected [rapier]")
+            }
+            if (sha256Bytes(rapierNested.entries[nativePayloadPath]) != rapierNativeSha256) {
+                throw new GradleException("Unexpected nested Rapier native archive SHA-256: "
+                        + sha256Bytes(rapierNested.entries[nativePayloadPath]))
+            }
+            def extractedNativeLeaks = (outerEntryNames + rapierNested.entries.keySet()
+                    + companionNested.entries.keySet()).findAll { entry ->
+                entry ==~ /(?i).*\.(dll|so|dylib)$/
+            }
+            if (!extractedNativeLeaks.isEmpty()) {
+                throw new GradleException("Extracted Rapier/Sable native binary leaked outside the native archive: ${extractedNativeLeaks}")
+            }
+
+            if (!lz4Nested.entries.containsKey('net/jpountz/lz4/LZ4FrameInputStream.class')) {
+                throw new GradleException('Nested LZ4 runtime jar does not contain LZ4FrameInputStream')
+            }
+            if (sha256Bytes(lz4Nested.bytes) != rapierLz4Sha256) {
+                throw new GradleException("Nested LZ4 runtime jar SHA mismatch: ${sha256Bytes(lz4Nested.bytes)}")
+            }
+            def jpountzLeaks = (outerClasses + rapierClasses + companionNested.entries.keySet()).findAll {
+                it.startsWith('net/jpountz/')
+            }
+            if (!jpountzLeaks.isEmpty()) {
+                throw new GradleException("LZ4 classes leaked outside nested LZ4 jar: ${jpountzLeaks}")
+            }
+
+            def mavenRuntimeHits = containsAnyText(rapierNested.entries, ['org/apache/maven', 'org.apache.maven'])
+            if (!mavenRuntimeHits.isEmpty()) {
+                throw new GradleException("Rapier runtime bytecode still references Maven Artifact classes: ${mavenRuntimeHits}")
+            }
+            if (nestedRows.any { row -> "${row.identifier.group}:${row.identifier.artifact}".contains('maven') }) {
+                throw new GradleException('Maven Artifact was unexpectedly packaged at runtime')
+            }
+
+            def outerPackages = classPackages(outerClasses)
+            def companionPackages = classPackages(companionNested.entries.keySet())
+            def rapierPackages = classPackages(rapierClasses)
+            def splitPackages = [
+                    'outer/companion': outerPackages.intersect(companionPackages).sort(),
+                    'outer/rapier'   : outerPackages.intersect(rapierPackages).sort(),
+                    'companion/rapier': companionPackages.intersect(rapierPackages).sort()
+            ].findAll { ignored, packages -> !packages.isEmpty() }
+            if (!splitPackages.isEmpty()) {
+                throw new GradleException("Package split between nested libraries and outer Sable: ${splitPackages}")
+            }
+
+            def devLeaks = (outerEntryNames + rapierNested.entries.keySet() + companionNested.entries.keySet()).findAll { entry ->
+                entry.contains('build/classes') || entry.contains('build/resources')
+                        || entry.contains('.gradle/') || entry.endsWith('.java')
+            }
+            if (!devLeaks.isEmpty()) {
+                throw new GradleException("Development output/source leaked into packaged artifact: ${devLeaks}")
+            }
+
+            if (sha256Bytes(rapierNested.bytes) != sha256(rapierJar)) {
+                throw new GradleException('Nested Rapier jar bytes differ from remapped production Rapier jar output')
+            }
+            def referenceReport = RapierProductionJarMapper.referenceReport(rapierJar, mappingsFile)
+            if (referenceReport.minecraftReferenceOwners.isEmpty()
+                    || referenceReport.productionMinecraftMemberReferences.isEmpty()
+                    || !referenceReport.namedMinecraftMemberReferences.isEmpty()) {
+                throw new GradleException("Rapier production namespace verification failed: "
+                        + "owners=${referenceReport.minecraftReferenceOwners.size()}, "
+                        + "productionRefs=${referenceReport.productionMinecraftMemberReferences.size()}, "
+                        + "namedRefs=${referenceReport.namedMinecraftMemberReferences.take(20)}")
+            }
+
+            logger.lifecycle("verifyRapierPackagedArtifact PASS: nested=${rapierBackportGroup}:${rapierBackportArtifact}:${version}, "
+                    + "rapierClasses=${rapierClasses.size()}, productionMinecraftRefs="
+                    + "${referenceReport.productionMinecraftMemberReferences.size()}, nativeSha256=${rapierNativeSha256}, "
+                    + "lz4=${rapierLz4JarJarPath}, mavenArtifactRuntime=false, providers=[Rapier:1000, Static:900], "
+                    + "winner=${rapierProvider}, splitPackages=0")
+        } finally {
+            outer.close()
+        }
     }
 }
 

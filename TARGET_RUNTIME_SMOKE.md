@@ -44,6 +44,58 @@ package the already-staged Rapier Java/resources/native payload as a distinct
 Forge JarJar/common-library boundary and statically prove ServiceLoader selects
 Rapier while Static remains fallback, before any runtime smoke.
 
+## M8.3 Rapier Packaged-Artifact Static Acceptance (2026-08-24)
+
+No Minecraft client/server was launched, no native library was loaded, and no
+Rust build/regeneration was performed. The new
+`.\gradlew.bat --offline :forge:verifyRapierPackagedArtifact` task passed.
+
+The final Sable Forge `-all.jar` now nests one distinct Rapier common-library
+JarJar artifact:
+
+```text
+dev.ryanhcode.sable-rapier:sable-rapier-common-1.20.1:2.0.0
+META-INF/jarjar/sable-rapier-common-1.20.1-2.0.0.jar
+```
+
+The nested Rapier jar contains `16` Rapier classes, the Rapier
+`PhysicsPipelineProvider` service descriptor, native README/license resources,
+and exactly one copy of
+`natives/sable_rapier/sable_rapier_binaries.zip.l4z`
+(`SHA-256 427CAA80B6B7D365703C3196B20AA29097EBF7FE5A61E20ED8C57B2A71BA0401`).
+It contains no Forge/NeoForge mod metadata, Companion classes, outer Sable
+classes, Create/Flywheel/Ponder/Registrate/Veil jars, development outputs, or
+split packages with outer Sable/Companion.
+
+Rapier has Minecraft member references, so the packaged nested library is
+derived from the accepted named/userdev Rapier jar by
+`RapierProductionJarMapper` using the existing `createMcpToSrg/output.tsrg`
+mapping. Static namespace proof: `46` production/SRG Minecraft member
+references, `0` named Minecraft member references remaining. The outer Sable
+production reobf artifact remains the distributable target; the Rapier mapper is
+only for the new nested Rapier production library.
+
+Rapier requires `net.jpountz.lz4.LZ4FrameInputStream` at runtime. M8.3 therefore
+deliberately nests exactly one `at.yawk.lz4:lz4-java:1.11.0` runtime jar at
+`META-INF/jarjar/lz4-java-1.11.0.jar`
+(`SHA-256 535C5578CAB5DCD0A438E202DF80091632B873C0370C25D9B1C1AD1D73577207`).
+`org.apache.maven:maven-artifact:3.8.5` remains compile-only: Rapier runtime
+bytecode contains no Maven Artifact references, and Maven Artifact is not
+bundled.
+
+The effective static provider set is:
+
+```text
+RapierPhysicsPipelineProvider priority=1000
+StaticPhysicsPipelineProvider priority=900
+winner=RapierPhysicsPipelineProvider
+```
+
+M8.4 should add a static gravity/collision smoke boundary around one existing
+stone sublevel with Rapier selected, still without Create/Flywheel deferred
+Mixins or advanced rendering. Runtime proof remains a later one-launch
+milestone.
+
 ## Standalone InvokeDynamic Handle Userdev Remap Fix (2026-08-23)
 
 No Minecraft client or server was launched during this follow-up.
