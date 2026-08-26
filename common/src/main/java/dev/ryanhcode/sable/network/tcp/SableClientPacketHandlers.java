@@ -124,9 +124,13 @@ public final class SableClientPacketHandlers {
             return;
         }
 
+        Sable.LOGGER.info("SABLE_CLIENT phase=sublevel_create_received id={} plot={} name={} bounds={}",
+                packet.subLevelID(), packet.plotCoordinate(), packet.name(), packet.bounds());
         final ClientSubLevel subLevel = (ClientSubLevel) clientContainer.allocateSubLevel(
                 packet.subLevelID(), ChunkPos.getX(packet.plotCoordinate()), ChunkPos.getZ(packet.plotCoordinate()),
                 new dev.ryanhcode.sable.companion.math.Pose3d(packet.lastPose()));
+        Sable.LOGGER.info("SABLE_CLIENT phase=sublevel_registered id={} plot={} name={}",
+                subLevel.getUniqueId(), packet.plotCoordinate(), packet.name());
         final SubLevelSnapshotInterpolator interpolator = subLevel.getInterpolator();
         interpolator.receiveSnapshot(packet.gameTick() - 1, packet.lastPose());
         interpolator.receiveSnapshot(packet.gameTick(), packet.pose());
@@ -157,6 +161,8 @@ public final class SableClientPacketHandlers {
             return;
         }
         clientSubLevel.setFinalized();
+        Sable.LOGGER.info("SABLE_CLIENT phase=sublevel_finalized id={} plot={} name={}",
+                clientSubLevel.getUniqueId(), packet.plotCoordinate(), clientSubLevel.getName());
         clientSubLevel.updateRenderData();
     }
 

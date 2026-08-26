@@ -98,6 +98,23 @@ public interface SubLevelRenderDispatcher extends NativeResource, ResourceManage
      */
     void renderAfterSections(final Iterable<ClientSubLevel> sublevels, final double cameraX, double cameraY, double cameraZ, final Matrix4f modelView, final Matrix4f projection, final float partialTicks);
 
+    /**
+     * Renders the retained basic single-block path from a stable platform render callback.
+     *
+     * @param sublevels    The sub-levels to render
+     * @param renderType   The render type being rendered
+     * @param cameraX      The x position of the camera
+     * @param cameraY      The y position of the camera
+     * @param cameraZ      The z position of the camera
+     * @param modelView    The modelview matrix
+     * @param projection   The projection matrix
+     * @param partialTicks The percentage from last tick to this tick
+     */
+    default void renderBasicSingleBlockLayer(final Iterable<ClientSubLevel> sublevels, final RenderType renderType,
+                                             final double cameraX, final double cameraY, final double cameraZ,
+                                             final Matrix4f modelView, final Matrix4f projection, final float partialTicks) {
+    }
+
     void renderBlockEntities(final Iterable<ClientSubLevel> sublevels, final BlockEntityRenderer blockEntityRenderer, final double cameraX, double cameraY, double cameraZ, final float partialTick);
 
     void addDebugInfo(final Consumer<String> consumer);

@@ -15,6 +15,7 @@ import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
@@ -105,8 +106,8 @@ public class ExplosionMixin {
             final Vec3 localExplosionPosition = pose.transformPositionInverse(new Vec3(this.x, this.y, this.z));
 
             blockpos = BlockPos.containing(localRayPosition);
-            blockstate = this.level.getBlockState(blockpos);
-            fluidstate = this.level.getFluidState(blockpos);
+            blockstate = SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, blockpos);
+            fluidstate = SubLevelBlockStateLookup.getFluidStateOrEmpty(subLevel, blockpos);
 
             final boolean canExplodeBefore = f > 0.0;
 

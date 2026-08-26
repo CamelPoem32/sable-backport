@@ -2,6 +2,7 @@ package dev.ryanhcode.sable.sublevel.plot;
 
 import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
+import dev.ryanhcode.sable.mixin.plot.ChunkHolderAccessor;
 import dev.ryanhcode.sable.util.SableChunkFutures;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
@@ -42,9 +43,10 @@ public class PlotChunkHolder extends ChunkHolder {
 
         this.chunk = chunk;
         this.heatSections = new HeatDataChunkSection[chunk.getSectionsCount()];
-        this.tickingChunkFuture = SableChunkFutures.loadedLevelChunk(chunk);
-        this.entityTickingChunkFuture = SableChunkFutures.loadedLevelChunk(chunk);
-        this.fullChunkFuture = SableChunkFutures.loadedLevelChunk(chunk);
+        final ChunkHolderAccessor accessor = (ChunkHolderAccessor) this;
+        accessor.sable$setTickingChunkFuture(SableChunkFutures.loadedLevelChunk(chunk));
+        accessor.sable$setEntityTickingChunkFuture(SableChunkFutures.loadedLevelChunk(chunk));
+        accessor.sable$setFullChunkFuture(SableChunkFutures.loadedLevelChunk(chunk));
 
         if (!this.chunk.isEmpty()) {
             this.buildBoundingBox();

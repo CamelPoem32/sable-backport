@@ -1,5 +1,7 @@
 package dev.ryanhcode.sable.mixinhelpers.clip_overwrite;
 
+import dev.ryanhcode.sable.mixin.clip_overwrite.ClipContextAccessor;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
@@ -9,6 +11,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.EntityCollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.NotNull;
@@ -20,8 +23,8 @@ public final class BlockGetterClipHelper {
 
     public static @NotNull BlockHitResult originalClip(final BlockGetter level, final ClipContext clipContext) {
         return BlockGetter.traverseBlocks(clipContext.getFrom(), clipContext.getTo(), clipContext, (context, blockPos) -> {
-            final BlockState blockState = level.getBlockState(blockPos);
-            final FluidState fluidState = level.getFluidState(blockPos);
+            final BlockState blockState = SubLevelBlockStateLookup.getBlockStateOrLevel(level, blockPos);
+            final FluidState fluidState = SubLevelBlockStateLookup.getFluidStateOrLevel(level, blockPos);
             final Vec3 from = context.getFrom();
             final Vec3 to = context.getTo();
             final VoxelShape blockShape = context.getBlockShape(blockState, level, blockPos);
@@ -39,9 +42,11 @@ public final class BlockGetterClipHelper {
     }
 
     public static ClipContext copyContext(final ClipContext source, final Vec3 from, final Vec3 to) {
-        final Entity entity = source.collisionContext instanceof EntityCollisionContext entityContext
+        final ClipContextAccessor accessor = (ClipContextAccessor) source;
+        final CollisionContext collisionContext = accessor.sable$getCollisionContext();
+        final Entity entity = collisionContext instanceof EntityCollisionContext entityContext
                 ? entityContext.getEntity()
                 : null;
-        return new ClipContext(from, to, source.block, source.fluid, entity);
+        return new ClipContext(from, to, accessor.sable$getBlock(), accessor.sable$getFluid(), entity);
     }
 }

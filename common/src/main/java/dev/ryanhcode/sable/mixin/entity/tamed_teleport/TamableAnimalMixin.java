@@ -8,6 +8,7 @@ import dev.ryanhcode.sable.api.entity.EntitySubLevelUtil;
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.api.math.OrientedBoundingBox3d;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.phys.Vec3;
@@ -41,7 +42,7 @@ public class TamableAnimalMixin {
         for (final SubLevel subLevel1 : subLevels) {
             final Vector3d center = sable$BOX.center();
             final BlockPos pos = BlockPos.containing(subLevel1.logicalPose().transformPositionInverse(new Vec3(center.x(), center.y(), center.z())));
-            if (!instance.level().getBlockState(pos).isAir()) {
+            if (!SubLevelBlockStateLookup.getBlockStateOrAir(subLevel1, pos).isAir()) {
                 return false;
             }
         }

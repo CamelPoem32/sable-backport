@@ -5,9 +5,12 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.entity.EntitySubLevelUtil;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.goal.EatBlockGoal;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -26,5 +29,10 @@ public class EatBlockGoalMixin {
 
 		return pos;
 	}
+
+    @WrapOperation(method = {"tick", "canUse"}, at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;getBlockState(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;"))
+    private BlockState sable$getBlockState(final Level level, final BlockPos pos, final Operation<BlockState> original) {
+        return SubLevelBlockStateLookup.getBlockStateOrLevel(level, pos);
+    }
 
 }

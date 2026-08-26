@@ -11,6 +11,7 @@
   "commands.sable.physics.local": "local",
 
   "commands.sable.spawn.success": "Spawned %s",
+  "commands.sable.spawn.block.failure": "Failed to spawn single-block sub-level: %s",
   "commands.sable.spawn.clone.success": "Cloned sublevel",
 
   "commands.sable.physics.impulse.angular.success": "Applied %s angular impulse to %s of %s",

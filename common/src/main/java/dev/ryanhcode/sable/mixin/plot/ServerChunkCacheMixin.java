@@ -68,6 +68,22 @@ public class ServerChunkCacheMixin {
         }
     }
 
+    @Inject(method = "getChunk(IILnet/minecraft/world/level/chunk/ChunkStatus;Z)Lnet/minecraft/world/level/chunk/ChunkAccess;", at = @At("HEAD"), cancellable = true)
+    private void sable$getChunk(final int x, final int z, final ChunkStatus chunkStatus, final boolean create, final CallbackInfoReturnable<ChunkAccess> cir) {
+        final SubLevelContainer container = this.sable$getPlotContainer();
+
+        if (container.inBounds(x, z)) {
+            final ChunkPos chunkPos = new ChunkPos(x, z);
+            final LevelChunk chunk = container.getChunk(chunkPos);
+
+            if (chunk != null) {
+                cir.setReturnValue(chunk);
+            } else {
+                cir.setReturnValue(this.sable$emptyChunk);
+            }
+        }
+    }
+
     @Inject(method = "getChunkFutureMainThread", at = @At("HEAD"), cancellable = true)
     private void getChunkFutureMainThread(final int x, final int z, final ChunkStatus chunkStatus, final boolean bl, final CallbackInfoReturnable<CompletableFuture<com.mojang.datafixers.util.Either<ChunkAccess, ChunkHolder.ChunkLoadingFailure>>> cir) {
         final SubLevelContainer container = this.sable$getPlotContainer();

@@ -6,7 +6,9 @@ import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
+import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.command.SableCommandHelper;
 import dev.ryanhcode.sable.api.command.SubLevelArgumentType;
 import dev.ryanhcode.sable.api.physics.constraint.PhysicsConstraintHandle;
@@ -26,6 +28,7 @@ import dev.ryanhcode.sable.sublevel.plot.EmbeddedPlotLevelAccessor;
 import dev.ryanhcode.sable.sublevel.plot.LevelPlot;
 import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
 import dev.ryanhcode.sable.sublevel.plot.ServerLevelPlot;
+import dev.ryanhcode.sable.sublevel.storage.SubLevelRemovalReason;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import dev.ryanhcode.sable.util.SchematicLoader;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -48,6 +51,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
@@ -74,6 +78,8 @@ public class SableSpawnCommands {
     };
 
     private static final BlockState DEFAULT_SPAWN_BLOCKSTATE = Blocks.STONE.defaultBlockState();
+    private static final DynamicCommandExceptionType ERROR_SPAWN_BLOCK_FAILED = new DynamicCommandExceptionType(
+            message -> Component.translatable("commands.sable.spawn.block.failure", message));
 
     /**
      * Adds the following commands:
@@ -124,7 +130,7 @@ public class SableSpawnCommands {
                 .then(Commands.literal("block")
                         .executes((ctx) -> spawnBlock(ctx, DEFAULT_SPAWN_BLOCKSTATE, null))
                         .then(namedSpawnFinale(Commands.argument("block", BlockStateArgument.block(buildContext)),
-                                (ctx, name) -> spawnBlock(ctx, BlockStateArgument.getBlock(ctx, "block").getState(), name))))
+                                SableSpawnCommands::spawnBlockFromArgument)))
 
                 .then(Commands.literal("platform")
                         .then(Commands.argument("size", IntegerArgumentType.integer(1, 32))
@@ -272,7 +278,7 @@ public class SableSpawnCommands {
         final CommandSourceStack source = ctx.getSource();
         final ServerLevel level = source.getLevel();
 
-        final StructureTemplate template = SchematicLoader.loadSchematic(level, ResourceLocation.fromNamespaceAndPath("sable", StringArgumentType.getString(ctx, "name")));
+        final StructureTemplate template = SchematicLoader.loadSchematic(level, new ResourceLocation("sable", StringArgumentType.getString(ctx, "name")));
 
         if (template == null) {
             source.sendFailure(Component.translatable("commands.sable.place_schematic.failure"));
@@ -462,30 +468,156 @@ public class SableSpawnCommands {
     }
 
     private static int spawnBlock(final CommandContext<CommandSourceStack> ctx, final BlockState material, final @Nullable String name) throws CommandSyntaxException {
+        String outcome = "unknown";
+        try {
+            final int result = spawnBlockResolved(ctx, material, name, true);
+            outcome = "success:" + result;
+            return result;
+        } catch (final CommandSyntaxException exception) {
+            outcome = "command_exception:" + exception.getClass().getSimpleName();
+            Sable.LOGGER.error("SABLE_SPAWN phase=failed command=block name={} material={}",
+                    name, material, exception);
+            throw exception;
+        } catch (final RuntimeException exception) {
+            outcome = "runtime_exception:" + exception.getClass().getSimpleName();
+            Sable.LOGGER.error("SABLE_SPAWN phase=failed command=block name={} material={}",
+                    name, material, exception);
+            final String message = exception.getMessage() != null ? exception.getMessage() : exception.getClass().getSimpleName();
+            throw ERROR_SPAWN_BLOCK_FAILED.create(message);
+        } catch (final Error error) {
+            outcome = "error:" + error.getClass().getSimpleName();
+            Sable.LOGGER.error("SABLE_SPAWN phase=failed command=block name={} material={}",
+                    name, material, error);
+            throw error;
+        } finally {
+            Sable.LOGGER.info("SABLE_SPAWN phase=exit command=block name={} outcome={}", name, outcome);
+        }
+    }
+
+    private static int spawnBlockFromArgument(final CommandContext<CommandSourceStack> ctx, final @Nullable String name) throws CommandSyntaxException {
         final CommandSourceStack source = ctx.getSource();
+        String outcome = "unknown";
+        Sable.LOGGER.info("SABLE_SPAWN phase=entered command=block name={} material=<block-argument> position={}",
+                name, source.getPosition());
+        try {
+            final BlockState material = BlockStateArgument.getBlock(ctx, "block").getState();
+            Sable.LOGGER.info("SABLE_SPAWN phase=argument_resolved command=block name={} material={}",
+                    name, material);
+            final int result = spawnBlockResolved(ctx, material, name, false);
+            outcome = "success:" + result;
+            return result;
+        } catch (final CommandSyntaxException exception) {
+            outcome = "command_exception:" + exception.getClass().getSimpleName();
+            Sable.LOGGER.error("SABLE_SPAWN phase=failed command=block name={} material=<block-argument>",
+                    name, exception);
+            throw exception;
+        } catch (final RuntimeException exception) {
+            outcome = "runtime_exception:" + exception.getClass().getSimpleName();
+            Sable.LOGGER.error("SABLE_SPAWN phase=failed command=block name={} material=<block-argument>",
+                    name, exception);
+            final String message = exception.getMessage() != null ? exception.getMessage() : exception.getClass().getSimpleName();
+            throw ERROR_SPAWN_BLOCK_FAILED.create(message);
+        } catch (final Error error) {
+            outcome = "error:" + error.getClass().getSimpleName();
+            Sable.LOGGER.error("SABLE_SPAWN phase=failed command=block name={} material=<block-argument>",
+                    name, error);
+            throw error;
+        } finally {
+            Sable.LOGGER.info("SABLE_SPAWN phase=exit command=block name={} outcome={}", name, outcome);
+        }
+    }
+
+    private static int spawnBlockResolved(final CommandContext<CommandSourceStack> ctx, final BlockState material,
+                                          final @Nullable String name, final boolean logEntered) throws CommandSyntaxException {
+        final CommandSourceStack source = ctx.getSource();
+        if (logEntered) {
+            Sable.LOGGER.info("SABLE_SPAWN phase=entered command=block name={} material={} position={}",
+                    name, material, source.getPosition());
+        }
+        Sable.LOGGER.info("SABLE_SPAWN phase=source_resolved command=block name={} level={}",
+                name, source.getLevel().dimension().location());
 
         final SubLevelContainer plotContainer = SableCommandHelper.requireSubLevelContainer(ctx);
+        Sable.LOGGER.info("SABLE_SPAWN phase=container_resolved command=block name={}", name);
+        SubLevel subLevel = null;
 
-        final Vec3 playerPos = source.getPosition();
+        try {
+            final Vec3 playerPos = source.getPosition();
 
-        final Pose3d pose = new Pose3d();
-        pose.position().set(playerPos.x, playerPos.y, playerPos.z);
+            final Pose3d pose = new Pose3d();
+            pose.position().set(playerPos.x, playerPos.y, playerPos.z);
+            Sable.LOGGER.info("SABLE_SPAWN phase=create_begin command=block name={} position={}",
+                    name, playerPos);
 
-        final SubLevel subLevel = plotContainer.allocateNewSubLevel(pose);
-        subLevel.setName(name);
-        final LevelPlot plot = subLevel.getPlot();
+            subLevel = plotContainer.allocateNewSubLevel(pose);
+            Sable.LOGGER.info("SABLE_SPAWN phase=create_returned command=block name={} id={}",
+                    name, subLevel.getUniqueId());
+            subLevel.setName(name);
+            final LevelPlot plot = subLevel.getPlot();
 
-        final ChunkPos center = plot.getCenterChunk();
-        plot.newEmptyChunk(center);
+            final ChunkPos center = plot.getCenterChunk();
+            plot.newEmptyChunk(center);
+            Sable.LOGGER.info("SABLE_SPAWN phase=chunk_created command=block name={} id={} center={}",
+                    name, subLevel.getUniqueId(), center);
 
-        final EmbeddedPlotLevelAccessor accessor = plot.getEmbeddedLevelAccessor();
-        final BlockState oldState = accessor.getBlockState(BlockPos.ZERO);
-        accessor.setBlock(BlockPos.ZERO, material, 3);
-        finishInitialSpawnBlock(subLevel, BlockPos.ZERO, oldState, material);
-        subLevel.updateLastPose();
+            final BlockPos globalBlockPos = plot.getCenterBlock();
+            final PlotChunkHolder chunkHolder = plot.getChunkHolder(plot.toLocal(new ChunkPos(globalBlockPos)));
+            if (chunkHolder == null) {
+                throw new IllegalStateException("Initial spawn block is not associated with a plot chunk: " + globalBlockPos);
+            }
+            final LevelChunk chunk = chunkHolder.getChunk();
+            final BlockState oldState = chunk.getBlockState(globalBlockPos);
+            final BlockState previousState = chunk.setBlockState(globalBlockPos, material, false);
+            if (previousState == null) {
+                throw new IllegalStateException("Initial spawn block write was outside the plot chunk: " + globalBlockPos);
+            }
+            final BlockState storedState = chunk.getBlockState(globalBlockPos);
+            if (storedState != material) {
+                throw new IllegalStateException("Initial spawn block write did not persist at "
+                        + globalBlockPos + ": expected " + material + ", found " + storedState);
+            }
+            Sable.LOGGER.info("SABLE_SPAWN phase=block_set command=block name={} id={} global={} old={} previous={} new={} stored={}",
+                    name, subLevel.getUniqueId(), globalBlockPos, oldState, previousState, material, storedState);
+            finishInitialSpawnBlock(subLevel, BlockPos.ZERO, oldState, material);
+            Sable.LOGGER.info("SABLE_SPAWN phase=registered command=block name={} id={}",
+                    name, subLevel.getUniqueId());
+            subLevel.updateLastPose();
 
-        source.sendSuccess(() -> Component.translatable("commands.sable.spawn.success", "block"), false);
-        return 1;
+            Sable.LOGGER.info("SABLE_SPAWN phase=complete command=block name={} id={} material={}",
+                    name, subLevel.getUniqueId(), material);
+            source.sendSuccess(() -> Component.translatable("commands.sable.spawn.success", "block"), false);
+            return 1;
+        } catch (final RuntimeException exception) {
+            rollbackSpawnSubLevel(plotContainer, subLevel, name, exception);
+            Sable.LOGGER.error("SABLE_SPAWN phase=failed command=block name={} material={}",
+                    name, material, exception);
+            final String message = exception.getMessage() != null ? exception.getMessage() : exception.getClass().getSimpleName();
+            throw ERROR_SPAWN_BLOCK_FAILED.create(message);
+        } catch (final Error error) {
+            rollbackSpawnSubLevel(plotContainer, subLevel, name, error);
+            Sable.LOGGER.error("SABLE_SPAWN phase=failed command=block name={} material={}",
+                    name, material, error);
+            throw error;
+        }
+    }
+
+    private static void rollbackSpawnSubLevel(final SubLevelContainer plotContainer, final @Nullable SubLevel subLevel,
+                                              final @Nullable String name, final Throwable failure) {
+        if (subLevel == null || subLevel.isRemoved()) {
+            return;
+        }
+
+        Sable.LOGGER.warn("SABLE_SPAWN phase=rollback_begin command=block name={} id={} reason={}",
+                name, subLevel.getUniqueId(), failure.getClass().getSimpleName());
+        try {
+            plotContainer.removeSubLevel(subLevel, SubLevelRemovalReason.REMOVED);
+            Sable.LOGGER.warn("SABLE_SPAWN phase=rollback_complete command=block name={} id={}",
+                    name, subLevel.getUniqueId());
+        } catch (final Throwable cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
+            Sable.LOGGER.error("SABLE_SPAWN phase=rollback_failed command=block name={} id={}",
+                    name, subLevel.getUniqueId(), cleanupFailure);
+        }
     }
 
     private static void finishInitialSpawnBlock(final SubLevel subLevel, final BlockPos localBlockPos,
@@ -513,8 +645,28 @@ public class SableSpawnCommands {
 
         serverSubLevel.buildMassTracker();
         serverSubLevel.updateMergedMassData(1.0f);
-        if (serverSubLevel.getMassTracker().isInvalid()) {
-            throw new IllegalStateException("Initial spawn block produced invalid mass data");
+        final var mergedMass = serverSubLevel.getMassTracker();
+        final var selfMass = serverSubLevel.getSelfMassTracker();
+        Sable.LOGGER.info(
+                "SABLE_SPAWN phase=mass_check command=block id={} mass={} selfMass={} centerOfMass={} selfCenterOfMass={} bounds={} block={} physicsSystemPresent={}",
+                serverSubLevel.getUniqueId(),
+                mergedMass.getMass(),
+                selfMass.getMass(),
+                mergedMass.getCenterOfMass(),
+                selfMass.getCenterOfMass(),
+                bounds,
+                newState,
+                SubLevelPhysicsSystem.get(serverSubLevel.getLevel()) != null);
+        if (mergedMass.isInvalid()) {
+            throw new IllegalStateException(
+                    "Initial spawn block produced invalid mass data: mass=%s, selfMass=%s, centerOfMass=%s, selfCenterOfMass=%s, bounds=%s, block=%s"
+                            .formatted(
+                                    mergedMass.getMass(),
+                                    selfMass.getMass(),
+                                    mergedMass.getCenterOfMass(),
+                                    selfMass.getCenterOfMass(),
+                                    bounds,
+                                    newState));
         }
         serverSubLevel.updateBoundingBox();
     }

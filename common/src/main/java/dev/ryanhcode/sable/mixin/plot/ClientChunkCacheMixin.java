@@ -1,15 +1,20 @@
 package dev.ryanhcode.sable.mixin.plot;
 
+import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.platform.SableChunkEventPlatform;
+import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.sublevel.plot.LevelPlot;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkPacketData;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -21,6 +26,9 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
@@ -28,6 +36,9 @@ import java.util.function.Consumer;
  */
 @Mixin(ClientChunkCache.class)
 public abstract class ClientChunkCacheMixin {
+
+    @Unique
+    private static final Set<Long> SABLE$LOGGED_CHUNK_STATES = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     @Shadow
     @Final
@@ -120,7 +131,40 @@ public abstract class ClientChunkCacheMixin {
             this.level.getLightEngine().setLightEnabled(chunkPos, true);
 
             SableChunkEventPlatform.INSTANCE.onClientChunkPacketReplaced(levelChunk);
+            this.sable$logSubLevelChunkState(container, chunkPos, levelChunk);
             cir.setReturnValue(levelChunk);
         }
+    }
+
+    @Unique
+    private void sable$logSubLevelChunkState(final SubLevelContainer container, final ChunkPos chunkPos, final LevelChunk chunk) {
+        final long chunkKey = ChunkPos.asLong(chunkPos.x, chunkPos.z);
+        if (!SABLE$LOGGED_CHUNK_STATES.add(chunkKey)) {
+            return;
+        }
+
+        final LevelPlot plot = container.getPlot(chunkPos);
+        final SubLevel subLevel = plot == null ? null : plot.getSubLevel();
+        if (subLevel == null) {
+            return;
+        }
+
+        final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = chunkPos.getMinBlockX(); x <= chunkPos.getMaxBlockX(); x++) {
+            for (int z = chunkPos.getMinBlockZ(); z <= chunkPos.getMaxBlockZ(); z++) {
+                for (int y = this.level.getMinBuildHeight(); y < this.level.getMaxBuildHeight(); y++) {
+                    pos.set(x, y, z);
+                    final BlockState state = chunk.getBlockState(pos);
+                    if (!state.isAir()) {
+                        Sable.LOGGER.info("SABLE_CLIENT phase=block_state_received id={} plotChunk={} pos={} state={}",
+                                subLevel.getUniqueId(), chunkPos, pos.immutable(), state.getBlock());
+                        return;
+                    }
+                }
+            }
+        }
+
+        Sable.LOGGER.info("SABLE_CLIENT phase=block_state_received id={} plotChunk={} state=air_only",
+                subLevel.getUniqueId(), chunkPos);
     }
 }

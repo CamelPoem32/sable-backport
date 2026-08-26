@@ -15,9 +15,11 @@ import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import java.util.Collections;
 
 @Mixin(LevelRenderer.class)
 public class LevelRendererMixin {
@@ -32,17 +34,27 @@ public class LevelRendererMixin {
             return;
         }
 
-        SubLevelRenderDispatcher.get().rebuild(((ClientSubLevelContainer) ((SubLevelContainerHolder) this.level).sable$getPlotContainer()).getAllSubLevels());
+        SubLevelRenderDispatcher.get().rebuild(this.sable$getSubLevels());
     }
 
     @Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/DimensionSpecialEffects;constantAmbientLight()Z", ordinal = 0, shift = At.Shift.BEFORE))
     private void sable$renderSingleBlockSubLevels(final PoseStack poseStack, final float partialTick, final long finishTimeNano,
                                                   final boolean renderBlockOutline, final Camera camera, final GameRenderer gameRenderer,
                                                   final LightTexture lightTexture, final Matrix4f projection, final CallbackInfo ci) {
-        final Iterable<ClientSubLevel> sublevels = ((ClientSubLevelContainer) ((SubLevelContainerHolder) this.level).sable$getPlotContainer()).getAllSubLevels();
+        final Iterable<ClientSubLevel> sublevels = this.sable$getSubLevels();
         final Vec3 cameraPosition = camera.getPosition();
         SubLevelRenderDispatcher.get().renderAfterSections(sublevels, cameraPosition.x, cameraPosition.y, cameraPosition.z,
                 poseStack.last().pose(), projection, partialTick);
+    }
+
+    @Unique
+    private Iterable<ClientSubLevel> sable$getSubLevels() {
+        if (this.level == null) {
+            return Collections.emptyList();
+        }
+
+        final ClientSubLevelContainer container = (ClientSubLevelContainer) ((SubLevelContainerHolder) this.level).sable$getPlotContainer();
+        return container == null ? Collections.emptyList() : container.getAllSubLevels();
     }
 
 }

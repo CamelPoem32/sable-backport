@@ -256,6 +256,478 @@ The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain a
 > `forge/build/downloadMcpConfig/output.zip` AccessDenied; no Minecraft launch
 > or Veil/Oculus patch was attempted.
 
+> **M9.6 nested Companion production namespace mapping prepared (2026-08-25):**
+> production runtime reached normal entity ticking, then the nested Companion
+> library called named `Entity.position()Lnet/minecraft/world/phys/Vec3;` from
+> `SableCompanion.getFeetPos(...)` while ModLauncher was in SRG namespace. The
+> exact MCP-to-SRG mapping is
+> `net/minecraft/world/entity/Entity.position()Lnet/minecraft/world/phys/Vec3;`
+> -> `m_20182_`.
+>
+> The build gap was that `:sable_companion_1_20:jar` was nested directly by
+> Forge JarJar while the outer Sable jar and later nested Rapier jar received
+> production namespace mapping. New
+> `remapCompanionBackportJarToProduction` reuses the hierarchy-aware
+> `RapierProductionJarMapper` for the Companion common jar, and
+> `packageCompanionIntoFinalForgeArtifact` replaces the nested Companion JarJar
+> before Rapier/LZ4 packaging runs. The standalone userdev derivation now
+> extracts and remaps nested Companion back from SRG -> named alongside nested
+> Rapier, preserving the M7 no-dev-output/no-external-Companion boundary.
+>
+> New `:forge:verifyCompanionProductionNamespace` extracts the Companion jar
+> nested in the final `-all.jar`, checks the `getFeetPos` canary, scans all
+> Companion Minecraft MethodInsn/FieldInsn/Handle/ConstantDynamic references
+> through the Minecraft hierarchy, proves the service descriptor is unchanged,
+> and verifies standalone userdev Companion has no stale SRG references.
+> `spotlessApply`, buildSrc compilation, `:forge:verifyAttributeRegistrationBoundary`,
+> and `:forge:verifyVeilRuntimeBoundary` passed. The refreshed build and
+> artifact-backed Companion/Rapier/access/Lithium verifiers are blocked before
+> project compilation by the recurring external Windows lock on
+> `forge/build/downloadMcpConfig/output.zip`; no Minecraft process was launched.
+>
+> Follow-up packaging fix: the Companion metadata row was not missing; the M9.6
+> replacement task was looking up the nested filename-style artifact id
+> `sable-companion-common-1.20.1`. The established Forge JarJar metadata uses
+> `dev.ryanhcode.sable-companion:sable_companion_1_20:1.6.0` with path
+> `META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar`. The packaging task
+> now preserves that identity, marks the row obfuscated, and
+> `verifyCompanionProductionNamespace` requires the final nested Companion bytes
+> to equal the SRG remap output SHA
+> `203BB5E93CBD8E01482891A46638AA11E9CA1215D2D781C746724C603BEC28D0`.
+> `spotlessApply` passed; `build` and artifact verifiers remain blocked first
+> by the same external `downloadMcpConfig/output.zip` AccessDenied.
+
+> **M9 production `/sable spawn block` command boundary prepared (2026-08-25):**
+> the command is not test-only. Source and current production bytecode both
+> register `/sable spawn block <block> <name>` through
+> `SableSpawnCommands.register`, and the success path uses the normal
+> `SubLevelContainer.allocateNewSubLevel` single-block creation/finalization
+> flow and returns Brigadier result `1`. No `sable.runtimeSmoke` or
+> `sable.standaloneRuntimeSmoke` property is referenced by the production
+> handler.
+>
+> The production symptom (visible command, no chat output, no stored success,
+> and no created sublevel) is consistent with an unchecked runtime failure
+> escaping inside the spawn/finalization body before `sendSuccess`/`return 1`.
+> `spawnBlock` now keeps the same creation semantics but wraps only runtime
+> spawn failures in a Brigadier `CommandSyntaxException`, logs the original
+> exception, removes any partially allocated sublevel, and reports
+> `commands.sable.spawn.block.failure` instead of silently disappearing.
+> New `:forge:verifySableSpawnCommandBoundary` passed and proves the command
+> registration reaches this handler, the success path returns `1`, the handler
+> calls normal sublevel creation, and no production path depends on smoke flags.
+> `spotlessApply` passed; `:forge:compileJava` remains blocked before javac by
+> the known external `forge/build/downloadMcpConfig/output.zip`
+> `AccessDeniedException`, so the refreshed artifact still needs rebuilding.
+>
+> Follow-up production evidence showed a separate release blocker: one rebuilt
+> artifact selected `StaticPhysicsPipelineProvider` in production because
+> `sable-forge-1.20.1-2.0.0-all.jar` contained only Companion + MixinExtras
+> JarJar rows and the outer `PhysicsPipelineProvider` service descriptor only
+> listed Static. Nested `sable-rapier-common-1.20.1-2.0.0.jar` and
+> `lz4-java-1.11.0.jar` were absent. Root cause was canonical task-graph
+> reachability: normal `build` could refresh the `-all.jar` through
+> `reobfJarJar` without running the later
+> `packageRapierIntoFinalForgeArtifact`/`verifyRapierPackagedArtifact` chain,
+> leaving a valid but Rapierless final jar after the M9.6 Companion replacement
+> work. `:forge:build` now depends on `:forge:verifyRapierPackagedArtifact`, so
+> the canonical build must prove the final Companion/Rapier/LZ4/MixinExtras
+> surface after all jar rewrites. The Companion production remap is also ordered
+> after the base `reobfJarJar` artifact to preserve the intended pipeline:
+> base production all-jar -> Companion replacement -> Rapier/LZ4 packaging ->
+> final verifier. The current on-disk jar again contains Rapier and LZ4, so this
+> packaging regression is considered fixed, but the jar still needs the M9.7
+> Rapier invokedynamic/SAM remap below before the next production run.
+>
+> Static verification is still execution-blocked by Windows/ForgeGradle locks:
+> after deleting only generated lock targets and retrying with `--no-daemon`,
+> `compileJava` completed source analysis with only existing warnings but failed
+> on
+> `sable_companion_1_20/build/libs/sable-companion-common-1.20.1-1.6.0.jar`.
+> The old Rapierless on-disk final jar SHA-256 was
+> `E3A46DE3A263D4DCD22AE462E79D9539BF860D34FF3E671B253672E53B364807` and is
+> not acceptable for production.
+
+> **M9.5 production Rapier inherited-member remap prepared (2026-08-24):**
+> production runtime reached world ticking, then the nested Rapier jar called
+> named `ServerLevel.getBlockState(BlockPos)` under SRG ModLauncher. The method
+> is declared through `ServerLevel -> Level -> LevelAccessor ->
+> CommonLevelAccessor -> LevelReader -> BlockAndTintGetter -> BlockGetter`, and
+> `createMcpToSrg/output.tsrg` maps
+> `BlockGetter.getBlockState(BlockPos)` to `m_8055_`.
+>
+> `RapierProductionJarMapper` now resolves methods and fields through the actual
+> named Minecraft superclass/interface hierarchy for ordinary instructions,
+> bootstrap/LDC handles, and recursive `ConstantDynamic` values. Its production
+> scan now fails on unresolved references as well as stale named references.
+> A direct mapper probe against the cached mapped Forge `47.4.20` jar remapped
+> 74 member references, including 19 inherited-owner references missed by the
+> old exact-owner mapper; it reported 61 verified production references, zero
+> named references, and zero unresolved references. The failing call became
+> `ServerLevel.m_8055_(BlockPos)`.
+>
+> New `:forge:verifyRapierProductionNamespace` inspects the Rapier jar nested in
+> the final `-all.jar`, checks the `handleBlockChange` canary and the full
+> method/field/Handle/ConstantDynamic surface, and preserves the exact-one
+> Rapier/Companion/LZ4/native boundary. `spotlessApply` and buildSrc compilation
+> passed. The refreshed build and artifact-backed verifier remain blocked before
+> project compilation by the recurring external Windows lock on
+> `forge/build/downloadMcpConfig/output.zip`; no Minecraft process was launched.
+
+> **M9.7 production Rapier invokedynamic/SAM remap prepared (2026-08-25):**
+> production now loads the rebuilt final artifact and selects
+> `RapierPhysicsPipelineProvider`, then ordinary block changes fail in
+> `RapierVoxelColliderBakery.buildPhysicsDataForBlock` because the nested
+> production Rapier jar still has a LambdaMetafactory call-site named
+> `consume` for the Minecraft functional interface
+> `Shapes$DoubleLineConsumer`. In production/SRG, the SAM mapping is
+> `Shapes$DoubleLineConsumer.consume(DDDDDD)V -> m_83161_`. The surrounding
+> instruction was already mapped correctly (`VoxelShape.forAllBoxes` ->
+> `m_83286_`), proving the missed bytecode surface is the
+> `InvokeDynamicInsnNode.name` used as the generated lambda SAM name.
+>
+> `RapierProductionJarMapper` now performs a general LambdaMetafactory SAM-name
+> repair after the normal ASM remap: it resolves the functional-interface owner
+> from the invokedynamic return type, resolves the erased SAM descriptor from
+> bootstrap argument `0`, maps only Minecraft/Mojang SAM methods through the
+> existing hierarchy-aware named -> SRG mappings, and leaves non-Minecraft
+> invokedynamic sites unchanged. The reference scanner now also audits
+> invokedynamic call-site SAM names and reports total invokedynamic,
+> LambdaMetafactory, and Minecraft-lambda counts. `verifyRapierProductionNamespace`
+> now explicitly requires
+> `INDY_SAM net/minecraft/world/phys/shapes/Shapes$DoubleLineConsumer.m_83161_(DDDDDD)V`
+> and rejects stale `consume`.
+>
+> Static status: `:buildSrc:compileJava` passed after the mapper change and
+> `:forge:spotlessApply` passed. The full requested Forge build/verifier chain
+> remains blocked by recurring external Windows/ForgeGradle locks: first
+> `forge/build/downloadMcpConfig/output.zip`, and after one narrow generated-file
+> cleanup, `sable_companion_1_20/build/libs/sable-companion-common-1.20.1-1.6.0.jar`;
+> the final retry returned to `downloadMcpConfig/output.zip`. The current
+> on-disk final jar SHA-256 is
+> `1FA01B9F581548E1446D574C3A305786758529D5968F7728C502174E0D314D0E`, contains
+> Rapier/LZ4, but was not refreshed after the M9.7 mapper change and must not be
+> used as the next production test artifact.
+
+> **M9.8 production `/sable spawn block` command-tree diagnostics prepared
+> (2026-08-25):** fresh production evidence shows the world and Rapier runtime
+> are healthy, `/sable info @l` executes, but
+> `/execute store success ... run sable spawn block minecraft:stone
+> m9_production_smoke` leaves the score unchanged and direct execution prints
+> nothing. Static source and current production bytecode inspection did not find
+> a missing terminal callback: the tree is
+> `sable` (permission 2) -> `spawn` -> `block` -> required `block` argument ->
+> optional required `name` argument, where `namedSpawnFinale` attaches
+> `.executes(...)` to both `<block>` and `<block> <name>`. The bytecode chain is
+> `lambda$namedSpawnFinale$14 -> NamedSpawnInvoker.run -> lambda$register$10 ->
+> spawnBlock`. No `sable.runtimeSmoke` or `sable.standaloneRuntimeSmoke` gate is
+> on the production command path.
+>
+> Because the log had zero `m9_production_smoke`/handler evidence, the remaining
+> issue is observability: production could not distinguish "terminal node did
+> not execute" from "handler entered and failed before any user-visible result".
+> `spawnBlock` now logs a concise `SABLE_SPAWN phase=entered ...` before
+> `requireSubLevelContainer`, logs `SABLE_SPAWN phase=complete ...` after
+> successful initialization, still returns Brigadier result `1`, and still wraps
+> runtime spawn failures as a useful `CommandSyntaxException` with rollback.
+> `verifySableSpawnCommandBoundary` now checks the exact tree shape, terminal
+> callback path, entry/complete probes, success return, failure boundary, normal
+> `allocateNewSubLevel` usage, and absence of smoke-property gating.
+>
+> Validation is currently blocked at Gradle project configuration after the
+> generated Companion jar cleanup: offline mode reports no cached
+> `net.minecraft:client:1.20.1`, and the sandboxed non-offline path cannot
+> connect to the Forge/Minecraft repositories. The current on-disk final jar
+> SHA-256 is
+> `E56BD732B36F85776D23928A98A81EB0732B77A255037151404D4F0256BB4EBB`; it has not
+> been rebuilt with the M9.8 command probes and should not be used as proof of
+> the command-tree fix.
+
+> **M9.14 Rapier/Sable packaged ABI and failed-spawn rollback prepared
+> (2026-08-26):** fresh production evidence progressed through command entry,
+> sublevel allocation, and plot chunk creation, then failed in nested Rapier with
+> `NoSuchMethodError` for
+> `dev.ryanhcode.sable.util.LevelAccelerator.getBlockState(BlockPos)`. Static
+> bytecode inspection proved the outer production Sable jar exposes
+> `LevelAccelerator.m_8055_(BlockPos)` for the `BlockGetter#getBlockState`
+> override, while the nested production Rapier jar still called the named Sable
+> owner method. `RapierProductionJarMapper` now indexes compiled Sable classes in
+> its hierarchy and applies Minecraft inherited member mappings to Sable-owned
+> method references when descriptor/hierarchy evidence proves an override. The
+> Rapier production verifier now also performs a cross-artifact ABI scan from the
+> nested Rapier jar to the final packaged Sable/Companion classes and explicitly
+> requires the Rapier `LevelAccelerator.m_8055_` linkage.
+>
+> The same runtime failure happened after `phase=chunk_created`, before
+> `phase=block_set`. The command had already allocated a `ServerSubLevel`,
+> registered it in the container/occupancy maps, notified observers, created a
+> plot chunk holder, inserted it into `ChunkMap.updatingChunkMap`, marked the
+> chunk map modified, initialized lighting/chunk status, and started block
+> placement/physics notification. The previous inner rollback only handled
+> `RuntimeException`; `NoSuchMethodError` is an `Error`, so low-level chunk/plot
+> state could survive until later cleanup despite `/sable info` no longer seeing
+> the object. The spawn path now rolls back any post-allocation `Throwable`
+> through canonical `SubLevelContainer.removeSubLevel(..., REMOVED)`, logs
+> `rollback_begin` / `rollback_complete` / `rollback_failed`, and preserves Error
+> rethrow semantics. Success is still returned only after block placement,
+> physics/mass initialization, registration diagnostics, and `updateLastPose`.
+>
+> The `minecraft:lake_lava_underground` warning occurred at
+> `20481024 ~= 1280064 * 16`, matching the plot chunk center reported by the
+> command. `newEmptyChunk` constructs an empty `LevelChunk` directly; the warning
+> therefore appears to come from vanilla/Forge systems observing the inserted
+> far-out chunk/status transition, not from intentional terrain generation by the
+> spawn command. No plot-allocation redesign was made in this checkpoint.
+>
+> Validation: `:buildSrc:compileJava` PASS, `:forge:spotlessApply` PASS,
+> `:forge:verifySableSpawnCommandBoundary` PASS. Fresh `:forge:build` and the
+> new final-artifact ABI/access verifiers are blocked before compile/reobf by the
+> recurring ForgeGradle
+> `AccessDeniedException: forge/build/downloadMcpConfig/output.zip`; no fresh
+> all-jar was produced or scanned after the M9.14 changes in this environment.
+> The current stale on-disk `-all.jar` SHA-256 is
+> `E931B72B160F32B939A8B600F6AE26DE9DC658F80017FE078C7B02A9EB831156` and must
+> not be used for the next production test.
+
+> **M9.15 initial single-block mass initialization prepared (2026-08-26):**
+> fresh production evidence reached `SABLE_SPAWN phase=block_set old=air
+> new=stone`, then failed in the command's own validation with
+> `Initial spawn block produced invalid mass data`. Static inspection shows that
+> this means `serverSubLevel.getMassTracker().isInvalid()`, which is exactly
+> merged mass `<= 0.0`; the new diagnostic logs merged mass, self mass,
+> center-of-mass values, plot bounds, block state, and physics-system presence
+> immediately before the check.
+>
+> The expected one-stone mass is still `2.0`: `minecraft:stone` is covered by
+> `data/sable/tags/block/heavy.json` through `#c:stones`, and
+> `data/sable/physics_block_properties/heavy.json` sets `sable:mass` to `2.0`.
+> The mass pipeline is synchronous for this path: `LevelChunk.setBlockState` is
+> intercepted by the retained `LevelChunk` Mixin, then
+> `SableCommonEvents.handleBlockChange`, `SubLevelPhysicsSystem.handleBlockChange`,
+> `updateMassDataFromBlockChange`, `PhysicsChunkTicketManager`, and
+> `RapierPhysicsPipeline` update the physics/mass boundary before the command
+> rebuilds and validates the aggregate mass.
+>
+> The first semantic difference from the working assembly/M8 path was storage:
+> the production command used `EmbeddedPlotLevelAccessor#setBlock`, which
+> delegates to parent `ServerLevel#setBlock` at the far plot coordinate. The
+> accompanying worldgen warning at approximately `centerChunk * 16` indicates
+> that this parent lookup path could touch vanilla/Forge chunk generation
+> surfaces instead of proving the freshly created plot chunk now contains the
+> block. The command now writes the initial block directly to the
+> `PlotChunkHolder`'s `LevelChunk`, verifies the returned previous state and
+> re-reads the stored state from that same chunk, then runs the existing
+> mass/bounds finalization. This does not hardcode mass, skip validation, sleep,
+> or mutate Rapier internals.
+>
+> Rollback remains canonical through
+> `SubLevelContainer.removeSubLevel(..., REMOVED)` for any post-allocation
+> `Throwable`, and `verifySableSpawnCommandBoundary` now checks rollback,
+> direct plot-chunk initial storage, stored-state verification, and mass-check
+> diagnostics. No additional shutdown leak is proven statically after the
+> existing rollback path; the prior save hang remains a runtime observation to
+> re-check after a successful direct chunk write.
+>
+> Validation: `:forge:spotlessApply` PASS and
+> `:forge:verifySableSpawnCommandBoundary` PASS. `:forge:build`,
+> `:forge:verifyProductionMinecraftAccessBoundary`, and
+> `:forge:verifyRapierProductionNamespace` were blocked before javac/artifact
+> scanning by the recurring ForgeGradle
+> `AccessDeniedException: forge/build/downloadMcpConfig/output.zip`. Current
+> on-disk `-all.jar` SHA-256 is
+> `DBB9D7E45A3FE5890B528A5C8739B9B528A9F68AA9ACF1BC9C599F96368396B3`, but it
+> was not freshly rebuilt after M9.15 and must not be used as acceptance proof.
+
+> **M9.16 ClipContext client access boundary prepared (2026-08-26):** fresh
+> production runtime proved the single-block smoke spawn now completes:
+> `block_set stored=stone`, `mass=2.0`, `selfMass=2.0`, `registered`,
+> `complete`, and Brigadier `success:1`. That spawn/mass/rollback path was not
+> changed in this checkpoint. The new failure is one second later on the client
+> render-thread raycast path:
+> `BlockGetterClipHelper.copyContext -> ClipContext.f_45686_`.
+>
+> Local mappings and class metadata identify the copied `ClipContext` fields as
+> `from=f_45682_ Vec3`, `to=f_45683_ Vec3`, `block=f_45684_ ClipContext.Block`,
+> `fluid=f_45685_ ClipContext.Fluid`, and
+> `collisionContext=f_45686_ CollisionContext`; all are `private final` in the
+> production/SRG class. `getFrom()` / `getTo()` already cover start/end through
+> public methods, while `block`, `fluid`, and `collisionContext` have no exact
+> public getter in 1.20.1.
+>
+> `BlockGetterClipHelper.copyContext` now uses an enabled
+> `ClipContextAccessor` Mixin for only `block`, `fluid`, and
+> `collisionContext`, preserving the existing semantics of constructing the
+> copied context with the transformed `from`/`to`, original block/fluid modes,
+> and entity-derived collision context. Reflection and broad AT expansion were
+> not used. The obsolete `ClipContext` AT rows for `f_45684_`, `f_45685_`, and
+> `f_45686_` were removed.
+>
+> The production access verifier missed the runtime failure because these three
+> fields were still declared as AT-backed, so the generic bytecode audit
+> classified the helper's direct private reads as `SAFE_AT`. The verifier now
+> treats ClipContext block/fluid/collisionContext as accessor-managed fields,
+> rejects ordinary direct bytecode access even if stale AT rows are reintroduced,
+> requires `ClipContextAccessor` in the retained mixin config/refmap, and checks
+> `BlockGetterClipHelper` calls the accessor bridge. A source-level audit of
+> retained `mixinhelpers/**` found no other direct `.block`, `.fluid`,
+> `.collisionContext`, SRG field, reflection, or private-lookup hazards.
+>
+> Validation: `:forge:spotlessApply` PASS and
+> `:forge:verifySableSpawnCommandBoundary` PASS. `:forge:build`,
+> `:forge:verifyProductionMinecraftAccessBoundary`, and
+> `:forge:verifyRapierProductionNamespace` were blocked before javac/final
+> artifact scanning by the recurring ForgeGradle
+> `AccessDeniedException: forge/build/downloadMcpConfig/output.zip`. Current
+> on-disk `-all.jar` SHA-256 is
+> `9334B59A86F856960F9F029145A72CD180376BACC98E8CB5484369753DC5602B`, but it
+> is not fresh M9.16 acceptance evidence.
+
+> **M9.17 player/sublevel collision and basic single-block render boundaries
+> prepared (2026-08-26):** fresh production runtime proved the smoke spawn is
+> complete and registered with `mass=2.0`, `selfMass=2.0`, and Brigadier
+> `success:1`; that path was not changed. The new player-tick failure came
+> from the retained `entities_stick_sublevels.effects.EntityMixin`
+> `sable$preGetOnPos` path. It returned sublevel-local/plot coordinates for an
+> entity standing on a Sable object, after which vanilla
+> `Entity.getBlockStateOn()` called the parent `ServerLevel` /
+> `ServerChunkCache` at the far internal plot coordinate
+> (`chunk [1280064,1280064]`, block x/z around `20481032`). That is invalid
+> for Sable plot storage and produced `No chunk holder after ticket has been
+> added`.
+>
+> `SubLevelBlockStateLookup` now resolves plot block/entity state directly from
+> the owning `SubLevel` plot chunk holder (`plot.toLocal(new ChunkPos(pos)) ->
+> getChunkHolder -> holder.getChunk()`), returning air for absent plot chunks
+> and never invoking parent chunk loading. The active get-on-pos corridor now
+> uses that boundary in `entities_stick_sublevels.effects.EntityMixin`,
+> including a `getBlockStateOn` redirect so both tracking and pre-tracking
+> sublevel-local positions avoid parent `Level.getBlockState`. Adjacent active
+> entity corridors in `entity_sublevel_collision.EntityMixin` and
+> `entities_in_blocks.EntityMixin` were updated for the same plot-aware lookup;
+> no fake chunk holders or extra tickets were introduced.
+>
+> The invisible single-block symptom was traced separately to the retained
+> basic vanilla render path caching block state through the client parent level
+> at the plot coordinate. The intended retained path remains
+> `ClientSubLevel -> VanillaSubLevelRenderDispatcher ->
+> VanillaSingleSubLevelRenderData -> SingleBlockSubLevelWrapper ->
+> SableSubLevelRenderPlatformImpl`; advanced/chunked/Veil rendering remains
+> deferred. `VanillaSubLevelRenderDispatcher.isSingleBlock` and
+> `VanillaSingleSubLevelRenderData.rebuild` now read state and block entities
+> from the same plot-storage lookup, preserving the basic single-block render
+> path without reintroducing Veil.
+>
+> Added `:forge:verifySubLevelEntityCollisionBoundary` and
+> `:forge:verifyBasicSubLevelRenderLifecycle`. Validation:
+> `:forge:spotlessApply` PASS,
+> `:forge:verifySubLevelEntityCollisionBoundary` PASS,
+> `:forge:verifyBasicSubLevelRenderLifecycle` PASS, and
+> `:forge:verifySableSpawnCommandBoundary` PASS. `:forge:build`,
+> `:forge:verifyProductionMinecraftAccessBoundary`, and
+> `:forge:verifyRapierProductionNamespace` were blocked before javac/fresh
+> artifact scanning by the recurring ForgeGradle
+> `AccessDeniedException: forge/build/downloadMcpConfig/output.zip`. Current
+> on-disk `-all.jar` SHA-256 is
+> `9302E5230DE31FCA95F6F3157804AEE61185985A5D6969BFD5A3939157188F35`, but it is
+> not fresh M9.17 acceptance evidence.
+
+> **M9.18 remaining plot-coordinate escape and render observability prepared
+> (2026-08-26):** user production evidence corrected the M9.17 artifact status:
+> M9.17 was built, installed, and matched SHA-256
+> `01832B23B1311D03FD4663FD9D27EC5083423742BE02C969239F8D6D5FCDC79F` in both
+> `forge/build/libs` and `.minecraft/mods`. The remaining failures are real
+> semantic gaps, not stale-artifact behavior.
+>
+> The player-tick crash source resolves to
+> `climbing_sub_levels.LivingEntityMixin#sable$redirectPos`, enabled in
+> `sable-common-forge.mixins.json` and remapped in the compiled refmap. That
+> hook transforms a `LivingEntity` position into an intersecting sublevel's
+> local/plot coordinates, but then still called parent `Level.getBlockState`
+> at that plot coordinate. This specific body was outside the M9.17 verifier's
+> source set, which is why the verifier passed while production still reached
+> `ServerChunkCache.getChunkBlocking`.
+>
+> `SubLevelBlockStateLookup` now includes generic `(BlockGetter, BlockPos)`
+> helpers for block/fluid state. When the receiver is a parent `Level` and the
+> queried position belongs to an active Sable plot, the helper resolves the
+> owning `SubLevel` and reads the plot chunk directly; otherwise it falls back
+> to vanilla `BlockGetter` behavior. The climbing redirect now reads ladder
+> state through the owning sublevel. `BlockGetterClipHelper.originalClip` now
+> reads both block and fluid state through the generic helper, so Sable-transformed
+> clip rays no longer force parent-world chunk loading for plot coordinates.
+>
+> Additional active transformed-position corridors fixed in the same class of
+> bug: block placement intersection, fluid spread edge checks, `CanFallAtleast`
+> sublevel support, explosion ray contribution checks, `EatBlockGoal` block
+> state reads after sublevel position redirection, camera fluid/fog checks, and
+> tamed teleport obstruction checks. No fake chunks, forced tickets, coordinate
+> special cases, Rapier changes, spawn semantics changes, or packaging changes
+> were introduced.
+>
+> Client/render observability was added for one future production run:
+> `SABLE_CLIENT phase=sublevel_create_received`, `sublevel_registered`,
+> `block_state_received`, `sublevel_finalized`, and `SABLE_RENDER` phases
+> `dispatch`, `state`, and `draw`. The suspected invisible-render boundary is
+> still the client tracking/chunk/render handoff: the retained basic path exists,
+> but production lacked evidence for whether the client received the plot chunk
+> and whether the single-block renderer ever drew `minecraft:stone`.
+>
+> `:forge:verifySubLevelEntityCollisionBoundary` now depends on `compileJava`
+> and explicitly covers the compiled `climbing_sub_levels.LivingEntityMixin`
+> `redirectPos` body plus `BlockGetterClipHelper.lambda$originalClip$0`, not
+> only the M9.17-edited source canaries. `:forge:verifyBasicSubLevelRenderLifecycle`
+> now requires the packet/chunk/render diagnostic canaries in compiled classes.
+> Validation this turn: `:forge:spotlessApply` PASS. `:forge:build` and the
+> requested build-backed verifiers were blocked before javac by the recurring
+> ForgeGradle `AccessDeniedException:
+> forge/build/downloadMcpConfig/output.zip`, so no fresh M9.18 all-jar was
+> produced in this environment. Current on-disk all-jar remains
+> `01832B23B1311D03FD4663FD9D27EC5083423742BE02C969239F8D6D5FCDC79F`
+> and should be treated as the prior M9.17 artifact, not M9.18 validation.
+
+> **M9.19 generic plot-coordinate boundary and Veil-free render dispatch
+> prepared (2026-08-26):** fresh production evidence proved the M9.18 artifact
+> was fresh and that client synchronization now reaches
+> `SABLE_CLIENT phase=sublevel_create_received`, `sublevel_registered`,
+> `block_state_received ... state=minecraft:stone`, `sublevel_finalized`, and
+> `SABLE_RENDER phase=state ... state=minecraft:stone`. The block remains
+> invisible because no `SABLE_RENDER phase=dispatch` or `phase=draw` occurred.
+> Static tracing showed the retained `sublevel_render.LevelRendererMixin` still
+> called `renderAfterSections`, but the top-level
+> `LevelRenderer.renderSectionLayer` hook that populates the single-block layer
+> work lived only in the deferred Veil-dependent vanilla impl mixin. The retained
+> LevelRenderer mixin now restores a minimal Veil-free
+> `renderSectionLayer` entry point that calls
+> `SubLevelRenderDispatcher.renderSectionLayer`; the existing dispatcher/data
+> path should then naturally emit `dispatch`, `state`, and `draw`.
+>
+> The new player failures are no longer the M9.18 patched redirects. Vanilla
+> `LivingEntity.getBlockSpeedFactor()`/`onSoulSpeedBlock()` and
+> `LivingEntity.travel(Vec3)` are seeing Sable plot coordinates because Sable's
+> entity-stick architecture can keep the entity attached to the parent
+> `ServerLevel` while its active position is the sublevel/plot-local position.
+> Upstream relies on the plot-grid chunk-cache boundary for those generic
+> vanilla lookups. In Forge 1.20.1, `ServerChunkCache.getChunk(...)` can enter
+> the blocking/ticket path before the existing `getChunkFutureMainThread` hook
+> supplies the plot chunk, so vanilla attempted to load the far plot chunk as an
+> overworld chunk. `ServerChunkCacheMixin` now intercepts the exact 1.20.1
+> `getChunk(int,int,ChunkStatus,boolean): ChunkAccess` path at HEAD and returns
+> the owning plot chunk or the Sable empty chunk for plot-grid coordinates.
+>
+> This keeps ordinary non-plot chunk loads vanilla, avoids fake tickets or
+> coordinate special cases, and is the generic boundary for future vanilla calls
+> such as speed factor, travel, block effects, and fluid/collision probes.
+> Individual M9.17/M9.18 redirects remain where they express Sable-specific
+> transforms, but the verifier now also requires the generic
+> `ServerChunkCache.getChunk` plot boundary and the active Veil-free
+> `renderSectionLayer` entry point. Validation this turn:
+> `:forge:spotlessApply` PASS; `:forge:build` and the requested build-backed
+> verifiers again stopped before javac/fresh artifact generation on
+> `AccessDeniedException: forge/build/downloadMcpConfig/output.zip`. Current
+> on-disk all-jar SHA-256 is
+> `DB1840CCD36AABEF3EE09D46FA4F4CBF4753F402AA9DD8F8CBEA07D8028775C7`; it is
+> not fresh M9.19 acceptance evidence.
+
 ## Canonical Workflow
 
 `sableForgeBackport=true` is the default in `gradle.properties`. With `JAVA_HOME` pointing to JDK 17, the canonical compiler command is:

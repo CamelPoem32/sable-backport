@@ -4,6 +4,7 @@ import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.SableClient;
 import dev.ryanhcode.sable.SableConfig;
 import dev.ryanhcode.sable.mixinterface.udp.ServerConnectionListenerExtension;
+import dev.ryanhcode.sable.mixin.udp.ServerGamePacketListenerImplAccessor;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundSableUDPActivationPacket;
 import dev.ryanhcode.sable.network.packets.udp.SableUDPClientboundKeepAlivePacket;
 import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
@@ -78,7 +79,7 @@ public class SableUDPServer {
                 return true;
         }
 
-        final Connection connection = player.connection.connection;
+        final Connection connection = getConnection(player);
         final SableUDPAuthenticationState authState = this.udpAuthStates.get(connection);
         return authState != null && authState.getState() == SableUDPAuthenticationState.State.AUTHENTICATED;
     }
@@ -95,7 +96,7 @@ public class SableUDPServer {
         if (this.channel.eventLoop().inEventLoop())
             throw new IllegalStateException("Cannot send packet from event loop");
 
-        final Connection connection = player.connection.connection;
+        final Connection connection = getConnection(player);
 
         if (connection.getRemoteAddress() instanceof LocalAddress) {
             // We can't turn a local address into an InetSocketAddress, because there's no net communication
@@ -158,7 +159,7 @@ public class SableUDPServer {
         final UUID token = UUID.randomUUID();
         final SableUDPAuthenticationState authState = new SableUDPAuthenticationState(token);
 
-        this.udpAuthStates.put(player.connection.connection, authState);
+        this.udpAuthStates.put(getConnection(player), authState);
 
         // Send the token to the client
         if (SableConfig.ATTEMPT_UDP_NETWORKING.get()) {
@@ -184,6 +185,10 @@ public class SableUDPServer {
                 return;
             }
         }
+    }
+
+    private static Connection getConnection(final ServerPlayer player) {
+        return ((ServerGamePacketListenerImplAccessor) player.connection).sable$getConnection();
     }
 
     /**

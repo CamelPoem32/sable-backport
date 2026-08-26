@@ -25,7 +25,7 @@ public class SchematicLoader {
     public static @Nullable StructureTemplate loadSchematic(final ServerLevel level, final ResourceLocation location) {
         final String namespace = location.getNamespace();
         final String path = "schematics/" + location.getPath() + ".nbt";
-        final ResourceLocation location1 = ResourceLocation.fromNamespaceAndPath(namespace, path);
+        final ResourceLocation location1 = new ResourceLocation(namespace, path);
 
         final Optional<Resource> option = level.getServer().getResourceManager().getResource(location1);
         if (option.isEmpty()) {

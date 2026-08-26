@@ -7,6 +7,7 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
 import dev.ryanhcode.sable.api.math.LevelReusedVectors;
 import dev.ryanhcode.sable.api.math.OrientedBoundingBox3d;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
@@ -15,6 +16,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Quaterniond;
@@ -124,7 +126,10 @@ public abstract class BlockPlaceContextMixin extends UseOnContext {
                 Mth.floor(localBase.maxZ()));
 
         for (final BlockPos position : stream) {
-            final boolean replaced = replaceClicked || this.getLevel().getBlockState(position).canBeReplaced((BlockPlaceContext) (Object) this);
+            final BlockState existingState = otherSubLevel != null
+                    ? SubLevelBlockStateLookup.getBlockStateOrAir(otherSubLevel, position)
+                    : this.getLevel().getBlockState(position);
+            final boolean replaced = replaceClicked || existingState.canBeReplaced((BlockPlaceContext) (Object) this);
 
             Vector3d inWorldBoxPosition = new Vector3d(position.getX() + 0.5, position.getY() + 0.5, position.getZ() + 0.5);
             final Quaterniond inWorldBoxOrientation = new Quaterniond();

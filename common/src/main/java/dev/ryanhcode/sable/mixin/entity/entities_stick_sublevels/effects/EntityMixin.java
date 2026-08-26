@@ -10,11 +10,13 @@ import dev.ryanhcode.sable.api.math.OrientedBoundingBox3d;
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniondc;
 import org.joml.Vector3d;
@@ -46,6 +48,9 @@ public abstract class EntityMixin {
     @Shadow
     @Deprecated
     public abstract BlockPos getOnPosLegacy();
+
+    @Shadow
+    public abstract BlockPos getOnPos();
 
     @Shadow
     public abstract Level level();
@@ -150,12 +155,56 @@ public abstract class EntityMixin {
                 final BlockPos localBlockPos = BlockPos.containing(localPos);
 
                 // TODO: This should check if the collision shape is not empty, not if it's air
-                if (!this.level.getBlockState(localBlockPos).isAir()) {
+                if (!SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, localBlockPos).isAir()) {
                     cir.setReturnValue(localBlockPos);
                     return;
                 }
             }
         }
+    }
+
+    @Inject(method = "getBlockStateOn", at = @At("HEAD"), cancellable = true)
+    private void sable$preGetBlockStateOn(final CallbackInfoReturnable<BlockState> cir) {
+        final SubLevel trackingSubLevel = Sable.HELPER.getTrackingSubLevel((Entity) (Object) this);
+        if (trackingSubLevel == null) {
+            return;
+        }
+
+        final BlockState state = SubLevelBlockStateLookup.getBlockStateOrAir(trackingSubLevel, this.getOnPos());
+        if (!state.isAir()) {
+            cir.setReturnValue(state);
+        }
+    }
+
+    @Redirect(
+            method = "getBlockStateOn",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/world/level/Level;getBlockState(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;"))
+    private BlockState sable$getBlockStateOnFromSubLevel(final Level level, final BlockPos pos) {
+        final Entity entity = (Entity) (Object) this;
+        final SubLevel trackingSubLevel = Sable.HELPER.getTrackingSubLevel(entity);
+        if (trackingSubLevel != null) {
+            return SubLevelBlockStateLookup.getBlockStateOrAir(trackingSubLevel, pos);
+        }
+
+        final Vec3 feetPos = JOMLConversion.toMojang(Sable.HELPER.getFeetPos(entity, 0.1f));
+        final BoundingBox3d bounds = new BoundingBox3d(this.blockPosition);
+        bounds.expand(0.1f, bounds);
+
+        for (final SubLevel subLevel : Sable.HELPER.getAllIntersecting(this.level, bounds)) {
+            final BlockPos localBlockPos = BlockPos.containing(subLevel.logicalPose().transformPositionInverse(feetPos));
+            if (!localBlockPos.equals(pos)) {
+                continue;
+            }
+
+            final BlockState state = SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, localBlockPos);
+            if (!state.isAir()) {
+                return state;
+            }
+        }
+
+        return SubLevelBlockStateLookup.getBlockStateOrLevel(level, pos);
     }
 
 }

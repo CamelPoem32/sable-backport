@@ -10,6 +10,9 @@ import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.index.SableTags;
 import dev.ryanhcode.sable.mixinterface.plot.serialization.LevelChunkTicksExtension;
+import dev.ryanhcode.sable.mixin.plot.ChunkMapModifiedAccessor;
+import dev.ryanhcode.sable.mixin.plot.ChunkMapStatusChangeInvoker;
+import dev.ryanhcode.sable.mixin.plot.lighting.LevelLightEngineAccessor;
 import dev.ryanhcode.sable.platform.SableChunkEventPlatform;
 import dev.ryanhcode.sable.platform.SablePlotPlatform;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
@@ -92,8 +95,11 @@ public class ServerLevelPlot extends LevelPlot {
 
         final Level level = subLevel.getLevel();
         final LevelLightEngine parentLightEngine = level.getLightEngine();
+        final LevelLightEngineAccessor parentLightEngineAccessor = (LevelLightEngineAccessor) parentLightEngine;
         final ChunkSource chunkSource = level.getChunkSource();
-        this.lightEngine = new LevelLightEngine(chunkSource, parentLightEngine.blockEngine != null, parentLightEngine.skyEngine != null);
+        this.lightEngine = new LevelLightEngine(chunkSource,
+                parentLightEngineAccessor.sable$getBlockEngine() != null,
+                parentLightEngineAccessor.sable$getSkyEngine() != null);
     }
 
     /**
@@ -151,7 +157,7 @@ public class ServerLevelPlot extends LevelPlot {
 
         final ServerChunkCache cache = serverLevel.getChunkSource();
         cache.chunkMap.updatingChunkMap.remove(pos.toLong());
-        cache.chunkMap.modified = true;
+        ((ChunkMapModifiedAccessor) cache.chunkMap).sable$setModified(true);
 
         levelChunk.setLoaded(false);
 
@@ -226,7 +232,7 @@ public class ServerLevelPlot extends LevelPlot {
         // Update the chunk map if one exists
         final ServerChunkCache cache = level.getChunkSource();
         cache.chunkMap.updatingChunkMap.put(globalChunkPos.toLong(), holder);
-        cache.chunkMap.modified = true;
+        ((ChunkMapModifiedAccessor) cache.chunkMap).sable$setModified(true);
 
         super.addChunkHolder(localChunkPos, holder, initializeLighting);
 
@@ -244,7 +250,8 @@ public class ServerLevelPlot extends LevelPlot {
         chunk.registerTickContainerInLevel(level);
 
         level.entityManager.updateChunkStatus(chunk.getPos(), FullChunkStatus.ENTITY_TICKING);
-        level.getChunkSource().chunkMap.onFullChunkStatusChange(globalChunkPos, FullChunkStatus.ENTITY_TICKING);
+        ((ChunkMapStatusChangeInvoker) level.getChunkSource().chunkMap)
+                .sable$callOnFullChunkStatusChange(globalChunkPos, FullChunkStatus.ENTITY_TICKING);
 
         do {
             this.lightEngine.runLightUpdates();
@@ -476,8 +483,9 @@ public class ServerLevelPlot extends LevelPlot {
 
                 final SectionPos sectionPos = SectionPos.of(global, level.getSectionYFromSectionIndex(yIndex));
 
-                final boolean hasBlockLight = this.lightEngine.blockEngine != null && sectionTag.contains("BlockLight", Tag.TAG_BYTE_ARRAY);
-                final boolean hasSkyLight = this.lightEngine.skyEngine != null && level.dimensionType().hasSkyLight() && sectionTag.contains("SkyLight", Tag.TAG_BYTE_ARRAY);
+                final LevelLightEngineAccessor lightEngineAccessor = (LevelLightEngineAccessor) this.lightEngine;
+                final boolean hasBlockLight = lightEngineAccessor.sable$getBlockEngine() != null && sectionTag.contains("BlockLight", Tag.TAG_BYTE_ARRAY);
+                final boolean hasSkyLight = lightEngineAccessor.sable$getSkyEngine() != null && level.dimensionType().hasSkyLight() && sectionTag.contains("SkyLight", Tag.TAG_BYTE_ARRAY);
                 if (hasBlockLight || hasSkyLight) {
                     if (!hasLit) {
                         this.lightEngine.retainData(global, true);

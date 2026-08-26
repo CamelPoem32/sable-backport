@@ -10,6 +10,7 @@ import dev.ryanhcode.sable.mixinterface.entity.entity_sublevel_collision.LevelEx
 import dev.ryanhcode.sable.mixinterface.voxel_shape_iteration.FastVoxelShapeIterable;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.entity_collision.SubLevelEntityCollision;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -64,7 +65,7 @@ public class CanFallAtleastHelper {
             entityBoundsOBB.setOrientation(sink.entityBoxOrientation);
 
             for (final BlockPos block : blocks) {
-                final BlockState state = level.getBlockState(block);
+                final BlockState state = SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, block);
                 final VoxelShape voxelShape = state.getCollisionShape(level, block);
 
                 if (state.isAir()) {

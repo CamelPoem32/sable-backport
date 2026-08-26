@@ -57,7 +57,7 @@ public class PhysicsBlockPropertyTypes {
     public static final SableRegistryObject<PhysicsBlockPropertyType<Double>> FLOATING_SCALE = register(sablePath("floating_scale"), Codec.DOUBLE, 1.0);
 
     private static ResourceLocation sablePath(final String path) {
-        return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
+        return new ResourceLocation(MOD_ID, path);
     }
 
     public static void register() {

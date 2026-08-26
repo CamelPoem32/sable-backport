@@ -2,11 +2,13 @@ package dev.ryanhcode.sable.sublevel.render.vanilla;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
 import dev.ryanhcode.sable.platform.SableSubLevelRenderPlatform;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.PrioritizeChunkUpdates;
@@ -62,6 +64,8 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
      */
     private BlockEntity singleBlockEntity = null;
     private boolean singleBlockEntityGlobal = false;
+    private boolean loggedState = false;
+    private boolean loggedDraw = false;
 
     /**
      * Creates a new renderer for the given sub-level
@@ -123,6 +127,13 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
             return;
         }
 
+        if (!this.loggedDraw) {
+            this.loggedDraw = true;
+            Sable.LOGGER.info("SABLE_RENDER phase=draw id={} name={} pos={} state={} layer={}",
+                    this.subLevel.getUniqueId(), this.subLevel.getName(), this.singleBlockPos,
+                    this.singleBlockState.getBlock(), layer);
+        }
+
         final PoseStack stack = new PoseStack();
 
         // These NEED to be here because renderPos is mutated below
@@ -161,13 +172,18 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
         final BoundingBox3ic bounds = this.subLevel.getPlot().getBoundingBox();
         final BlockPos pos = new BlockPos(bounds.minX(), bounds.minY(), bounds.minZ());
 
-        final BlockState blockState = this.subLevel.getLevel().getBlockState(pos);
+        final BlockState blockState = SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, pos);
 
         this.singleBlockState = blockState;
         this.singleBlockPos = pos;
         this.singleBlockSeed = blockState.getSeed(pos);
+        if (!this.loggedState || !blockState.isAir()) {
+            this.loggedState = true;
+            Sable.LOGGER.info("SABLE_RENDER phase=state id={} name={} pos={} state={} bounds={}",
+                    this.subLevel.getUniqueId(), this.subLevel.getName(), pos, blockState.getBlock(), bounds);
+        }
 
-        this.handleBlockEntity(blockState.hasBlockEntity() ? this.subLevel.getLevel().getBlockEntity(pos) : null);
+        this.handleBlockEntity(blockState.hasBlockEntity() ? SubLevelBlockStateLookup.getBlockEntity(this.subLevel, pos) : null);
 
         if (this.singleBlockEntity != null) {
             SableSubLevelRenderPlatform.INSTANCE.tryAddFlywheelVisual(this.singleBlockEntity);

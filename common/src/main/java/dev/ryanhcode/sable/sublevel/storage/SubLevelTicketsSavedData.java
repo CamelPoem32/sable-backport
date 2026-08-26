@@ -85,7 +85,7 @@ public class SubLevelTicketsSavedData extends SavedData {
     }
 
     private static <T> SubLevelLoadingTicket<T> deserializeTicket(final UUID subLevelId, final CompoundTag tag) {
-        final ResourceLocation typeName = ResourceLocation.parse(tag.getString("type"));
+        final ResourceLocation typeName = new ResourceLocation(tag.getString("type"));
         @SuppressWarnings("unchecked") final SubLevelLoadingTicketType<T> type = (SubLevelLoadingTicketType<T>) SubLevelLoadingTicketType.byName(typeName);
 
         if (type == null) {

@@ -7,6 +7,7 @@ import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.mixinterface.toast.SableToastableServer;
+import dev.ryanhcode.sable.mixin.storage.DimensionDataStorageAccessor;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.storage.HoldingSubLevel;
@@ -84,7 +85,9 @@ public class SubLevelHoldingChunkMap implements AutoCloseable {
         this.level = level;
         this.container = container;
 
-        final File worldFolder = level.getChunkSource().getDataStorage().dataFolder.getParentFile();
+        final File worldFolder = ((DimensionDataStorageAccessor) level.getChunkSource().getDataStorage())
+                .sable$getDataFolder()
+                .getParentFile();
         final File subLevelsFolder = new File(worldFolder, "sublevels");
 
         subLevelsFolder.mkdirs();

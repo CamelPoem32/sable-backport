@@ -3,12 +3,14 @@ package dev.ryanhcode.sable.sublevel.render.dispatcher;
 import com.mojang.blaze3d.shaders.FogShape;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
+import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.index.SableTags;
 import dev.ryanhcode.sable.mixinterface.BlockEntityRenderDispatcherExtension;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
 import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaSingleSubLevelRenderData;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.ShaderInstance;
@@ -24,11 +26,16 @@ import org.joml.Matrix3f;
 import org.joml.Vector3d;
 import org.joml.Vector3f;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher {
+
+    private static final Set<UUID> LOGGED_DISPATCH = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     private final Set<RenderType> singleBlockLayers;
 
@@ -46,7 +53,8 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
             return false;
         }
 
-        final BlockState blockState = subLevel.getLevel().getBlockState(new BlockPos(bounds.minX(), bounds.minY(), bounds.minZ()));
+        final BlockState blockState = SubLevelBlockStateLookup.getBlockStateOrAir(
+                subLevel, new BlockPos(bounds.minX(), bounds.minY(), bounds.minZ()));
         return !blockState.is(SableTags.ALWAYS_CHUNK_RENDERING);
     }
 
@@ -124,6 +132,10 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
                     continue;
                 }
 
+                if (LOGGED_DISPATCH.add(sublevel.getUniqueId())) {
+                    Sable.LOGGER.info("SABLE_RENDER phase=dispatch id={} name={} layer={}",
+                            sublevel.getUniqueId(), sublevel.getName(), layer);
+                }
                 singleRenderData.renderSingleBlock(layer, consumer, modelView, cameraX, cameraY, cameraZ);
             }
 
@@ -132,6 +144,22 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
         profiler.pop();
 
         this.singleBlockLayers.clear();
+    }
+
+    @Override
+    public void renderBasicSingleBlockLayer(final Iterable<ClientSubLevel> sublevels, final RenderType renderType,
+                                            final double cameraX, final double cameraY, final double cameraZ,
+                                            final Matrix4f modelView, final Matrix4f projection, final float partialTicks) {
+        final ProfilerFiller profiler = Minecraft.getInstance().getProfiler();
+        profiler.push("sublevel_render_basic");
+        for (final ClientSubLevel sublevel : sublevels) {
+            if (sublevel.getRenderData() instanceof VanillaSingleSubLevelRenderData) {
+                this.singleBlockLayers.add(renderType);
+            }
+        }
+        profiler.pop();
+
+        this.renderAfterSections(sublevels, cameraX, cameraY, cameraZ, modelView, projection, partialTicks);
     }
 
     @Override

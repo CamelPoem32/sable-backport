@@ -10,6 +10,7 @@ import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.mixinterface.entity.entity_sublevel_collision.EntityMovementExtension;
 import dev.ryanhcode.sable.platform.SablePlatform;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.Entity;
@@ -50,7 +51,7 @@ public abstract class LivingEntityMixin extends Entity {
         for (final SubLevel subLevel : Sable.HELPER.getAllIntersecting(level, new BoundingBox3d(this.getBoundingBox()))) {
             subLevel.logicalPose().transformPositionInverse(JOMLConversion.toJOML(this.position(), position));
             pos.set(position.x, position.y, position.z);
-            final BlockState state = level.getBlockState(pos);
+            final BlockState state = SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, pos);
 
             if (state.is(BlockTags.CLIMBABLE) && SablePlatform.INSTANCE.isBlockstateLadder(state, level, pos, self)) {
                 subLevelBlockState.set(state);

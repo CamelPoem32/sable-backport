@@ -364,6 +364,26 @@ def standaloneProductionSableArtifact = layout.buildDirectory.file(
         "libs/${mod_id}-forge-${forge_minecraft_version}-${version}-all.jar")
 def standaloneMappedSableRuntime = layout.buildDirectory.file(
         "standaloneRuntime/${mod_id}-forge-${forge_minecraft_version}-${version}-all-userdev.jar")
+def companionBackportGroup = 'dev.ryanhcode.sable-companion'
+def companionBackportArtifact = 'sable_companion_1_20'
+def companionBackportJarBaseName = "sable-companion-common-${forge_minecraft_version}"
+def companionBackportJarName = "${companionBackportJarBaseName}-${sable_companion_version}.jar"
+def companionBackportProductionJar = layout.buildDirectory.file("companionBackport/${companionBackportJarName}")
+def companionBackportJarJarPath = "META-INF/jarjar/${companionBackportJarName}"
+def standaloneCompanionProductionNestedJar = layout.buildDirectory.file(
+        "standaloneRuntime/${companionBackportJarBaseName}-${sable_companion_version}-nested-production.jar")
+def standaloneCompanionUserdevNestedJar = layout.buildDirectory.file(
+        "standaloneRuntime/${companionBackportJarBaseName}-${sable_companion_version}-nested-userdev.jar")
+def productionRemapHierarchyClasspath = {
+    def hierarchy = []
+    hierarchy.addAll(configurations.compileClasspath.files.findAll {
+        it.isFile() && it.name.endsWith('.jar')
+    })
+    hierarchy.addAll(sourceSets.main.output.classesDirs.files.findAll {
+        it.exists()
+    })
+    hierarchy
+}
 def rapierBackportGroup = 'dev.ryanhcode.sable-rapier'
 def rapierBackportArtifact = "sable-rapier-common-${forge_minecraft_version}"
 def rapierBackportJarName = "${rapierBackportArtifact}-${version}.jar"
@@ -1374,14 +1394,147 @@ tasks.register('jarRapierBackportLibrary') {
     }
 }
 
+tasks.register('remapCompanionBackportJarToProduction') {
+    group = 'forge backport'
+    description = 'Maps the nested Companion common library from named/userdev bytecode to Forge production SRG namespace.'
+    dependsOn project(':sable_companion_1_20').tasks.named('jar')
+    dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('createMcpToSrg')
+    mustRunAfter tasks.named('reobfJarJar')
+
+    inputs.file(provider { project(':sable_companion_1_20').tasks.named('jar').get().archiveFile.get().asFile })
+    inputs.file(layout.buildDirectory.file('createMcpToSrg/output.tsrg'))
+    inputs.files(configurations.compileClasspath)
+    inputs.files(sourceSets.main.output.classesDirs)
+    outputs.file(companionBackportProductionJar)
+
+    doLast {
+        File namedJar = project(':sable_companion_1_20').tasks.named('jar').get().archiveFile.get().asFile
+        File productionJar = companionBackportProductionJar.get().asFile
+        File mappingsFile = layout.buildDirectory.file('createMcpToSrg/output.tsrg').get().asFile
+        if (!namedJar.isFile()) {
+            throw new GradleException("Named Companion jar is missing: ${namedJar}")
+        }
+        if (!mappingsFile.isFile()) {
+            throw new GradleException("Companion production remap requires ${mappingsFile}")
+        }
+        def hierarchyClasspath = productionRemapHierarchyClasspath()
+        def result = RapierProductionJarMapper.mapNamedToProduction(
+                namedJar, mappingsFile, productionJar, hierarchyClasspath)
+        if (result.productionMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException('Companion production remap did not prove any Minecraft member references')
+        }
+        if (!result.namedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException(
+                    "Companion production jar still contains named Minecraft member references: "
+                            + result.namedMinecraftMemberReferences.take(20)
+            )
+        }
+        if (!result.unresolvedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException(
+                    "Companion production jar contains unresolved Minecraft member references: "
+                            + result.unresolvedMinecraftMemberReferences.take(20)
+            )
+        }
+        logger.lifecycle("remapCompanionBackportJarToProduction PASS: inputSha256=${result.inputSha256}, "
+                + "outputSha256=${result.outputSha256}, transformedClasses=${result.transformedClasses}, "
+                + "memberReferenceRemaps=${result.memberReferenceRemaps}, "
+                + "inheritedMemberReferenceRemaps=${result.inheritedMemberReferenceRemaps}, "
+                + "handleReferenceRemaps=${result.invokedynamicHandleRemaps}, "
+                + "indySamNameRemaps=${result.invokedynamicSamNameRemaps}, "
+                + "productionMemberRefs=${result.productionMinecraftMemberReferences.size()}")
+    }
+}
+
+tasks.register('packageCompanionIntoFinalForgeArtifact') {
+    group = 'forge backport'
+    description = 'Replaces the JarJar-packaged Companion common library in the final Sable all-jar with production/SRG bytecode.'
+    dependsOn tasks.named('reobfJarJar')
+    dependsOn tasks.named('remapCompanionBackportJarToProduction')
+
+    inputs.file(standaloneProductionSableArtifact)
+    inputs.file(companionBackportProductionJar)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        File finalJar = standaloneProductionSableArtifact.get().asFile
+        File companionJar = companionBackportProductionJar.get().asFile
+        if (!finalJar.isFile()) {
+            throw new GradleException("Companion packaging requires final Sable all-jar: ${finalJar}")
+        }
+        if (!companionJar.isFile()) {
+            throw new GradleException("Production Companion nested jar is missing: ${companionJar}")
+        }
+
+        File tempJar = new File(finalJar.parentFile, finalJar.name + '.m9.6-companion.tmp')
+        def entries = [:]
+        def metadata = null
+        ZipInputStream input = new ZipInputStream(new BufferedInputStream(new FileInputStream(finalJar)))
+        try {
+            def entry
+            while ((entry = input.nextEntry) != null) {
+                if (entry.directory) {
+                    continue
+                }
+                byte[] contents = input.readAllBytes()
+                if (entry.name == companionBackportJarJarPath) {
+                    continue
+                }
+                if (entry.name == 'META-INF/jarjar/metadata.json') {
+                    metadata = new JsonSlurper().parseText(new String(contents, 'UTF-8'))
+                    continue
+                }
+                entries[entry.name] = contents
+            }
+        } finally {
+            input.close()
+        }
+        if (metadata == null) {
+            throw new GradleException('Final Sable all-jar is missing META-INF/jarjar/metadata.json')
+        }
+        def companionRows = metadata.jars.findAll { row ->
+            row.identifier.group == companionBackportGroup && row.identifier.artifact == companionBackportArtifact
+        }
+        if (companionRows.size() != 1 || companionRows[0].path != companionBackportJarJarPath
+                || companionRows[0].version.artifactVersion != sable_companion_version) {
+            throw new GradleException("Unexpected Companion JarJar metadata row before replacement: ${companionRows}")
+        }
+        companionRows[0].isObfuscated = true
+
+        entries['META-INF/jarjar/metadata.json'] = groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson(metadata)).getBytes('UTF-8')
+        entries[companionBackportJarJarPath] = Files.readAllBytes(companionJar.toPath())
+
+        ZipOutputStream output = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tempJar)))
+        try {
+            entries.keySet().sort().each { name ->
+                ZipEntry outputEntry = new ZipEntry(name)
+                outputEntry.time = 0L
+                output.putNextEntry(outputEntry)
+                output.write(entries[name])
+                output.closeEntry()
+            }
+        } finally {
+            output.close()
+        }
+        Files.move(tempJar.toPath(), finalJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        logger.lifecycle("packageCompanionIntoFinalForgeArtifact PASS: nested ${companionBackportJarJarPath} "
+                + "is production/SRG mapped in ${finalJar.name}")
+    }
+}
+
 tasks.register('remapRapierBackportJarToProduction') {
     group = 'forge backport'
     description = 'Maps the isolated Rapier common library from named/userdev bytecode to Forge production SRG namespace.'
     dependsOn tasks.named('jarRapierBackportLibrary')
+    dependsOn tasks.named('syncMixinRefmap')
+    dependsOn tasks.named('compileJava')
     dependsOn tasks.named('createMcpToSrg')
 
     inputs.file(rapierBackportNamedJar)
     inputs.file(layout.buildDirectory.file('createMcpToSrg/output.tsrg'))
+    inputs.files(configurations.compileClasspath)
+    inputs.files(sourceSets.main.output.classesDirs)
     outputs.file(rapierBackportProductionJar)
 
     doLast {
@@ -1394,7 +1547,9 @@ tasks.register('remapRapierBackportJarToProduction') {
         if (!mappingsFile.isFile()) {
             throw new GradleException("Rapier production remap requires ${mappingsFile}")
         }
-        def result = RapierProductionJarMapper.mapNamedToProduction(namedJar, mappingsFile, productionJar)
+        def hierarchyClasspath = productionRemapHierarchyClasspath()
+        def result = RapierProductionJarMapper.mapNamedToProduction(
+                namedJar, mappingsFile, productionJar, hierarchyClasspath)
         if (!result.namedMinecraftMemberReferences.isEmpty()) {
             throw new GradleException(
                     "Rapier production jar still contains named Minecraft member references: "
@@ -1406,10 +1561,21 @@ tasks.register('remapRapierBackportJarToProduction') {
                     'Rapier production remap did not prove any Minecraft member references; namespace check would be vacuous'
             )
         }
+        if (!result.unresolvedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException(
+                    "Rapier production jar contains unresolved Minecraft member references: "
+                            + result.unresolvedMinecraftMemberReferences.take(20)
+            )
+        }
         logger.lifecycle("remapRapierBackportJarToProduction PASS: inputSha256=${result.inputSha256}, "
                 + "outputSha256=${result.outputSha256}, transformedClasses=${result.transformedClasses}, "
                 + "memberReferenceRemaps=${result.memberReferenceRemaps}, "
+                + "inheritedMemberReferenceRemaps=${result.inheritedMemberReferenceRemaps}, "
                 + "handleReferenceRemaps=${result.invokedynamicHandleRemaps}, "
+                + "indySamNameRemaps=${result.invokedynamicSamNameRemaps}, "
+                + "invokedynamicSites=${result.totalInvokedynamicSites}, "
+                + "lambdaMetafactorySites=${result.lambdaMetafactorySites}, "
+                + "minecraftLambdaSites=${result.minecraftLambdaMetafactorySites}, "
                 + "minecraftOwners=${result.minecraftReferenceOwners.size()}, "
                 + "productionMemberRefs=${result.productionMinecraftMemberReferences.size()}")
     }
@@ -1418,7 +1584,7 @@ tasks.register('remapRapierBackportJarToProduction') {
 tasks.register('packageRapierIntoFinalForgeArtifact') {
     group = 'forge backport'
     description = 'Nests the production Rapier library and its LZ4 runtime dependency into the existing final Sable all-jar.'
-    dependsOn tasks.named('reobfJarJar')
+    dependsOn tasks.named('packageCompanionIntoFinalForgeArtifact')
     dependsOn tasks.named('remapRapierBackportJarToProduction')
 
     inputs.file(standaloneProductionSableArtifact)
@@ -1515,6 +1681,8 @@ tasks.register('verifyRapierPackagedArtifact') {
     group = 'verification'
     description = 'Verifies M8.3 Rapier JarJar packaging, provider selection, namespace, native ownership, and dependency boundary.'
     dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+    inputs.files(configurations.compileClasspath)
+    inputs.files(sourceSets.main.output.classesDirs)
 
     doLast {
         File finalJar = standaloneProductionSableArtifact.get().asFile
@@ -1593,7 +1761,14 @@ tasks.register('verifyRapierPackagedArtifact') {
                     || lz4Rows[0].isObfuscated != false) {
                 throw new GradleException("Unexpected LZ4 JarJar metadata row: ${lz4Rows}")
             }
-            if (nestedRows.findAll { it.identifier.group == 'dev.ryanhcode.sable-companion' }.size() != 1) {
+            def companionRows = nestedRows.findAll {
+                it.identifier.group == companionBackportGroup
+                        && it.identifier.artifact == companionBackportArtifact
+                        && it.path == companionBackportJarJarPath
+                        && it.version.artifactVersion == sable_companion_version
+                        && it.isObfuscated == true
+            }
+            if (companionRows.size() != 1) {
                 throw new GradleException('Companion JarJar metadata row is no longer exactly one')
             }
             if (nestedRows.findAll { it.identifier.group == 'io.github.llamalad7'
@@ -1612,7 +1787,7 @@ tasks.register('verifyRapierPackagedArtifact') {
 
             def rapierNested = readNestedJar(outer, rapierBackportJarJarPath)
             def lz4Nested = readNestedJar(outer, rapierLz4JarJarPath)
-            def companionRow = nestedRows.find { it.identifier.group == 'dev.ryanhcode.sable-companion' }
+            def companionRow = companionRows[0]
             def companionNested = readNestedJar(outer, companionRow.path as String)
 
             def outerClasses = outerEntryNames.findAll {
@@ -1745,14 +1920,21 @@ tasks.register('verifyRapierPackagedArtifact') {
             if (sha256Bytes(rapierNested.bytes) != sha256(rapierJar)) {
                 throw new GradleException('Nested Rapier jar bytes differ from remapped production Rapier jar output')
             }
-            def referenceReport = RapierProductionJarMapper.referenceReport(rapierJar, mappingsFile)
-            if (referenceReport.minecraftReferenceOwners.isEmpty()
-                    || referenceReport.productionMinecraftMemberReferences.isEmpty()
-                    || !referenceReport.namedMinecraftMemberReferences.isEmpty()) {
-                throw new GradleException("Rapier production namespace verification failed: "
-                        + "owners=${referenceReport.minecraftReferenceOwners.size()}, "
-                        + "productionRefs=${referenceReport.productionMinecraftMemberReferences.size()}, "
-                        + "namedRefs=${referenceReport.namedMinecraftMemberReferences.take(20)}")
+            def hierarchyClasspath = productionRemapHierarchyClasspath()
+            def referenceReport = RapierProductionJarMapper.referenceReport(
+                    rapierJar, mappingsFile, hierarchyClasspath)
+        if (referenceReport.minecraftReferenceOwners.isEmpty()
+                || referenceReport.productionMinecraftMemberReferences.isEmpty()
+                || !referenceReport.namedMinecraftMemberReferences.isEmpty()
+                || !referenceReport.unresolvedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException("Rapier production namespace verification failed: "
+                    + "owners=${referenceReport.minecraftReferenceOwners.size()}, "
+                    + "productionRefs=${referenceReport.productionMinecraftMemberReferences.size()}, "
+                    + "namedRefs=${referenceReport.namedMinecraftMemberReferences.take(20)}, "
+                    + "unresolvedRefs=${referenceReport.unresolvedMinecraftMemberReferences.take(20)}, "
+                    + "invokedynamicSites=${referenceReport.totalInvokedynamicSites}, "
+                    + "lambdaMetafactorySites=${referenceReport.lambdaMetafactorySites}, "
+                    + "minecraftLambdaSites=${referenceReport.minecraftLambdaMetafactorySites}")
             }
 
             logger.lifecycle("verifyRapierPackagedArtifact PASS: nested=${rapierBackportGroup}:${rapierBackportArtifact}:${version}, "
@@ -1763,6 +1945,296 @@ tasks.register('verifyRapierPackagedArtifact') {
         } finally {
             outer.close()
         }
+    }
+}
+
+tasks.register('verifyRapierProductionNamespace') {
+    group = 'verification'
+    description = 'Verifies every Minecraft member reference in the final nested Rapier jar against the production hierarchy.'
+    dependsOn tasks.named('verifyRapierPackagedArtifact')
+
+    inputs.file(standaloneProductionSableArtifact)
+    inputs.file(layout.buildDirectory.file('createMcpToSrg/output.tsrg'))
+    inputs.files(configurations.compileClasspath)
+    inputs.files(sourceSets.main.output.classesDirs)
+
+    doLast {
+        File finalJar = standaloneProductionSableArtifact.get().asFile
+        File mappingsFile = layout.buildDirectory.file('createMcpToSrg/output.tsrg').get().asFile
+        File extractedRapier = layout.buildDirectory.file(
+                'verification/rapierProductionNamespace/sable-rapier-common-1.20.1-2.0.0.jar').get().asFile
+        byte[] rapierBytes
+        JarFile outer = new JarFile(finalJar)
+        try {
+            def rapierEntries = outer.entries().toList().findAll { it.name == rapierBackportJarJarPath }
+            if (rapierEntries.size() != 1) {
+                throw new GradleException("Expected one nested Rapier jar, found ${rapierEntries.size()}")
+            }
+            rapierBytes = outer.getInputStream(rapierEntries[0]).readAllBytes()
+            [
+                    'META-INF/jarjar/sable-companion-common-1.20.1-1.6.0.jar',
+                    rapierLz4JarJarPath
+            ].each { nestedPath ->
+                if (outer.entries().toList().count { it.name == nestedPath } != 1) {
+                    throw new GradleException("Expected exactly one unchanged nested dependency ${nestedPath}")
+                }
+            }
+        } finally {
+            outer.close()
+        }
+        extractedRapier.parentFile.mkdirs()
+        Files.write(extractedRapier.toPath(), rapierBytes)
+
+        def hierarchyClasspath = productionRemapHierarchyClasspath()
+        def report = RapierProductionJarMapper.referenceReport(
+                extractedRapier, mappingsFile, hierarchyClasspath)
+        if (!report.namedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException("Nested production Rapier contains stale named Minecraft references: "
+                    + report.namedMinecraftMemberReferences.take(30))
+        }
+        if (!report.unresolvedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException("Nested production Rapier contains unresolved Minecraft references: "
+                    + report.unresolvedMinecraftMemberReferences.take(30))
+        }
+        if (report.productionMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException('Nested production Rapier member verification would be vacuous')
+        }
+
+        String blockStateDescriptor = '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;'
+        String expectedBlockStateReference = 'METHOD net/minecraft/server/level/ServerLevel.m_8055_' + blockStateDescriptor
+        String staleBlockStateReference = 'METHOD net/minecraft/server/level/ServerLevel.getBlockState' + blockStateDescriptor
+        def handleBlockChangeReferences = RapierProductionJarMapper.instructionMemberReferences(
+                extractedRapier,
+                'dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipeline',
+                'handleBlockChange')
+        if (!handleBlockChangeReferences.contains(expectedBlockStateReference)
+                || handleBlockChangeReferences.contains(staleBlockStateReference)) {
+            def blockStateReferences = handleBlockChangeReferences.findAll {
+                it.contains('ServerLevel') && it.contains('BlockState')
+            }
+            throw new GradleException(
+                    "RapierPhysicsPipeline.handleBlockChange has the wrong production ServerLevel "
+                            + "block-state reference: ${blockStateReferences}")
+        }
+
+        String expectedLevelAcceleratorBlockStateReference =
+                'METHOD dev/ryanhcode/sable/util/LevelAccelerator.m_8055_' + blockStateDescriptor
+        String staleLevelAcceleratorBlockStateReference =
+                'METHOD dev/ryanhcode/sable/util/LevelAccelerator.getBlockState' + blockStateDescriptor
+        def handleChunkSectionAdditionReferences = RapierProductionJarMapper.instructionMemberReferences(
+                extractedRapier,
+                'dev.ryanhcode.sable.physics.impl.rapier.RapierPhysicsPipeline',
+                'handleChunkSectionAddition',
+                '(Lnet/minecraft/world/level/chunk/LevelChunkSection;IIIZ)V')
+        if (!handleChunkSectionAdditionReferences.contains(expectedLevelAcceleratorBlockStateReference)
+                || handleChunkSectionAdditionReferences.contains(staleLevelAcceleratorBlockStateReference)) {
+            def levelAcceleratorReferences = handleChunkSectionAdditionReferences.findAll {
+                it.contains('LevelAccelerator') && it.contains('BlockState')
+            }
+            throw new GradleException(
+                    "RapierPhysicsPipeline.handleChunkSectionAddition has the wrong production "
+                            + "LevelAccelerator block-state reference: ${levelAcceleratorReferences}")
+        }
+
+        File extractedCompanion = layout.buildDirectory.file(
+                "verification/rapierProductionNamespace/${companionBackportJarName}").get().asFile
+        JarFile finalOuterForCompanion = new JarFile(finalJar)
+        try {
+            def companionEntries = finalOuterForCompanion.entries().toList().findAll {
+                it.name == companionBackportJarJarPath
+            }
+            if (companionEntries.size() != 1) {
+                throw new GradleException("Expected one nested Companion jar for ABI check, found ${companionEntries.size()}")
+            }
+            extractedCompanion.parentFile.mkdirs()
+            Files.write(extractedCompanion.toPath(),
+                    finalOuterForCompanion.getInputStream(companionEntries[0]).readAllBytes())
+        } finally {
+            finalOuterForCompanion.close()
+        }
+        def rapierSableAbi = RapierProductionJarMapper.crossArtifactAbiReport(
+                extractedRapier,
+                [finalJar, extractedCompanion],
+                'dev/ryanhcode/sable/')
+        if (!rapierSableAbi.passed()) {
+            throw new GradleException("Nested Rapier has unresolved packaged Sable ABI references: "
+                    + "classes=${rapierSableAbi.unresolvedClasses.take(20)}, "
+                    + "methods=${rapierSableAbi.unresolvedMethods.take(20)}, "
+                    + "fields=${rapierSableAbi.unresolvedFields.take(20)}")
+        }
+        if (!rapierSableAbi.resolvedMethods.contains(
+                'dev/ryanhcode/sable/util/LevelAccelerator.m_8055_' + blockStateDescriptor)) {
+            throw new GradleException('Nested Rapier did not prove linkage to production LevelAccelerator.m_8055_')
+        }
+
+        String expectedDoubleLineConsumerSam =
+                'INDY_SAM net/minecraft/world/phys/shapes/Shapes$DoubleLineConsumer.m_83161_(DDDDDD)V'
+        def staleDoubleLineConsumerSam = report.namedMinecraftMemberReferences.findAll {
+            it.contains('INDY_SAM net/minecraft/world/phys/shapes/Shapes$DoubleLineConsumer.consume(DDDDDD)V')
+        }
+        if (!report.productionMinecraftMemberReferences.contains(expectedDoubleLineConsumerSam)
+                || !staleDoubleLineConsumerSam.isEmpty()) {
+            throw new GradleException(
+                    "RapierVoxelColliderBakery DoubleLineConsumer lambda has the wrong production SAM name: "
+                            + "expected=${expectedDoubleLineConsumerSam}, stale=${staleDoubleLineConsumerSam}")
+        }
+
+        JarFile rapier = new JarFile(extractedRapier)
+        try {
+            def nativeEntries = rapier.entries().toList().findAll {
+                it.name == 'natives/sable_rapier/sable_rapier_binaries.zip.l4z'
+            }
+            if (nativeEntries.size() != 1
+                    || sha256Bytes(rapier.getInputStream(nativeEntries[0]).readAllBytes()) != rapierNativeSha256) {
+                throw new GradleException('Nested Rapier native ownership/hash changed during namespace repair')
+            }
+        } finally {
+            rapier.close()
+        }
+
+        logger.lifecycle('verifyRapierProductionNamespace PASS: inherited ServerLevel.getBlockState -> '
+                + 'BlockGetter.m_8055_, productionRefs='
+                + "${report.productionMinecraftMemberReferences.size()}, namedRefs=0, unresolvedRefs=0, "
+                + "rapierSableAbiClasses=${rapierSableAbi.resolvedClasses.size()}, "
+                + "rapierSableAbiMethods=${rapierSableAbi.resolvedMethods.size()}, "
+                + "rapierSableAbiFields=${rapierSableAbi.resolvedFields.size()}, "
+                + "invokedynamicSites=${report.totalInvokedynamicSites}, "
+                + "lambdaMetafactorySites=${report.lambdaMetafactorySites}, "
+                + "minecraftLambdaSites=${report.minecraftLambdaMetafactorySites}, "
+                + 'DoubleLineConsumer.consume -> m_83161_, '
+                + 'handles/constantDynamic=verified, nestedRapier=1, Companion/LZ4/native unchanged')
+    }
+}
+
+tasks.register('verifyCompanionProductionNamespace') {
+    group = 'verification'
+    description = 'Verifies every Minecraft member reference in the final nested Companion jar against the production hierarchy.'
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+    dependsOn prepareStandaloneSableUserdevArtifact
+
+    inputs.file(standaloneProductionSableArtifact)
+    inputs.file(standaloneMappedSableRuntime)
+    inputs.file(layout.buildDirectory.file('createMcpToSrg/output.tsrg'))
+    inputs.file(layout.buildDirectory.file('createSrgToMcp/output.srg'))
+    inputs.files(configurations.compileClasspath)
+    inputs.files(sourceSets.main.output.classesDirs)
+
+    doLast {
+        File finalJar = standaloneProductionSableArtifact.get().asFile
+        File mappedSableJar = standaloneMappedSableRuntime.get().asFile
+        File productionMappingsFile = layout.buildDirectory.file('createMcpToSrg/output.tsrg').get().asFile
+        File userdevMappingsFile = layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile
+        File remappedCompanionJar = companionBackportProductionJar.get().asFile
+        File productionCompanion = layout.buildDirectory.file(
+                "verification/companionProductionNamespace/${companionBackportJarName}").get().asFile
+        File userdevCompanion = layout.buildDirectory.file(
+                "verification/companionProductionNamespace/${companionBackportArtifact}-${sable_companion_version}-userdev.jar").get().asFile
+        String companionService = 'META-INF/services/dev.ryanhcode.sable.companion.SableCompanion'
+        String companionProvider = 'dev.ryanhcode.sable.companion.impl.DefaultSableCompanion'
+
+        def extractNestedJar = { File outerJar, String nestedPath, File destination ->
+            JarFile outer = new JarFile(outerJar)
+            try {
+                def nestedEntries = outer.entries().toList().findAll { it.name == nestedPath }
+                if (nestedEntries.size() != 1) {
+                    throw new GradleException("Expected exactly one nested ${nestedPath} in ${outerJar.name}, "
+                            + "found ${nestedEntries.size()}")
+                }
+                destination.parentFile.mkdirs()
+                Files.write(destination.toPath(), outer.getInputStream(nestedEntries[0]).readAllBytes())
+            } finally {
+                outer.close()
+            }
+        }
+        extractNestedJar(finalJar, companionBackportJarJarPath, productionCompanion)
+        extractNestedJar(mappedSableJar, companionBackportJarJarPath, userdevCompanion)
+        if (sha256(productionCompanion) != sha256(remappedCompanionJar)) {
+            throw new GradleException('Final nested Companion jar bytes differ from remapped production Companion output')
+        }
+
+        def hierarchyClasspath = productionRemapHierarchyClasspath()
+        def productionReport = RapierProductionJarMapper.referenceReport(
+                productionCompanion, productionMappingsFile, hierarchyClasspath)
+        if (productionReport.productionMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException('Nested Companion production namespace check would be vacuous')
+        }
+        if (!productionReport.namedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException("Nested production Companion contains stale named Minecraft references: "
+                    + productionReport.namedMinecraftMemberReferences.take(30))
+        }
+        if (!productionReport.unresolvedMinecraftMemberReferences.isEmpty()) {
+            throw new GradleException("Nested production Companion contains unresolved Minecraft references: "
+                    + productionReport.unresolvedMinecraftMemberReferences.take(30))
+        }
+
+        String feetPosDescriptor = '(Lnet/minecraft/world/entity/Entity;FLorg/joml/Quaterniondc;)Lorg/joml/Vector3d;'
+        String positionDescriptor = '()Lnet/minecraft/world/phys/Vec3;'
+        String expectedPositionReference = 'METHOD net/minecraft/world/entity/Entity.m_20182_' + positionDescriptor
+        String stalePositionReference = 'METHOD net/minecraft/world/entity/Entity.position' + positionDescriptor
+        def feetPosReferences = RapierProductionJarMapper.instructionMemberReferences(
+                productionCompanion,
+                'dev.ryanhcode.sable.companion.SableCompanion',
+                'getFeetPos',
+                feetPosDescriptor)
+        if (!feetPosReferences.contains(expectedPositionReference)
+                || feetPosReferences.contains(stalePositionReference)) {
+            throw new GradleException("SableCompanion.getFeetPos has the wrong production Entity.position reference: "
+                    + feetPosReferences.findAll { it.contains('net/minecraft/world/entity/Entity.') })
+        }
+
+        JarFile finalOuter = new JarFile(finalJar)
+        try {
+            def companionOuterClasses = finalOuter.entries().toList().findAll { entry ->
+                entry.name.startsWith('dev/ryanhcode/sable/companion/') && entry.name.endsWith('.class')
+            }
+            if (!companionOuterClasses.isEmpty()) {
+                throw new GradleException("Companion classes leaked outside JarJar: ${companionOuterClasses*.name}")
+            }
+        } finally {
+            finalOuter.close()
+        }
+
+        JarFile productionCompanionJar = new JarFile(productionCompanion)
+        try {
+            def serviceEntry = productionCompanionJar.getJarEntry(companionService)
+            if (serviceEntry == null) {
+                throw new GradleException("Production Companion jar is missing ${companionService}")
+            }
+            String serviceText = productionCompanionJar.getInputStream(serviceEntry).getText('UTF-8').trim()
+            if (serviceText != companionProvider) {
+                throw new GradleException("Production Companion service descriptor changed: ${serviceText}")
+            }
+        } finally {
+            productionCompanionJar.close()
+        }
+
+        def userdevStaleReferences = SableStandaloneUserdevMapper.staleKnownMemberReferences(
+                userdevCompanion,
+                userdevMappingsFile,
+                hierarchyClasspath)
+        if (!userdevStaleReferences.references.isEmpty()) {
+            throw new GradleException("Standalone userdev nested Companion has stale SRG member references: "
+                    + userdevStaleReferences.references.take(30))
+        }
+        def userdevFeetPosReferences = SableStandaloneUserdevMapper.classReferences(
+                userdevCompanion,
+                'dev/ryanhcode/sable/companion/SableCompanion.class')
+        if (!userdevFeetPosReferences.methods.contains(
+                'net/minecraft/world/entity/Entity.position' + positionDescriptor)
+                || userdevFeetPosReferences.methods.any {
+            it.contains('net/minecraft/world/entity/Entity.m_20182_' + positionDescriptor)
+        }) {
+            throw new GradleException("Standalone userdev Companion did not remap Entity.m_20182_ back to position: "
+                    + userdevFeetPosReferences.methods.findAll { it.contains('net/minecraft/world/entity/Entity.') })
+        }
+
+        def companionClasses = RapierProductionJarMapper.classEntries(productionCompanion).findAll {
+            it.startsWith('dev/ryanhcode/sable/companion/')
+        }
+        logger.lifecycle('verifyCompanionProductionNamespace PASS: Entity.position -> Entity.m_20182_, '
+                + "companionClasses=${companionClasses.size()}, productionRefs="
+                + "${productionReport.productionMinecraftMemberReferences.size()}, namedRefs=0, unresolvedRefs=0, "
+                + "standaloneUserdevStaleRefs=0, service=${companionProvider}")
     }
 }
 
@@ -2595,7 +3067,7 @@ def forgeServiceProviders = [
 tasks.register('verifyStandaloneForgeArtifact') {
     group = 'verification'
     description = 'Statically verifies the final reobfuscated Forge artifact and its JarJar-packaged Companion library.'
-    dependsOn tasks.named('reobfJarJar')
+    dependsOn tasks.named('packageCompanionIntoFinalForgeArtifact')
     dependsOn project(':sable_companion_1_20').tasks.named('jar')
 
     doLast {
@@ -2735,10 +3207,12 @@ tasks.register('verifyStandaloneForgeArtifact') {
             def metadata = new JsonSlurper().parseText(readText('META-INF/jarjar/metadata.json'))
             def nestedRows = metadata.jars ?: []
             def companionRows = nestedRows.findAll { row ->
-                row.identifier.group == 'dev.ryanhcode.sable-companion'
+                row.identifier.group == companionBackportGroup
+                        && row.identifier.artifact == companionBackportArtifact
                         && row.version.artifactVersion == sable_companion_version
             }
-            if (companionRows.size() != 1) {
+            if (companionRows.size() != 1 || companionRows[0].path != companionBackportJarJarPath
+                    || companionRows[0].isObfuscated != true) {
                 throw new GradleException("Expected one Companion JarJar metadata row, found ${companionRows}")
             }
             def mixinExtrasRows = nestedRows.findAll { row ->
@@ -2948,7 +3422,10 @@ def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSab
                 standaloneHierarchyClasspath)
         File nestedProductionRapier = standaloneRapierProductionNestedJar.get().asFile
         File nestedUserdevRapier = standaloneRapierUserdevNestedJar.get().asFile
+        File nestedProductionCompanion = standaloneCompanionProductionNestedJar.get().asFile
+        File nestedUserdevCompanion = standaloneCompanionUserdevNestedJar.get().asFile
         nestedProductionRapier.parentFile.mkdirs()
+        nestedProductionCompanion.parentFile.mkdirs()
         JarFile mappedOuterJar = new JarFile(outputJar)
         try {
             def nestedRapierEntry = mappedOuterJar.getJarEntry(rapierBackportJarJarPath)
@@ -2958,7 +3435,15 @@ def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSab
                                 + 'run :forge:verifyRapierPackagedArtifact first'
                 )
             }
+            def nestedCompanionEntry = mappedOuterJar.getJarEntry(companionBackportJarJarPath)
+            if (nestedCompanionEntry == null) {
+                throw new GradleException(
+                        "Standalone userdev Sable artifact lacks nested Companion JarJar ${companionBackportJarJarPath}"
+                )
+            }
             Files.write(nestedProductionRapier.toPath(), mappedOuterJar.getInputStream(nestedRapierEntry).readAllBytes())
+            Files.write(nestedProductionCompanion.toPath(),
+                    mappedOuterJar.getInputStream(nestedCompanionEntry).readAllBytes())
         } finally {
             mappedOuterJar.close()
         }
@@ -2967,7 +3452,12 @@ def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSab
                 mappingsFile,
                 nestedUserdevRapier,
                 standaloneHierarchyClasspath)
-        File tempOutputJar = new File(outputJar.parentFile, outputJar.name + '.rapier-userdev.tmp')
+        def nestedCompanionResult = SableStandaloneUserdevMapper.map(
+                nestedProductionCompanion,
+                mappingsFile,
+                nestedUserdevCompanion,
+                standaloneHierarchyClasspath)
+        File tempOutputJar = new File(outputJar.parentFile, outputJar.name + '.nested-userdev.tmp')
         ZipInputStream input = new ZipInputStream(new BufferedInputStream(new FileInputStream(outputJar)))
         ZipOutputStream output = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tempOutputJar)))
         try {
@@ -2978,6 +3468,8 @@ def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSab
                 output.putNextEntry(outputEntry)
                 if (entry.name == rapierBackportJarJarPath) {
                     output.write(Files.readAllBytes(nestedUserdevRapier.toPath()))
+                } else if (entry.name == companionBackportJarJarPath) {
+                    output.write(Files.readAllBytes(nestedUserdevCompanion.toPath()))
                 } else {
                     output.write(input.readAllBytes())
                 }
@@ -3009,6 +3501,14 @@ def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSab
                 + "${nestedRapierResult.constantDynamicHandleReferenceRemaps}, "
                 + "unresolvedHierarchyDeclarations=${nestedRapierResult.unresolvedHierarchyDeclarations}, "
                 + "unresolvedHierarchyReferences=${nestedRapierResult.unresolvedHierarchyReferences}")
+        logger.lifecycle("Prepared standalone userdev nested Companion ${companionBackportJarJarPath}; "
+                + "inputSha256=${nestedCompanionResult.inputSha256}, transformedClasses="
+                + "${nestedCompanionResult.transformedClasses}, referenceRemaps="
+                + "${nestedCompanionResult.referenceRemaps}, handleReferenceRemaps="
+                + "${nestedCompanionResult.handleReferenceRemaps}, constantDynamicHandleReferenceRemaps="
+                + "${nestedCompanionResult.constantDynamicHandleReferenceRemaps}, "
+                + "unresolvedHierarchyDeclarations=${nestedCompanionResult.unresolvedHierarchyDeclarations}, "
+                + "unresolvedHierarchyReferences=${nestedCompanionResult.unresolvedHierarchyReferences}")
     }
 }
 
@@ -3787,6 +4287,7 @@ tasks.register('verifyRapierRuntimeSmokePreparation') {
     description = 'Statically verifies M8.4 standalone Rapier userdev mapping, provenance, and smoke-probe wiring.'
     dependsOn prepareStandaloneSableUserdevArtifact
     dependsOn tasks.named('prepareStandaloneRuntimeLauncherRoots')
+    inputs.files(sourceSets.main.output.classesDirs)
 
     doLast {
         File smokeSource = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeStandaloneRuntimeSmoke.java')
@@ -3874,18 +4375,18 @@ tasks.register('verifyRapierRuntimeSmokePreparation') {
         } finally {
             productionOuter.close()
         }
-        def standaloneHierarchyClasspath = configurations.compileClasspath.files.findAll {
-            it.isFile() && it.name.endsWith('.jar')
-        }
+        def standaloneHierarchyClasspath = productionRemapHierarchyClasspath()
 
-        def productionRapierReport = RapierProductionJarMapper.referenceReport(productionNestedRapier, mappingsFile)
+        def productionRapierReport = RapierProductionJarMapper.referenceReport(
+                productionNestedRapier, mappingsFile, standaloneHierarchyClasspath)
         if (productionRapierReport.productionMinecraftMemberReferences.isEmpty()
                 || !productionRapierReport.namedMinecraftMemberReferences.isEmpty()) {
             throw new GradleException("Production nested Rapier namespace proof failed: productionRefs="
                     + "${productionRapierReport.productionMinecraftMemberReferences.size()}, namedRefs="
                     + "${productionRapierReport.namedMinecraftMemberReferences.take(20)}")
         }
-        def userdevRapierReport = RapierProductionJarMapper.referenceReport(userdevNestedRapier, mappingsFile)
+        def userdevRapierReport = RapierProductionJarMapper.referenceReport(
+                userdevNestedRapier, mappingsFile, standaloneHierarchyClasspath)
         def userdevSrgLookingProductionRefs = userdevRapierReport.productionMinecraftMemberReferences.findAll {
             it.contains('.m_') || it.contains('.f_')
         }
@@ -4002,6 +4503,10 @@ tasks.matching { it.name == 'runStandaloneClient' }.configureEach {
 tasks.named('check') {
     dependsOn tasks.named('verifyForgeAccessTransformer')
     dependsOn tasks.named('verifyForgePackaging')
+}
+
+tasks.named('build') {
+    dependsOn tasks.named('verifyRapierPackagedArtifact')
 }
 
 tasks.named('checkstyleMain') {
@@ -4227,6 +4732,671 @@ tasks.register('verifyLithiumSableCompatibility') {
     }
 }
 
+tasks.register('verifySableSpawnCommandBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the production /sable spawn block command reaches a safe handler and is not smoke-gated.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableSpawnCommands.java'))
+    inputs.file(rootProject.file('common/src/main/resources/assets/sable/lang/en_us.json'))
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+
+    doLast {
+        File commandSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java')
+        File spawnSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableSpawnCommands.java')
+        File langSource = rootProject.file('common/src/main/resources/assets/sable/lang/en_us.json')
+        File forgeSource = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+        String commandText = commandSource.getText('UTF-8')
+        String spawnText = spawnSource.getText('UTF-8')
+        String langText = langSource.getText('UTF-8')
+        String forgeText = forgeSource.getText('UTF-8')
+
+        if (!commandText.contains('SableSpawnCommands.register(sableBuilder, buildContext)')) {
+            throw new GradleException('Root /sable command no longer registers SableSpawnCommands')
+        }
+        if (!commandText.contains('Commands.literal("sable")')
+                || !commandText.contains('commandSourceStack.hasPermission(2)')
+                || !forgeText.contains('MinecraftForge.EVENT_BUS.addListener(this::registerCommand)')
+                || !forgeText.contains('SableCommand.register(event.getDispatcher(), event.getBuildContext())')) {
+            throw new GradleException('Forge /sable root registration lost command tree/event-bus canaries')
+        }
+        [
+                'Commands.literal("spawn")',
+                '.then(Commands.literal("block")',
+                '.executes((ctx) -> spawnBlock(ctx, DEFAULT_SPAWN_BLOCKSTATE, null))',
+                'BlockStateArgument.block(buildContext)',
+                'SableSpawnCommands::spawnBlockFromArgument'
+        ].each { canary ->
+            if (!spawnText.contains(canary)) {
+                throw new GradleException("/sable spawn block registration lost canary: ${canary}")
+            }
+        }
+
+        int registerStart = spawnText.indexOf('public static void register(')
+        int namedFinaleStart = spawnText.indexOf('@FunctionalInterface', registerStart)
+        if (registerStart < 0 || namedFinaleStart < 0) {
+            throw new GradleException('Unable to isolate SableSpawnCommands.register source')
+        }
+        String registerText = spawnText.substring(registerStart, namedFinaleStart)
+        int spawnIndex = registerText.indexOf('Commands.literal("spawn")')
+        int blockIndex = registerText.indexOf('.then(Commands.literal("block")')
+        int platformIndex = registerText.indexOf('.then(Commands.literal("platform")')
+        if (!(spawnIndex >= 0 && blockIndex > spawnIndex && platformIndex > blockIndex)) {
+            throw new GradleException('Unexpected /sable spawn block registration order/tree shape')
+        }
+        String blockTreeText = registerText.substring(blockIndex, platformIndex)
+        [
+                '.then(Commands.literal("block")',
+                '.executes((ctx) -> spawnBlock(ctx, DEFAULT_SPAWN_BLOCKSTATE, null))',
+                '.then(namedSpawnFinale(Commands.argument("block", BlockStateArgument.block(buildContext)),',
+                'SableSpawnCommands::spawnBlockFromArgument'
+        ].each { canary ->
+            if (!blockTreeText.contains(canary)) {
+                throw new GradleException("/sable spawn block tree lost terminal callback canary: ${canary}")
+            }
+        }
+
+        int finaleStart = spawnText.indexOf('private static <T extends ArgumentBuilder')
+        int spawnBlockStart = spawnText.indexOf('private static int spawnBlock(', finaleStart)
+        if (finaleStart < 0 || spawnBlockStart < 0) {
+            throw new GradleException('Unable to isolate namedSpawnFinale source')
+        }
+        String finaleText = spawnText.substring(finaleStart, spawnBlockStart)
+        [
+                'builder.executes((ctx) -> invoker.run(ctx, null))',
+                'builder.then(Commands.argument("name", StringArgumentType.string())',
+                '.executes((ctx) -> invoker.run(ctx, StringArgumentType.getString(ctx, "name"))))'
+        ].each { canary ->
+            if (!finaleText.contains(canary)) {
+                throw new GradleException("namedSpawnFinale no longer makes the block/name terminal executable: ${canary}")
+            }
+        }
+
+        int methodStart = spawnText.indexOf('private static int spawnBlock(')
+        int methodEnd = spawnText.indexOf('private static void finishInitialSpawnBlock(', methodStart)
+        if (methodStart < 0 || methodEnd < 0) {
+            throw new GradleException('Unable to isolate spawnBlock handler source')
+        }
+        String handlerText = spawnText.substring(methodStart, methodEnd)
+        [
+                'private static int spawnBlockFromArgument',
+                'material=<block-argument>',
+                'BlockStateArgument.getBlock(ctx, "block").getState()',
+                'private static int spawnBlockResolved',
+                'SABLE_SPAWN phase=argument_resolved',
+                'SABLE_SPAWN phase=source_resolved',
+                'SABLE_SPAWN phase=container_resolved',
+                'SABLE_SPAWN phase=create_begin',
+                'SABLE_SPAWN phase=create_returned',
+                'SABLE_SPAWN phase=chunk_created',
+                'SABLE_SPAWN phase=block_set',
+                'SABLE_SPAWN phase=registered',
+                'SableCommandHelper.requireSubLevelContainer(ctx)',
+                'plotContainer.allocateNewSubLevel(pose)',
+                'subLevel.setName(name)',
+                'final PlotChunkHolder chunkHolder = plot.getChunkHolder(plot.toLocal(new ChunkPos(globalBlockPos)))',
+                'final LevelChunk chunk = chunkHolder.getChunk()',
+                'final BlockState oldState = chunk.getBlockState(globalBlockPos)',
+                'final BlockState previousState = chunk.setBlockState(globalBlockPos, material, false)',
+                'final BlockState storedState = chunk.getBlockState(globalBlockPos)',
+                'Initial spawn block write did not persist',
+                'finishInitialSpawnBlock(subLevel, BlockPos.ZERO, oldState, material)',
+                'subLevel.updateLastPose()',
+                'SABLE_SPAWN phase=entered',
+                'SABLE_SPAWN phase=complete',
+                'SABLE_SPAWN phase=failed',
+                'SABLE_SPAWN phase=exit',
+                'SABLE_SPAWN phase=rollback_begin',
+                'SABLE_SPAWN phase=rollback_complete',
+                'SABLE_SPAWN phase=rollback_failed',
+                'source.sendSuccess(() -> Component.translatable("commands.sable.spawn.success", "block"), false)',
+                'return 1;',
+                'private static void rollbackSpawnSubLevel',
+                'plotContainer.removeSubLevel(subLevel, SubLevelRemovalReason.REMOVED)',
+                'failure.addSuppressed(cleanupFailure)',
+                'catch (final CommandSyntaxException exception)',
+                'catch (final RuntimeException exception)',
+                'catch (final Error error)',
+                'throw ERROR_SPAWN_BLOCK_FAILED.create(message)'
+        ].each { canary ->
+            if (!handlerText.contains(canary)) {
+                throw new GradleException("spawnBlock handler lost production canary: ${canary}")
+            }
+        }
+        if (handlerText.contains('accessor.getBlockState(BlockPos.ZERO)')
+                || handlerText.contains('accessor.setBlock(BlockPos.ZERO, material')) {
+            throw new GradleException('/sable spawn block regressed to embedded parent-world lookup for initial block storage')
+        }
+        if (!handlerText.contains('throws CommandSyntaxException')) {
+            throw new GradleException('spawnBlock handlers no longer declare CommandSyntaxException')
+        }
+        String finishText = spawnText.substring(methodEnd)
+        [
+                'SABLE_SPAWN phase=mass_check',
+                'chunkHolder.handleBlockChange',
+                'plot.updateBoundingBox()',
+                'plot.expandIfNecessary(globalBlockPos)',
+                'serverSubLevel.buildMassTracker()',
+                'serverSubLevel.updateMergedMassData(1.0f)',
+                'final var mergedMass = serverSubLevel.getMassTracker()',
+                'final var selfMass = serverSubLevel.getSelfMassTracker()',
+                'SubLevelPhysicsSystem.get(serverSubLevel.getLevel()) != null',
+                'Initial spawn block produced invalid mass data: mass=%s'
+        ].each { canary ->
+            if (!finishText.contains(canary)) {
+                throw new GradleException("finishInitialSpawnBlock lost mass-initialization canary: ${canary}")
+            }
+        }
+        if (handlerText.contains('sable.runtimeSmoke') || handlerText.contains('sable.standaloneRuntimeSmoke')
+                || handlerText.contains('Boolean.getBoolean')) {
+            throw new GradleException('/sable spawn block production path is incorrectly smoke-property gated')
+        }
+        if (!spawnText.contains('DynamicCommandExceptionType ERROR_SPAWN_BLOCK_FAILED')) {
+            throw new GradleException('spawnBlock no longer exposes a Brigadier command failure boundary')
+        }
+        if (!langText.contains('"commands.sable.spawn.block.failure"')) {
+            throw new GradleException('Missing user-visible spawnBlock failure translation')
+        }
+
+        def brigadierResult = SableSpawnCommandTreeVerifier.verify()
+        if (brigadierResult.consumed() != brigadierResult.total() || brigadierResult.result() != 1) {
+            throw new GradleException("Unexpected /sable spawn block Brigadier verifier result: ${brigadierResult}")
+        }
+        brigadierResult.tree().each { line ->
+            logger.lifecycle("verifySableSpawnCommandBoundary tree:${line}")
+        }
+
+        logger.lifecycle('verifySableSpawnCommandBoundary PASS: /sable spawn block is production registered, '
+                + "parseConsumed=${brigadierResult.consumed()}/${brigadierResult.total()}, "
+                + 'terminal block/name node invokes spawnBlock, returns 1 on success, logs entered/complete/failed, '
+                + 'converts runtime spawn failures to CommandSyntaxException, writes the initial block through the plot chunk, '
+                + 'checks persisted state/mass before success, uses allocateNewSubLevel, '
+                + 'and is not sable.runtimeSmoke gated')
+    }
+}
+
+tasks.register('verifySubLevelEntityCollisionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies active entity/sublevel collision queries do not load plot-storage blocks through the parent ServerChunkCache.'
+    dependsOn tasks.named('compileJava')
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/ServerChunkCacheMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/climbing_sub_levels/LivingEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixinhelpers/clip_overwrite/BlockGetterClipHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/block_placement/BlockPlaceContextMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/fluids_on_sub_levels/FlowingFluidMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixinhelpers/CanFallAtleastHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/explosion/ExplosionMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_ai/EatBlockGoalMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_swimming/CameraMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/tamed_teleport/TamableAnimalMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entities_stick_sublevels/effects/EntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_sublevel_collision/EntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entities_in_blocks/EntityMixin.java'))
+    inputs.dir(layout.buildDirectory.dir('classes/java/main'))
+
+    doLast {
+        File lookupSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java')
+        File serverChunkCacheSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/plot/ServerChunkCacheMixin.java')
+        File climbingSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/climbing_sub_levels/LivingEntityMixin.java')
+        File clipHelperSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixinhelpers/clip_overwrite/BlockGetterClipHelper.java')
+        File blockPlacementSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/block_placement/BlockPlaceContextMixin.java')
+        File flowingFluidSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/fluids_on_sub_levels/FlowingFluidMixin.java')
+        File canFallSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixinhelpers/CanFallAtleastHelper.java')
+        File explosionSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/explosion/ExplosionMixin.java')
+        File eatBlockGoalSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_ai/EatBlockGoalMixin.java')
+        File cameraSwimmingSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_swimming/CameraMixin.java')
+        File tamedTeleportSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/entity/tamed_teleport/TamableAnimalMixin.java')
+        File stickEffectsSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/entity/entities_stick_sublevels/effects/EntityMixin.java')
+        File subLevelCollisionSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_sublevel_collision/EntityMixin.java')
+        File entitiesInBlocksSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/entity/entities_in_blocks/EntityMixin.java')
+
+        String lookupText = lookupSource.getText('UTF-8')
+        String serverChunkCacheText = serverChunkCacheSource.getText('UTF-8')
+        String climbingText = climbingSource.getText('UTF-8')
+        String clipHelperText = clipHelperSource.getText('UTF-8')
+        String blockPlacementText = blockPlacementSource.getText('UTF-8')
+        String flowingFluidText = flowingFluidSource.getText('UTF-8')
+        String canFallText = canFallSource.getText('UTF-8')
+        String explosionText = explosionSource.getText('UTF-8')
+        String eatBlockGoalText = eatBlockGoalSource.getText('UTF-8')
+        String cameraSwimmingText = cameraSwimmingSource.getText('UTF-8')
+        String tamedTeleportText = tamedTeleportSource.getText('UTF-8')
+        String stickEffectsText = stickEffectsSource.getText('UTF-8')
+        String subLevelCollisionText = subLevelCollisionSource.getText('UTF-8')
+        String entitiesInBlocksText = entitiesInBlocksSource.getText('UTF-8')
+
+        [
+                'public static @NotNull BlockState getBlockStateOrAir',
+                'subLevel.getPlot().getChunkHolder',
+                'subLevel.getPlot().toLocal(new ChunkPos(plotBlockPos))',
+                'holder.getChunk()',
+                'chunk.getBlockState(plotBlockPos)',
+                'Blocks.AIR.defaultBlockState()'
+        ].each { canary ->
+            if (!lookupText.contains(canary)) {
+                throw new GradleException("SubLevelBlockStateLookup lost plot-chunk lookup canary: ${canary}")
+            }
+        }
+
+        [
+                '@Inject(method = "getChunk(IILnet/minecraft/world/level/chunk/ChunkStatus;Z)Lnet/minecraft/world/level/chunk/ChunkAccess;"',
+                'private void sable$getChunk',
+                'container.inBounds(x, z)',
+                'container.getChunk(chunkPos)',
+                'cir.setReturnValue(chunk)',
+                'cir.setReturnValue(this.sable$emptyChunk)'
+        ].each { canary ->
+            if (!serverChunkCacheText.contains(canary)) {
+                throw new GradleException("ServerChunkCacheMixin lost generic plot chunk-cache boundary canary: ${canary}")
+            }
+        }
+        if (serverChunkCacheText.contains('getChunkBlocking')) {
+            throw new GradleException('ServerChunkCacheMixin must intercept plot coordinates before vanilla getChunkBlocking')
+        }
+        if (lookupText.contains('subLevel.getLevel().getBlockState')
+                || lookupText.contains('level.getChunk(')
+                || lookupText.contains('getChunkBlocking')) {
+            throw new GradleException('SubLevelBlockStateLookup must not use parent Level chunk/block loading')
+        }
+        [
+                'public static @NotNull BlockState getBlockStateOrLevel',
+                'public static @NotNull FluidState getFluidStateOrLevel',
+                'Sable.HELPER.getContaining(level, blockPos)',
+                'return blockGetter.getBlockState(blockPos)',
+                'return blockGetter.getFluidState(blockPos)'
+        ].each { canary ->
+            if (!lookupText.contains(canary)) {
+                throw new GradleException("SubLevelBlockStateLookup lost generic parent-Level plot-position canary: ${canary}")
+            }
+        }
+
+        [
+                'private BlockPos sable$redirectPos',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, pos)'
+        ].each { canary ->
+            if (!climbingText.contains(canary)) {
+                throw new GradleException("climbing_sub_levels LivingEntityMixin lost redirectPos plot lookup canary: ${canary}")
+            }
+        }
+        if (climbingText.contains('final BlockState state = level.getBlockState(pos)')) {
+            throw new GradleException('climbing_sub_levels LivingEntityMixin still routes redirectPos local plot coordinates through parent Level')
+        }
+
+        [
+                'SubLevelBlockStateLookup.getBlockStateOrLevel(level, blockPos)',
+                'SubLevelBlockStateLookup.getFluidStateOrLevel(level, blockPos)'
+        ].each { canary ->
+            if (!clipHelperText.contains(canary)) {
+                throw new GradleException("BlockGetterClipHelper originalClip lost generic plot-aware clip canary: ${canary}")
+            }
+        }
+        if (clipHelperText.contains('final BlockState blockState = level.getBlockState(blockPos)')
+                || clipHelperText.contains('final FluidState fluidState = level.getFluidState(blockPos)')) {
+            throw new GradleException('BlockGetterClipHelper originalClip still reads transformed clip positions through the parent BlockGetter')
+        }
+
+        [
+                'SubLevelBlockStateLookup.getBlockStateOrAir(otherSubLevel, position)',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, mut)',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, block)',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, blockpos)',
+                'SubLevelBlockStateLookup.getFluidStateOrEmpty(subLevel, blockpos)',
+                'SubLevelBlockStateLookup.getBlockStateOrLevel(level, pos)',
+                'SubLevelBlockStateLookup.getFluidStateOrEmpty(subLevel, localBlockPosition)',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(subLevel1, pos)'
+        ].each { canary ->
+            String joined = [
+                    blockPlacementText,
+                    flowingFluidText,
+                    canFallText,
+                    explosionText,
+                    eatBlockGoalText,
+                    cameraSwimmingText,
+                    tamedTeleportText
+            ].join('\n')
+            if (!joined.contains(canary)) {
+                throw new GradleException("Active adjacent entity/interaction corridor lost plot-aware lookup canary: ${canary}")
+            }
+        }
+
+        [
+                'private void sable$preGetOnPos',
+                'private void sable$preGetBlockStateOn',
+                'private BlockState sable$getBlockStateOnFromSubLevel',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, localBlockPos)',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(trackingSubLevel, this.getOnPos())',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(trackingSubLevel, pos)',
+                'cir.setReturnValue(state)'
+        ].each { canary ->
+            if (!stickEffectsText.contains(canary)) {
+                throw new GradleException("entities_stick_sublevels effects EntityMixin lost Sable-aware getOnPos/getBlockStateOn canary: ${canary}")
+            }
+        }
+        if (stickEffectsText.contains('this.level.getBlockState(localBlockPos)')
+                || stickEffectsText.contains('level().getBlockState(localBlockPos)')) {
+            throw new GradleException('entities_stick_sublevels effects EntityMixin still loads local plot coordinates through parent Level')
+        }
+
+        if (!subLevelCollisionText.contains('SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, localBlockPos)')) {
+            throw new GradleException('entity_sublevel_collision EntityMixin no longer resolves feet block state through plot-chunk lookup')
+        }
+        if (subLevelCollisionText.contains('this.level().getBlockState(localBlockPos)')
+                || subLevelCollisionText.contains('this.level.getBlockState(localBlockPos)')) {
+            throw new GradleException('entity_sublevel_collision EntityMixin still loads local plot coordinates through parent Level')
+        }
+
+        [
+                'SubLevelBlockStateLookup.getBlockStateOrAir(intersecting, mutableBlockPos)',
+                'if (blockState.isAir())',
+                'continue;'
+        ].each { canary ->
+            if (!entitiesInBlocksText.contains(canary)) {
+                throw new GradleException("entities_in_blocks EntityMixin lost plot-aware inside-block canary: ${canary}")
+            }
+        }
+        if (entitiesInBlocksText.contains('this.level.hasChunksAt(minPos, maxPos)')
+                || entitiesInBlocksText.contains('this.level.getBlockState(mutableBlockPos)')) {
+            throw new GradleException('entities_in_blocks EntityMixin still probes transformed plot bounds through parent Level')
+        }
+
+        File climbingClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/mixin/climbing_sub_levels/LivingEntityMixin.class').get().asFile
+        File serverChunkCacheClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/mixin/plot/ServerChunkCacheMixin.class').get().asFile
+        File clipHelperClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/mixinhelpers/clip_overwrite/BlockGetterClipHelper.class').get().asFile
+        if (!serverChunkCacheClass.isFile()) {
+            throw new GradleException("Compiled ServerChunkCacheMixin is missing: ${serverChunkCacheClass}")
+        }
+        if (!climbingClass.isFile()) {
+            throw new GradleException("Compiled climbing_sub_levels LivingEntityMixin is missing: ${climbingClass}")
+        }
+        if (!clipHelperClass.isFile()) {
+            throw new GradleException("Compiled BlockGetterClipHelper is missing: ${clipHelperClass}")
+        }
+        String serverChunkCacheClassText = new String(serverChunkCacheClass.bytes, StandardCharsets.ISO_8859_1)
+        String climbingClassText = new String(climbingClass.bytes, StandardCharsets.ISO_8859_1)
+        String clipHelperClassText = new String(clipHelperClass.bytes, StandardCharsets.ISO_8859_1)
+        if (!serverChunkCacheClassText.contains('sable$getChunk')
+                || !serverChunkCacheClassText.contains('getChunk')
+                || !serverChunkCacheClassText.contains('sable$emptyChunk')) {
+            throw new GradleException('Compiled ServerChunkCacheMixin does not retain generic getChunk plot-cache interception')
+        }
+        if (!climbingClassText.contains('sable$redirectPos')
+                || !climbingClassText.contains('SubLevelBlockStateLookup')
+                || !climbingClassText.contains('getBlockStateOrAir')) {
+            throw new GradleException('Compiled climbing_sub_levels LivingEntityMixin redirectPos does not retain plot-aware lookup bytecode canaries')
+        }
+        if (!clipHelperClassText.contains('lambda$originalClip$0')
+                || !clipHelperClassText.contains('SubLevelBlockStateLookup')
+                || !clipHelperClassText.contains('getBlockStateOrLevel')
+                || !clipHelperClassText.contains('getFluidStateOrLevel')) {
+            throw new GradleException('Compiled BlockGetterClipHelper originalClip lambda does not retain generic plot-aware block/fluid lookup canaries')
+        }
+
+        logger.lifecycle('verifySubLevelEntityCollisionBoundary PASS: generic ServerChunkCache.getChunk plot boundary, '
+                + 'LivingEntity.getBlockSpeedFactor/travel plot-coordinate coverage, getOnPos/getBlockStateOn, '
+                + 'feet-block state, climbing redirectPos, clip originalClip lambda, and adjacent active transformed-position '
+                + 'queries use plot-chunk lookup and cannot force parent ServerChunkCache loading for internal plot coordinates')
+    }
+}
+
+tasks.register('verifyBasicSubLevelRenderLifecycle') {
+    group = 'forge backport'
+    description = 'Verifies retained basic single-block rendering reads client plot storage and remains wired without deferred render features.'
+    dependsOn tasks.named('compileJava')
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableClientPacketHandlers.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/ClientChunkCacheMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/sublevel_render/LevelRendererMixin.java'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClient.java')
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java')
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ClientSubLevel.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/SubLevelRenderDispatcher.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/SingleBlockSubLevelWrapper.java'))
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/platform/SableSubLevelRenderPlatformImpl.java')
+
+    doLast {
+        String lookupText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java')
+                .getText('UTF-8')
+        String clientPacketText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableClientPacketHandlers.java')
+                .getText('UTF-8')
+        String clientChunkCacheText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/ClientChunkCacheMixin.java')
+                .getText('UTF-8')
+        String levelRendererMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/sublevel_render/LevelRendererMixin.java')
+                .getText('UTF-8')
+        String mixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String forgeClientText = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClient.java')
+                .getText('UTF-8')
+        String forgeRenderEventsText = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java')
+                .getText('UTF-8')
+        String clientSubLevelText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ClientSubLevel.java')
+                .getText('UTF-8')
+        String renderDispatcherInterfaceText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/SubLevelRenderDispatcher.java')
+                .getText('UTF-8')
+        String dispatcherText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java')
+                .getText('UTF-8')
+        String singleRenderText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java')
+                .getText('UTF-8')
+        String wrapperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/SingleBlockSubLevelWrapper.java')
+                .getText('UTF-8')
+        String platformText = file('src/main/java/dev/ryanhcode/sable/forge/platform/SableSubLevelRenderPlatformImpl.java')
+                .getText('UTF-8')
+
+        [
+                'SABLE_CLIENT phase=sublevel_create_received',
+                'SABLE_CLIENT phase=sublevel_registered',
+                'SABLE_CLIENT phase=sublevel_finalized',
+                'clientContainer.allocateSubLevel',
+                'subLevel.updateRenderData()'
+        ].each { canary ->
+            if (!clientPacketText.contains(canary)) {
+                throw new GradleException("SableClientPacketHandlers lost client tracking/render lifecycle diagnostic canary: ${canary}")
+            }
+        }
+        [
+                'SABLE_CLIENT phase=block_state_received',
+                'container.newPopulatedChunk(chunkPos, levelChunk)',
+                'SableChunkEventPlatform.INSTANCE.onClientChunkPacketReplaced(levelChunk)',
+                'chunk.getBlockState(pos)'
+        ].each { canary ->
+            if (!clientChunkCacheText.contains(canary)) {
+                throw new GradleException("ClientChunkCacheMixin lost client plot chunk/state diagnostic canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('"sublevel_render.LevelRendererMixin"')) {
+            throw new GradleException('Enabled production mixin config no longer installs the retained LevelRenderer render entry point')
+        }
+        if (levelRendererMixinText.contains('@Inject(method = "renderSectionLayer"')
+                || levelRendererMixinText.contains('@Inject(method = "renderChunkLayer"')
+                || levelRendererMixinText.contains('sable$renderSubLevelSectionLayer')) {
+            throw new GradleException('Retained LevelRendererMixin must not inject into LevelRenderer renderSectionLayer/renderChunkLayer internals')
+        }
+        if (levelRendererMixinText.contains('foundry.veil.')) {
+            throw new GradleException('Retained LevelRendererMixin must remain Veil-free')
+        }
+        [
+                'SableForgeClientRenderEvents.register();'
+        ].each { canary ->
+            if (!forgeClientText.contains(canary)) {
+                throw new GradleException("SableForgeClient lost Forge render event registration canary: ${canary}")
+            }
+        }
+        [
+                'RenderLevelStageEvent',
+                'MinecraftForge.EVENT_BUS.<RenderLevelStageEvent>addListener',
+                'RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS',
+                'RenderType.solid()',
+                'SubLevelRenderDispatcher.get().renderBasicSingleBlockLayer',
+                'event.getPoseStack().last().pose()',
+                'event.getProjectionMatrix()',
+                'event.getPartialTick()'
+        ].each { canary ->
+            if (!forgeRenderEventsText.contains(canary)) {
+                throw new GradleException("SableForgeClientRenderEvents lost Forge RenderLevelStageEvent dispatch canary: ${canary}")
+            }
+        }
+        [
+                'this.renderData = SubLevelRenderDispatcher.get().createRenderData(this)',
+                'this.renderData = SubLevelRenderDispatcher.get().resize(this, this.renderData)',
+                'public SubLevelRenderData getRenderData()'
+        ].each { canary ->
+            if (!clientSubLevelText.contains(canary)) {
+                throw new GradleException("ClientSubLevel lost render lifecycle canary: ${canary}")
+            }
+        }
+        [
+                'isSingleBlock',
+                'new VanillaSingleSubLevelRenderData(subLevel)',
+                'renderBasicSingleBlockLayer',
+                'renderAfterSections',
+                'renderSingleBlock(layer, consumer, modelView, cameraX, cameraY, cameraZ)',
+                'SABLE_RENDER phase=dispatch'
+        ].each { canary ->
+            if (!dispatcherText.contains(canary)) {
+                throw new GradleException("VanillaSubLevelRenderDispatcher lost basic single-block canary: ${canary}")
+            }
+        }
+        if (!dispatcherText.contains('SubLevelBlockStateLookup.getBlockStateOrAir(')) {
+            throw new GradleException('VanillaSubLevelRenderDispatcher isSingleBlock no longer reads plot storage')
+        }
+        if (dispatcherText.contains('subLevel.getLevel().getBlockState(new BlockPos(bounds.minX()')) {
+            throw new GradleException('VanillaSubLevelRenderDispatcher regressed to parent client-level lookup for single-block state')
+        }
+        if (!renderDispatcherInterfaceText.contains('renderBasicSingleBlockLayer')) {
+            throw new GradleException('SubLevelRenderDispatcher lost Forge-event basic single-block entry point')
+        }
+        [
+                'SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, pos)',
+                'SubLevelBlockStateLookup.getBlockEntity(this.subLevel, pos)',
+                'this.singleBlockState = blockState',
+                'SableSubLevelRenderPlatform.INSTANCE.getRenderLayers',
+                'SableSubLevelRenderPlatform.INSTANCE.tesselateBlock',
+                'SABLE_RENDER phase=state',
+                'SABLE_RENDER phase=draw'
+        ].each { canary ->
+            if (!singleRenderText.contains(canary)) {
+                throw new GradleException("VanillaSingleSubLevelRenderData lost plot-aware render canary: ${canary}")
+            }
+        }
+        if (singleRenderText.contains('this.subLevel.getLevel().getBlockState(pos)')
+                || singleRenderText.contains('this.subLevel.getLevel().getBlockEntity(pos)')) {
+            throw new GradleException('VanillaSingleSubLevelRenderData still reads single-block state/entity through parent client level')
+        }
+        [
+                'public final class SingleBlockSubLevelWrapper implements BlockAndTintGetter',
+                'return this.state',
+                'return Blocks.AIR.defaultBlockState()'
+        ].each { canary ->
+            if (!wrapperText.contains(canary)) {
+                throw new GradleException("SingleBlockSubLevelWrapper lost retained single-block wrapper canary: ${canary}")
+            }
+        }
+        [
+                'bakedModel.getModelData',
+                'bakedModel.getRenderTypes',
+                'getBlockRenderer().getModelRenderer().tesselateWithoutAO',
+                'Flywheel 0.6 visual registration is deferred; vanilla single-block rendering remains available.'
+        ].each { canary ->
+            if (!platformText.contains(canary)) {
+                throw new GradleException("SableSubLevelRenderPlatformImpl lost Forge basic-render canary: ${canary}")
+            }
+        }
+        if (!lookupText.contains('getBlockEntity')) {
+            throw new GradleException('SubLevelBlockStateLookup no longer exposes plot-aware block entity lookup for basic rendering')
+        }
+
+        File packetHandlersClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/network/tcp/SableClientPacketHandlers.class').get().asFile
+        File clientChunkCacheMixinClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/mixin/plot/ClientChunkCacheMixin.class').get().asFile
+        File levelRendererMixinClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/mixin/sublevel_render/LevelRendererMixin.class').get().asFile
+        File forgeRenderEventsClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.class').get().asFile
+        File dispatcherClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.class').get().asFile
+        File singleRenderClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.class').get().asFile
+        File renderPlatformClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/forge/platform/SableSubLevelRenderPlatformImpl.class').get().asFile
+        [
+                packetHandlersClass,
+                clientChunkCacheMixinClass,
+                levelRendererMixinClass,
+                forgeRenderEventsClass,
+                dispatcherClass,
+                singleRenderClass,
+                renderPlatformClass
+        ].each { classFile ->
+            if (!classFile.isFile()) {
+                throw new GradleException("Missing compiled render lifecycle diagnostic class: ${classFile}")
+            }
+        }
+        String renderClassCanaries = [
+                new String(packetHandlersClass.bytes, StandardCharsets.ISO_8859_1),
+                new String(clientChunkCacheMixinClass.bytes, StandardCharsets.ISO_8859_1),
+                new String(levelRendererMixinClass.bytes, StandardCharsets.ISO_8859_1),
+                new String(forgeRenderEventsClass.bytes, StandardCharsets.ISO_8859_1),
+                new String(dispatcherClass.bytes, StandardCharsets.ISO_8859_1),
+                new String(singleRenderClass.bytes, StandardCharsets.ISO_8859_1),
+                new String(renderPlatformClass.bytes, StandardCharsets.ISO_8859_1)
+        ].join('\n')
+        if (renderClassCanaries.contains('renderChunkLayer')
+                || renderClassCanaries.contains('renderSectionLayer(Lnet/minecraft/client/renderer/RenderType;')) {
+            throw new GradleException('Compiled retained basic render path still contains unsafe LevelRenderer internal layer hook')
+        }
+        [
+                'SableForgeClientRenderEvents',
+                'RenderLevelStageEvent',
+                'AFTER_SOLID_BLOCKS',
+                'renderBasicSingleBlockLayer',
+                'SABLE_CLIENT phase=sublevel_create_received',
+                'SABLE_CLIENT phase=sublevel_registered',
+                'SABLE_CLIENT phase=block_state_received',
+                'SABLE_CLIENT phase=sublevel_finalized',
+                'SABLE_RENDER phase=dispatch',
+                'SABLE_RENDER phase=state',
+                'SABLE_RENDER phase=draw'
+        ].each { canary ->
+            if (!renderClassCanaries.contains(canary)) {
+                throw new GradleException("Compiled basic render lifecycle classes lost runtime diagnostic canary: ${canary}")
+            }
+        }
+        String renderPlatformClassText = new String(renderPlatformClass.bytes, StandardCharsets.ISO_8859_1)
+        if (renderPlatformClassText.contains('f_110900_') || renderPlatformClassText.contains('modelRenderer')) {
+            throw new GradleException('Compiled SableSubLevelRenderPlatformImpl still directly references BlockRenderDispatcher.modelRenderer/f_110900_')
+        }
+        if (!renderPlatformClassText.contains('getModelRenderer')) {
+            throw new GradleException('Compiled SableSubLevelRenderPlatformImpl lost public getModelRenderer() render boundary')
+        }
+
+        logger.lifecycle('verifyBasicSubLevelRenderLifecycle PASS: Forge RenderLevelStageEvent AFTER_SOLID_BLOCKS '
+                + 'drives retained vanilla single-block render dispatch, reads state/block entities from client plot storage, '
+                + 'logs create/register/chunk/finalize/dispatch/state/draw for the next runtime, rejects unsafe '
+                + 'LevelRenderer renderSectionLayer/renderChunkLayer injection, and still avoids deferred chunked/advanced rendering')
+    }
+}
+
 tasks.register('verifyAttributeRegistrationBoundary') {
     group = 'forge backport'
     description = 'Verifies M9.3 Forge attribute registration uses EntityAttributeModificationEvent, not AttributeSupplier internals.'
@@ -4341,6 +5511,772 @@ tasks.register('verifyAttributeRegistrationBoundary') {
         logger.lifecycle('verifyAttributeRegistrationBoundary PASS: EntityType.PLAYER receives '
                 + 'PUNCH_STRENGTH=1.0 and PUNCH_COOLDOWN=0.0 via EntityAttributeModificationEvent; '
                 + 'AttributeSupplier.instances/f_22241_ private access and AT entry absent')
+    }
+}
+
+tasks.register('verifyProductionMinecraftAccessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M9.4 retained production Minecraft private/protected access is backed by ATs or accessors.'
+
+    dependsOn tasks.named('reobfJar')
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+
+    inputs.file('src/main/resources/META-INF/accesstransformer-forge.cfg')
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/holding/SubLevelHoldingChunkMap.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/storage/DimensionDataStorageAccessor.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/lighting/LevelLightEngineAccessor.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/PlotChunkHolder.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/ChunkHolderAccessor.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/ChunkMapModifiedAccessor.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/ChunkMapStatusChangeInvoker.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/udp/SableUDPServer.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/udp/ServerGamePacketListenerImplAccessor.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixinhelpers/clip_overwrite/BlockGetterClipHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/ClipContextAccessor.java'))
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/platform/SableSubLevelRenderPlatformImpl.java')
+    inputs.dir(rootProject.file('common/src/main/java'))
+    inputs.dir(file('src/main/java'))
+    inputs.file(tasks.named('jar').flatMap { it.archiveFile })
+    inputs.file(standaloneProductionSableArtifact)
+
+    doLast {
+        File accessTransformer = file('src/main/resources/META-INF/accesstransformer-forge.cfg')
+        File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+        File holdingMapSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/storage/holding/SubLevelHoldingChunkMap.java')
+        File accessorSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/storage/DimensionDataStorageAccessor.java')
+        File serverLevelPlotSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java')
+        File levelLightEngineAccessorSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/plot/lighting/LevelLightEngineAccessor.java')
+        File plotChunkHolderSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/plot/PlotChunkHolder.java')
+        File chunkHolderAccessorSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/plot/ChunkHolderAccessor.java')
+        File chunkMapModifiedAccessorSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/plot/ChunkMapModifiedAccessor.java')
+        File chunkMapStatusChangeInvokerSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/plot/ChunkMapStatusChangeInvoker.java')
+        File udpServerSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/network/udp/SableUDPServer.java')
+        File serverGamePacketListenerAccessorSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/udp/ServerGamePacketListenerImplAccessor.java')
+        File blockGetterClipHelperSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixinhelpers/clip_overwrite/BlockGetterClipHelper.java')
+        File clipContextAccessorSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/ClipContextAccessor.java')
+        File renderPlatformSource = file(
+                'src/main/java/dev/ryanhcode/sable/forge/platform/SableSubLevelRenderPlatformImpl.java')
+
+        String atText = accessTransformer.getText('UTF-8')
+        String mixinConfigText = mixinConfig.getText('UTF-8')
+        String holdingMapText = holdingMapSource.getText('UTF-8')
+        String accessorText = accessorSource.getText('UTF-8')
+        String serverLevelPlotText = serverLevelPlotSource.getText('UTF-8')
+        String levelLightEngineAccessorText = levelLightEngineAccessorSource.getText('UTF-8')
+        String plotChunkHolderText = plotChunkHolderSource.getText('UTF-8')
+        String chunkHolderAccessorText = chunkHolderAccessorSource.getText('UTF-8')
+        String chunkMapModifiedAccessorText = chunkMapModifiedAccessorSource.getText('UTF-8')
+        String chunkMapStatusChangeInvokerText = chunkMapStatusChangeInvokerSource.getText('UTF-8')
+        String udpServerText = udpServerSource.getText('UTF-8')
+        String serverGamePacketListenerAccessorText = serverGamePacketListenerAccessorSource.getText('UTF-8')
+        String blockGetterClipHelperText = blockGetterClipHelperSource.getText('UTF-8')
+        String clipContextAccessorText = clipContextAccessorSource.getText('UTF-8')
+        String renderPlatformText = renderPlatformSource.getText('UTF-8')
+
+        if (holdingMapText.contains('.dataFolder') || holdingMapText.contains('f_78146_')) {
+            throw new GradleException('SubLevelHoldingChunkMap source still directly accesses DimensionDataStorage.dataFolder/f_78146_')
+        }
+        [
+                'DimensionDataStorageAccessor',
+                'sable$getDataFolder()',
+                'level.getChunkSource().getDataStorage()'
+        ].each { canary ->
+            if (!holdingMapText.contains(canary)) {
+                throw new GradleException("SubLevelHoldingChunkMap source lost accessor-backed storage canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(DimensionDataStorage.class)',
+                '@Accessor("dataFolder")',
+                'File sable$getDataFolder()'
+        ].each { canary ->
+            if (!accessorText.contains(canary)) {
+                throw new GradleException("DimensionDataStorageAccessor source lost canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('"storage.DimensionDataStorageAccessor"')) {
+            throw new GradleException('DimensionDataStorageAccessor is not enabled in the retained production mixin config')
+        }
+        if (serverLevelPlotText.contains('.blockEngine') || serverLevelPlotText.contains('.skyEngine')
+                || serverLevelPlotText.contains('f_75802_') || serverLevelPlotText.contains('f_75803_')) {
+            throw new GradleException('ServerLevelPlot source still directly accesses LevelLightEngine blockEngine/skyEngine')
+        }
+        [
+                'LevelLightEngineAccessor',
+                'sable$getBlockEngine()',
+                'sable$getSkyEngine()'
+        ].each { canary ->
+            if (!serverLevelPlotText.contains(canary)) {
+                throw new GradleException("ServerLevelPlot source lost LevelLightEngine accessor canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(LevelLightEngine.class)',
+                '@Accessor("blockEngine")',
+                '@Accessor("skyEngine")',
+                'LightEngine<?, ?> sable$getBlockEngine()',
+                'LightEngine<?, ?> sable$getSkyEngine()'
+        ].each { canary ->
+            if (!levelLightEngineAccessorText.contains(canary)) {
+                throw new GradleException("LevelLightEngineAccessor source lost canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('"plot.lighting.LevelLightEngineAccessor"')) {
+            throw new GradleException('LevelLightEngineAccessor is not enabled in the retained production mixin config')
+        }
+        if (plotChunkHolderText.contains('this.tickingChunkFuture')
+                || plotChunkHolderText.contains('this.entityTickingChunkFuture')
+                || plotChunkHolderText.contains('this.fullChunkFuture')
+                || plotChunkHolderText.contains('f_140002_')
+                || plotChunkHolderText.contains('f_140003_')
+                || plotChunkHolderText.contains('f_140004_')) {
+            throw new GradleException('PlotChunkHolder source still directly accesses ChunkHolder loaded-future fields')
+        }
+        [
+                'ChunkHolderAccessor',
+                'sable$setTickingChunkFuture',
+                'sable$setEntityTickingChunkFuture',
+                'sable$setFullChunkFuture'
+        ].each { canary ->
+            if (!plotChunkHolderText.contains(canary)) {
+                throw new GradleException("PlotChunkHolder source lost ChunkHolder accessor canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(ChunkHolder.class)',
+                '@Accessor("entityTickingChunkFuture")',
+                '@Accessor("tickingChunkFuture")',
+                '@Accessor("fullChunkFuture")',
+                'sable$setEntityTickingChunkFuture',
+                'sable$setTickingChunkFuture',
+                'sable$setFullChunkFuture'
+        ].each { canary ->
+            if (!chunkHolderAccessorText.contains(canary)) {
+                throw new GradleException("ChunkHolderAccessor source lost canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('"plot.ChunkHolderAccessor"')) {
+            throw new GradleException('ChunkHolderAccessor is not enabled in the retained production mixin config')
+        }
+        if (serverLevelPlotText.contains('.modified') || serverLevelPlotText.contains('f_140140_')) {
+            throw new GradleException('ServerLevelPlot source still directly accesses ChunkMap.modified/f_140140_')
+        }
+        if (serverLevelPlotText.contains('.onFullChunkStatusChange') || serverLevelPlotText.contains('m_287285_')) {
+            throw new GradleException('ServerLevelPlot source still directly calls ChunkMap.onFullChunkStatusChange/m_287285_')
+        }
+        [
+                'ChunkMapModifiedAccessor',
+                'sable$setModified(true)'
+        ].each { canary ->
+            if (!serverLevelPlotText.contains(canary)) {
+                throw new GradleException("ServerLevelPlot source lost ChunkMap.modified accessor canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(ChunkMap.class)',
+                '@Accessor("modified")',
+                'void sable$setModified(boolean modified)'
+        ].each { canary ->
+            if (!chunkMapModifiedAccessorText.contains(canary)) {
+                throw new GradleException("ChunkMapModifiedAccessor source lost canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('"plot.ChunkMapModifiedAccessor"')) {
+            throw new GradleException('ChunkMapModifiedAccessor is not enabled in the retained production mixin config')
+        }
+        [
+                'ChunkMapStatusChangeInvoker',
+                'sable$callOnFullChunkStatusChange'
+        ].each { canary ->
+            if (!serverLevelPlotText.contains(canary)) {
+                throw new GradleException("ServerLevelPlot source lost ChunkMap status invoker canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(ChunkMap.class)',
+                '@Invoker("onFullChunkStatusChange")',
+                'void sable$callOnFullChunkStatusChange(ChunkPos chunkPos, FullChunkStatus fullChunkStatus)'
+        ].each { canary ->
+            if (!chunkMapStatusChangeInvokerText.contains(canary)) {
+                throw new GradleException("ChunkMapStatusChangeInvoker source lost canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('"plot.ChunkMapStatusChangeInvoker"')) {
+            throw new GradleException('ChunkMapStatusChangeInvoker is not enabled in the retained production mixin config')
+        }
+        if (udpServerText.contains('player.connection.connection') || udpServerText.contains('f_9742_')) {
+            throw new GradleException('SableUDPServer source still directly accesses ServerGamePacketListenerImpl.connection/f_9742_')
+        }
+        [
+                'ServerGamePacketListenerImplAccessor',
+                'sable$getConnection()',
+                'private static Connection getConnection(final ServerPlayer player)'
+        ].each { canary ->
+            if (!udpServerText.contains(canary)) {
+                throw new GradleException("SableUDPServer source lost connection accessor canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(ServerGamePacketListenerImpl.class)',
+                '@Accessor("connection")',
+                'Connection sable$getConnection()'
+        ].each { canary ->
+            if (!serverGamePacketListenerAccessorText.contains(canary)) {
+                throw new GradleException("ServerGamePacketListenerImplAccessor source lost canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('"udp.ServerGamePacketListenerImplAccessor"')) {
+            throw new GradleException('ServerGamePacketListenerImplAccessor is not enabled in the retained production mixin config')
+        }
+        if (blockGetterClipHelperText.contains('source.block')
+                || blockGetterClipHelperText.contains('source.fluid')
+                || blockGetterClipHelperText.contains('source.collisionContext')
+                || blockGetterClipHelperText.contains('f_45684_')
+                || blockGetterClipHelperText.contains('f_45685_')
+                || blockGetterClipHelperText.contains('f_45686_')) {
+            throw new GradleException('BlockGetterClipHelper source still directly accesses ClipContext private block/fluid/collisionContext fields')
+        }
+        [
+                'ClipContextAccessor',
+                'sable$getBlock()',
+                'sable$getFluid()',
+                'sable$getCollisionContext()',
+                'new ClipContext(from, to, accessor.sable$getBlock(), accessor.sable$getFluid(), entity)'
+        ].each { canary ->
+            if (!blockGetterClipHelperText.contains(canary)) {
+                throw new GradleException("BlockGetterClipHelper source lost ClipContext accessor/public getter canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(ClipContext.class)',
+                '@Accessor("block")',
+                '@Accessor("fluid")',
+                '@Accessor("collisionContext")',
+                'ClipContext.Block sable$getBlock()',
+                'ClipContext.Fluid sable$getFluid()',
+                'CollisionContext sable$getCollisionContext()'
+        ].each { canary ->
+            if (!clipContextAccessorText.contains(canary)) {
+                throw new GradleException("ClipContextAccessor source lost canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('"clip_overwrite.ClipContextAccessor"')) {
+            throw new GradleException('ClipContextAccessor is not enabled in the retained production mixin config')
+        }
+        if (renderPlatformText.contains('.modelRenderer') || renderPlatformText.contains('f_110900_')) {
+            throw new GradleException('SableSubLevelRenderPlatformImpl source still directly accesses BlockRenderDispatcher.modelRenderer/f_110900_')
+        }
+        [
+                'getBlockRenderer().getModelRenderer().tesselateWithoutAO',
+                'bakedModel.getModelData',
+                'bakedModel.getRenderTypes'
+        ].each { canary ->
+            if (!renderPlatformText.contains(canary)) {
+                throw new GradleException("SableSubLevelRenderPlatformImpl lost public BlockRenderDispatcher render canary: ${canary}")
+            }
+        }
+        [
+                'DimensionDataStorage f_78146_',
+                'DimensionDataStorage dataFolder',
+                'AttributeSupplier f_22241_',
+                'AttributeSupplier instances',
+                'LevelLightEngine f_75802_',
+                'LevelLightEngine f_75803_',
+                'LevelLightEngine blockEngine',
+                'LevelLightEngine skyEngine',
+                'ChunkHolder f_140002_',
+                'ChunkHolder f_140003_',
+                'ChunkHolder f_140004_',
+                'ChunkHolder fullChunkFuture',
+                'ChunkHolder tickingChunkFuture',
+                'ChunkHolder entityTickingChunkFuture',
+                'ChunkMap f_140140_',
+                'ChunkMap modified',
+                'ChunkMap m_287285_',
+                'ChunkMap onFullChunkStatusChange',
+                'ServerGamePacketListenerImpl f_9742_',
+                'ServerGamePacketListenerImpl connection',
+                'ClipContext f_45684_',
+                'ClipContext f_45685_',
+                'ClipContext f_45686_',
+                'ClipContext block',
+                'ClipContext fluid',
+                'ClipContext collisionContext'
+        ].each { obsolete ->
+            if (atText.contains(obsolete)) {
+                throw new GradleException("Access transformer still contains obsolete direct-access entry: ${obsolete}")
+            }
+        }
+
+        def staleNamedAtEntries = []
+        int atMemberEntries = 0
+        atText.readLines().eachWithIndex { line, index ->
+            String body = line.split('#', 2)[0].trim()
+            if (body.isEmpty()) {
+                return
+            }
+            String[] tokens = body.split(/\s+/)
+            if (tokens.length < 3) {
+                return
+            }
+            String owner = tokens[1]
+            String memberToken = tokens[2]
+            if (!owner.startsWith('net.minecraft.')) {
+                return
+            }
+            atMemberEntries++
+            String memberName = memberToken.contains('(') ? memberToken.substring(0, memberToken.indexOf('(')) : memberToken
+            if (memberName == '<init>') {
+                return
+            }
+            if (!(memberName ==~ /^[fm]_\d+_$/)) {
+                staleNamedAtEntries.add("${index + 1}:${owner}.${memberToken}")
+            }
+        }
+        if (!staleNamedAtEntries.isEmpty()) {
+            throw new GradleException("AT contains named/non-SRG Minecraft member entries in production file: ${staleNamedAtEntries}")
+        }
+        Set<String> atMembers = [] as Set
+        atText.readLines().each { line ->
+            String body = line.split('#', 2)[0].trim()
+            if (body.isEmpty()) {
+                return
+            }
+            String[] tokens = body.split(/\s+/)
+            if (tokens.length < 3) {
+                return
+            }
+            String owner = tokens[1]
+            String memberToken = tokens[2]
+            if (!owner.startsWith('net.minecraft.')) {
+                return
+            }
+            String internalOwner = owner.replace('.', '/')
+            if (memberToken.contains('(')) {
+                String memberName = memberToken.substring(0, memberToken.indexOf('('))
+                String descriptor = memberToken.substring(memberToken.indexOf('('))
+                atMembers.add("${internalOwner}.${memberName}${descriptor}".toString())
+            } else {
+                atMembers.add("${internalOwner}.${memberToken}".toString())
+            }
+        }
+
+        def reflectionHits = []
+        [rootProject.file('common/src/main/java'), file('src/main/java')].each { sourceRoot ->
+            if (!sourceRoot.isDirectory()) {
+                return
+            }
+            fileTree(sourceRoot) { include '**/*.java' }.files.each { sourceFile ->
+                String text = sourceFile.getText('UTF-8')
+                if (text.contains('getDeclaredField') || text.contains('setAccessible')
+                        || text.contains('MethodHandles.privateLookupIn')) {
+                    reflectionHits.add(sourceRoot.toPath().relativize(sourceFile.toPath()).toString().replace('\\', '/'))
+                }
+            }
+        }
+        if (!reflectionHits.isEmpty()) {
+            throw new GradleException("Retained source contains reflection/private-lookup access workarounds: ${reflectionHits}")
+        }
+        ProductionMinecraftAccessVerifier.verifyVisibilitySelfTest()
+
+        def verifyJar = { File jar ->
+            if (!jar.isFile()) {
+                throw new GradleException("Missing Forge production artifact for access-boundary verification: ${jar}")
+            }
+            JarFile jarFile = new JarFile(jar)
+            try {
+                def holdingEntry = jarFile.getJarEntry(
+                        'dev/ryanhcode/sable/sublevel/storage/holding/SubLevelHoldingChunkMap.class')
+                if (holdingEntry == null) {
+                    throw new GradleException("${jar.name} is missing SubLevelHoldingChunkMap.class")
+                }
+                String holdingClassText = new String(jarFile.getInputStream(holdingEntry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                if (holdingClassText.contains('f_78146_') || holdingClassText.contains('dataFolder')) {
+                    throw new GradleException("${jar.name} SubLevelHoldingChunkMap still contains direct DimensionDataStorage dataFolder/f_78146_ access")
+                }
+                if (!holdingClassText.contains('DimensionDataStorageAccessor')
+                        || !holdingClassText.contains('sable$getDataFolder')) {
+                    throw new GradleException("${jar.name} SubLevelHoldingChunkMap does not call the accessor-backed data folder bridge")
+                }
+
+                def accessorEntries = jarFile.entries().toList().findAll {
+                    it.name == 'dev/ryanhcode/sable/mixin/storage/DimensionDataStorageAccessor.class'
+                }
+                if (accessorEntries.size() != 1) {
+                    throw new GradleException("${jar.name} expected exactly one DimensionDataStorageAccessor.class, found ${accessorEntries.size()}")
+                }
+
+                def plotEntry = jarFile.getJarEntry('dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.class')
+                if (plotEntry == null) {
+                    throw new GradleException("${jar.name} is missing ServerLevelPlot.class")
+                }
+                def lightAccesses = ProductionMinecraftAccessVerifier.directLevelLightEngineFieldAccesses(
+                        jarFile.getInputStream(plotEntry).readAllBytes())
+                if (!lightAccesses.isEmpty()) {
+                    throw new GradleException("${jar.name} ServerLevelPlot still directly accesses private LevelLightEngine fields: ${lightAccesses}")
+                }
+                String plotClassText = new String(jarFile.getInputStream(plotEntry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                if (!plotClassText.contains('LevelLightEngineAccessor')
+                        || !plotClassText.contains('sable$getBlockEngine')
+                        || !plotClassText.contains('sable$getSkyEngine')) {
+                    throw new GradleException("${jar.name} ServerLevelPlot does not call the LevelLightEngine accessor bridge")
+                }
+                def serverPlotFieldAccesses = ProductionMinecraftAccessVerifier.directAccessorManagedFieldAccesses(
+                        jarFile.getInputStream(plotEntry).readAllBytes())
+                if (!serverPlotFieldAccesses.isEmpty()) {
+                    throw new GradleException("${jar.name} ServerLevelPlot still directly accesses private accessor-managed fields: ${serverPlotFieldAccesses}")
+                }
+                def serverPlotMethodAccesses = ProductionMinecraftAccessVerifier.directAccessorManagedMethodAccesses(
+                        jarFile.getInputStream(plotEntry).readAllBytes())
+                if (!serverPlotMethodAccesses.isEmpty()) {
+                    throw new GradleException("${jar.name} ServerLevelPlot still directly calls invoker-managed package-private Minecraft methods: ${serverPlotMethodAccesses}")
+                }
+                if (!plotClassText.contains('ChunkMapModifiedAccessor')
+                        || !plotClassText.contains('sable$setModified')) {
+                    throw new GradleException("${jar.name} ServerLevelPlot does not call the ChunkMap.modified accessor bridge")
+                }
+                if (!plotClassText.contains('ChunkMapStatusChangeInvoker')
+                        || !plotClassText.contains('sable$callOnFullChunkStatusChange')) {
+                    throw new GradleException("${jar.name} ServerLevelPlot does not call the ChunkMap status-change invoker bridge")
+                }
+
+                def lightAccessorEntries = jarFile.entries().toList().findAll {
+                    it.name == 'dev/ryanhcode/sable/mixin/plot/lighting/LevelLightEngineAccessor.class'
+                }
+                if (lightAccessorEntries.size() != 1) {
+                    throw new GradleException("${jar.name} expected exactly one LevelLightEngineAccessor.class, found ${lightAccessorEntries.size()}")
+                }
+
+                def plotChunkHolderEntry = jarFile.getJarEntry('dev/ryanhcode/sable/sublevel/plot/PlotChunkHolder.class')
+                if (plotChunkHolderEntry == null) {
+                    throw new GradleException("${jar.name} is missing PlotChunkHolder.class")
+                }
+                byte[] plotChunkHolderBytes = jarFile.getInputStream(plotChunkHolderEntry).readAllBytes()
+                def plotChunkHolderFieldAccesses = ProductionMinecraftAccessVerifier.directAccessorManagedFieldAccesses(
+                        plotChunkHolderBytes)
+                if (!plotChunkHolderFieldAccesses.isEmpty()) {
+                    throw new GradleException("${jar.name} PlotChunkHolder still directly accesses private accessor-managed fields: ${plotChunkHolderFieldAccesses}")
+                }
+                String plotChunkHolderClassText = new String(plotChunkHolderBytes, StandardCharsets.ISO_8859_1)
+                if (!plotChunkHolderClassText.contains('ChunkHolderAccessor')
+                        || !plotChunkHolderClassText.contains('sable$setTickingChunkFuture')
+                        || !plotChunkHolderClassText.contains('sable$setEntityTickingChunkFuture')
+                        || !plotChunkHolderClassText.contains('sable$setFullChunkFuture')) {
+                    throw new GradleException("${jar.name} PlotChunkHolder does not call the ChunkHolder accessor bridge")
+                }
+
+                def chunkHolderAccessorEntries = jarFile.entries().toList().findAll {
+                    it.name == 'dev/ryanhcode/sable/mixin/plot/ChunkHolderAccessor.class'
+                }
+                if (chunkHolderAccessorEntries.size() != 1) {
+                    throw new GradleException("${jar.name} expected exactly one ChunkHolderAccessor.class, found ${chunkHolderAccessorEntries.size()}")
+                }
+
+                def chunkMapModifiedAccessorEntries = jarFile.entries().toList().findAll {
+                    it.name == 'dev/ryanhcode/sable/mixin/plot/ChunkMapModifiedAccessor.class'
+                }
+                if (chunkMapModifiedAccessorEntries.size() != 1) {
+                    throw new GradleException("${jar.name} expected exactly one ChunkMapModifiedAccessor.class, found ${chunkMapModifiedAccessorEntries.size()}")
+                }
+
+                def chunkMapStatusChangeInvokerEntries = jarFile.entries().toList().findAll {
+                    it.name == 'dev/ryanhcode/sable/mixin/plot/ChunkMapStatusChangeInvoker.class'
+                }
+                if (chunkMapStatusChangeInvokerEntries.size() != 1) {
+                    throw new GradleException("${jar.name} expected exactly one ChunkMapStatusChangeInvoker.class, found ${chunkMapStatusChangeInvokerEntries.size()}")
+                }
+
+                def udpServerEntry = jarFile.getJarEntry('dev/ryanhcode/sable/network/udp/SableUDPServer.class')
+                if (udpServerEntry == null) {
+                    throw new GradleException("${jar.name} is missing SableUDPServer.class")
+                }
+                byte[] udpServerBytes = jarFile.getInputStream(udpServerEntry).readAllBytes()
+                def udpServerFieldAccesses = ProductionMinecraftAccessVerifier.directAccessorManagedFieldAccesses(
+                        udpServerBytes)
+                if (!udpServerFieldAccesses.isEmpty()) {
+                    throw new GradleException("${jar.name} SableUDPServer still directly accesses private accessor-managed fields: ${udpServerFieldAccesses}")
+                }
+                String udpServerClassText = new String(udpServerBytes, StandardCharsets.ISO_8859_1)
+                if (!udpServerClassText.contains('ServerGamePacketListenerImplAccessor')
+                        || !udpServerClassText.contains('sable$getConnection')) {
+                    throw new GradleException("${jar.name} SableUDPServer does not call the ServerGamePacketListenerImpl connection accessor bridge")
+                }
+
+                def serverGamePacketListenerAccessorEntries = jarFile.entries().toList().findAll {
+                    it.name == 'dev/ryanhcode/sable/mixin/udp/ServerGamePacketListenerImplAccessor.class'
+                }
+                if (serverGamePacketListenerAccessorEntries.size() != 1) {
+                    throw new GradleException("${jar.name} expected exactly one ServerGamePacketListenerImplAccessor.class, found ${serverGamePacketListenerAccessorEntries.size()}")
+                }
+
+                def blockGetterClipHelperEntry = jarFile.getJarEntry(
+                        'dev/ryanhcode/sable/mixinhelpers/clip_overwrite/BlockGetterClipHelper.class')
+                if (blockGetterClipHelperEntry == null) {
+                    throw new GradleException("${jar.name} is missing BlockGetterClipHelper.class")
+                }
+                byte[] blockGetterClipHelperBytes = jarFile.getInputStream(blockGetterClipHelperEntry).readAllBytes()
+                def blockGetterClipHelperFieldAccesses = ProductionMinecraftAccessVerifier.directAccessorManagedFieldAccesses(
+                        blockGetterClipHelperBytes)
+                if (!blockGetterClipHelperFieldAccesses.isEmpty()) {
+                    throw new GradleException("${jar.name} BlockGetterClipHelper still directly accesses private accessor-managed fields: ${blockGetterClipHelperFieldAccesses}")
+                }
+                String blockGetterClipHelperClassText = new String(blockGetterClipHelperBytes, StandardCharsets.ISO_8859_1)
+                if (!blockGetterClipHelperClassText.contains('ClipContextAccessor')
+                        || !blockGetterClipHelperClassText.contains('sable$getBlock')
+                        || !blockGetterClipHelperClassText.contains('sable$getFluid')
+                        || !blockGetterClipHelperClassText.contains('sable$getCollisionContext')) {
+                    throw new GradleException("${jar.name} BlockGetterClipHelper does not call the ClipContext accessor bridge")
+                }
+
+                def clipContextAccessorEntries = jarFile.entries().toList().findAll {
+                    it.name == 'dev/ryanhcode/sable/mixin/clip_overwrite/ClipContextAccessor.class'
+                }
+                if (clipContextAccessorEntries.size() != 1) {
+                    throw new GradleException("${jar.name} expected exactly one ClipContextAccessor.class, found ${clipContextAccessorEntries.size()}")
+                }
+
+                def renderPlatformEntry = jarFile.getJarEntry(
+                        'dev/ryanhcode/sable/forge/platform/SableSubLevelRenderPlatformImpl.class')
+                if (renderPlatformEntry == null) {
+                    throw new GradleException("${jar.name} is missing SableSubLevelRenderPlatformImpl.class")
+                }
+                byte[] renderPlatformBytes = jarFile.getInputStream(renderPlatformEntry).readAllBytes()
+                def renderPlatformFieldAccesses = ProductionMinecraftAccessVerifier.directForbiddenFieldAccesses(
+                        renderPlatformBytes)
+                if (!renderPlatformFieldAccesses.isEmpty()) {
+                    throw new GradleException("${jar.name} SableSubLevelRenderPlatformImpl still directly accesses private/public-boundary fields: ${renderPlatformFieldAccesses}")
+                }
+                String renderPlatformClassText = new String(renderPlatformBytes, StandardCharsets.ISO_8859_1)
+                if (!renderPlatformClassText.contains('m_110937_')
+                        && !renderPlatformClassText.contains('getModelRenderer')) {
+                    throw new GradleException("${jar.name} SableSubLevelRenderPlatformImpl does not use the public BlockRenderDispatcher model-renderer boundary")
+                }
+                if (renderPlatformClassText.contains('f_110900_') || renderPlatformClassText.contains('modelRenderer')) {
+                    throw new GradleException("${jar.name} SableSubLevelRenderPlatformImpl still references the private BlockRenderDispatcher.modelRenderer field")
+                }
+
+                def configEntry = jarFile.getJarEntry('sable-common-forge.mixins.json')
+                if (configEntry == null) {
+                    throw new GradleException("${jar.name} is missing sable-common-forge.mixins.json")
+                }
+                String jarMixinConfigText = new String(jarFile.getInputStream(configEntry).readAllBytes(), StandardCharsets.UTF_8)
+                if (!jarMixinConfigText.contains('"storage.DimensionDataStorageAccessor"')) {
+                    throw new GradleException("${jar.name} production mixin config does not enable DimensionDataStorageAccessor")
+                }
+                if (!jarMixinConfigText.contains('"plot.lighting.LevelLightEngineAccessor"')) {
+                    throw new GradleException("${jar.name} production mixin config does not enable LevelLightEngineAccessor")
+                }
+                if (!jarMixinConfigText.contains('"plot.ChunkHolderAccessor"')) {
+                    throw new GradleException("${jar.name} production mixin config does not enable ChunkHolderAccessor")
+                }
+                if (!jarMixinConfigText.contains('"plot.ChunkMapModifiedAccessor"')) {
+                    throw new GradleException("${jar.name} production mixin config does not enable ChunkMapModifiedAccessor")
+                }
+                if (!jarMixinConfigText.contains('"plot.ChunkMapStatusChangeInvoker"')) {
+                    throw new GradleException("${jar.name} production mixin config does not enable ChunkMapStatusChangeInvoker")
+                }
+                if (!jarMixinConfigText.contains('"udp.ServerGamePacketListenerImplAccessor"')) {
+                    throw new GradleException("${jar.name} production mixin config does not enable ServerGamePacketListenerImplAccessor")
+                }
+                if (!jarMixinConfigText.contains('"clip_overwrite.ClipContextAccessor"')) {
+                    throw new GradleException("${jar.name} production mixin config does not enable ClipContextAccessor")
+                }
+
+                def refmapEntry = jarFile.getJarEntry('sable.refmap.json')
+                if (refmapEntry == null) {
+                    throw new GradleException("${jar.name} is missing sable.refmap.json")
+                }
+                String refmapText = new String(jarFile.getInputStream(refmapEntry).readAllBytes(), StandardCharsets.UTF_8)
+                if (!refmapText.contains('DimensionDataStorageAccessor')) {
+                    throw new GradleException("${jar.name} refmap does not mention DimensionDataStorageAccessor")
+                }
+                if (!refmapText.contains('LevelLightEngineAccessor')) {
+                    throw new GradleException("${jar.name} refmap does not mention LevelLightEngineAccessor")
+                }
+                if (!refmapText.contains('ChunkHolderAccessor')) {
+                    throw new GradleException("${jar.name} refmap does not mention ChunkHolderAccessor")
+                }
+                if (!refmapText.contains('ChunkMapModifiedAccessor')) {
+                    throw new GradleException("${jar.name} refmap does not mention ChunkMapModifiedAccessor")
+                }
+                if (!refmapText.contains('ChunkMapStatusChangeInvoker')) {
+                    throw new GradleException("${jar.name} refmap does not mention ChunkMapStatusChangeInvoker")
+                }
+                if (!refmapText.contains('ServerGamePacketListenerImplAccessor')) {
+                    throw new GradleException("${jar.name} refmap does not mention ServerGamePacketListenerImplAccessor")
+                }
+                if (!refmapText.contains('ClipContextAccessor')) {
+                    throw new GradleException("${jar.name} refmap does not mention ClipContextAccessor")
+                }
+
+                def atEntry = jarFile.getJarEntry('META-INF/accesstransformer-forge.cfg')
+                if (atEntry == null) {
+                    throw new GradleException("${jar.name} is missing META-INF/accesstransformer-forge.cfg")
+                }
+                String jarAtText = new String(jarFile.getInputStream(atEntry).readAllBytes(), StandardCharsets.UTF_8)
+                if (jarAtText.contains('DimensionDataStorage') || jarAtText.contains('f_78146_')
+                        || jarAtText.contains('AttributeSupplier') || jarAtText.contains('f_22241_')) {
+                    throw new GradleException("${jar.name} still ships obsolete DimensionDataStorage/AttributeSupplier AT access")
+                }
+                if (jarAtText.contains('LevelLightEngine') || jarAtText.contains('f_75802_')
+                        || jarAtText.contains('f_75803_')) {
+                    throw new GradleException("${jar.name} still ships obsolete LevelLightEngine blockEngine/skyEngine AT access")
+                }
+                if (jarAtText.contains('ChunkHolder f_140002_') || jarAtText.contains('ChunkHolder f_140003_')
+                        || jarAtText.contains('ChunkHolder f_140004_')
+                        || jarAtText.contains('ChunkHolder fullChunkFuture')
+                        || jarAtText.contains('ChunkHolder tickingChunkFuture')
+                        || jarAtText.contains('ChunkHolder entityTickingChunkFuture')) {
+                    throw new GradleException("${jar.name} still ships obsolete ChunkHolder loaded-future AT access")
+                }
+                if (jarAtText.contains('ChunkMap f_140140_') || jarAtText.contains('ChunkMap modified')) {
+                    throw new GradleException("${jar.name} still ships obsolete ChunkMap.modified AT access")
+                }
+                if (jarAtText.contains('ChunkMap m_287285_')
+                        || jarAtText.contains('ChunkMap onFullChunkStatusChange')) {
+                    throw new GradleException("${jar.name} still ships obsolete ChunkMap.onFullChunkStatusChange AT access")
+                }
+                if (jarAtText.contains('ServerGamePacketListenerImpl f_9742_')
+                        || jarAtText.contains('ServerGamePacketListenerImpl connection')) {
+                    throw new GradleException("${jar.name} still ships obsolete ServerGamePacketListenerImpl.connection AT access")
+                }
+                if (jarAtText.contains('ClipContext f_45684_') || jarAtText.contains('ClipContext f_45685_')
+                        || jarAtText.contains('ClipContext f_45686_') || jarAtText.contains('ClipContext block')
+                        || jarAtText.contains('ClipContext fluid') || jarAtText.contains('ClipContext collisionContext')) {
+                    throw new GradleException("${jar.name} still ships obsolete ClipContext block/fluid/collisionContext AT access")
+                }
+
+                File minecraftSrgJarRoot = new File(gradle.gradleUserHomeDir,
+                        "caches/forge_gradle/mcp_repo/net/minecraft/joined")
+                def minecraftSrgJars = minecraftSrgJarRoot.isDirectory()
+                        ? fileTree(minecraftSrgJarRoot) {
+                            include "**/joined-${forge_minecraft_version}-*-srg.jar"
+                        }.files.sort { left, right -> left.absolutePath <=> right.absolutePath }
+                        : []
+                if (minecraftSrgJars.isEmpty()) {
+                    throw new GradleException("Could not locate Minecraft ${forge_minecraft_version} production/SRG jar under ${minecraftSrgJarRoot}")
+                }
+                File minecraftSrgJar = minecraftSrgJars[-1]
+                File forgeBinpatchedJar = layout.buildDirectory.file('tmp/m9-inspect-forge-binpatched.jar').get().asFile
+                File forgeMappedClasses = layout.buildDirectory.dir('compileClasspath/forgeMappedClasses').get().asFile
+                File forgeUniversalJar = new File(gradle.gradleUserHomeDir,
+                        "caches/forge_gradle/maven_downloader/net/minecraftforge/forge/${forge_minecraft_version}-${forge_version}/forge-${forge_minecraft_version}-${forge_version}-universal.jar")
+                List<File> minecraftVisibilityClasspath = [minecraftSrgJar]
+                if (forgeBinpatchedJar.isFile()) {
+                    minecraftVisibilityClasspath.add(forgeBinpatchedJar)
+                }
+                if (forgeUniversalJar.isFile()) {
+                    minecraftVisibilityClasspath.add(forgeUniversalJar)
+                }
+                if (forgeMappedClasses.isDirectory()) {
+                    minecraftVisibilityClasspath.add(forgeMappedClasses)
+                }
+                def minecraftVisibility = ProductionMinecraftAccessVerifier.loadMinecraftVisibilityDatabase(
+                        minecraftVisibilityClasspath)
+
+                int auditedClasses = 0
+                int minecraftFieldReferences = 0
+                int minecraftMethodReferences = 0
+                int resolvedReferences = 0
+                int safePublicReferences = 0
+                int safeProtectedReferences = 0
+                int safePackageReferences = 0
+                int safeAtReferences = 0
+                int atBackedFieldReferences = 0
+                int atBackedMethodReferences = 0
+                int distinctMinecraftOwners = 0
+                def forbiddenDirectAccesses = []
+                def invalidPrivateAccesses = []
+                def invalidPackageAccesses = []
+                def invalidProtectedAccesses = []
+                def unresolvedAccesses = []
+                jarFile.entries().toList().findAll {
+                    it.name.startsWith('dev/ryanhcode/sable/')
+                            && it.name.endsWith('.class')
+                            && !it.name.startsWith('dev/ryanhcode/sable/physics/impl/rapier/')
+                            && !it.name.startsWith('dev/ryanhcode/sable/mixin/')
+                }.each { classEntry ->
+                    auditedClasses++
+                    def audit = ProductionMinecraftAccessVerifier.auditMinecraftMemberReferences(
+                            jarFile.getInputStream(classEntry).readAllBytes(),
+                            atMembers,
+                            minecraftVisibility)
+                    minecraftFieldReferences += audit.minecraftFieldReferences
+                    minecraftMethodReferences += audit.minecraftMethodReferences
+                    resolvedReferences += audit.resolvedReferences
+                    safePublicReferences += audit.safePublicReferences
+                    safeProtectedReferences += audit.safeProtectedReferences
+                    safePackageReferences += audit.safePackageReferences
+                    safeAtReferences += audit.safeAtReferences
+                    atBackedFieldReferences += audit.atBackedFieldReferences
+                    atBackedMethodReferences += audit.atBackedMethodReferences
+                    distinctMinecraftOwners += audit.distinctMinecraftOwners
+                    forbiddenDirectAccesses.addAll(audit.forbiddenDirectAccesses)
+                    invalidPrivateAccesses.addAll(audit.invalidPrivateAccesses)
+                    invalidPackageAccesses.addAll(audit.invalidPackageAccesses)
+                    invalidProtectedAccesses.addAll(audit.invalidProtectedAccesses)
+                    unresolvedAccesses.addAll(audit.unresolvedAccesses)
+                }
+                if (!forbiddenDirectAccesses.isEmpty()) {
+                    throw new GradleException("${jar.name} retained Sable bytecode still directly accesses accessor-managed private Minecraft fields: ${forbiddenDirectAccesses}")
+                }
+                if (!invalidPrivateAccesses.isEmpty() || !invalidPackageAccesses.isEmpty()
+                        || !invalidProtectedAccesses.isEmpty() || !unresolvedAccesses.isEmpty()) {
+                    throw new GradleException("${jar.name} retained Sable production Minecraft access audit failed: "
+                            + "invalidPrivate=${invalidPrivateAccesses.take(20)}, "
+                            + "invalidPackage=${invalidPackageAccesses.take(20)}, "
+                            + "invalidProtected=${invalidProtectedAccesses.take(20)}, "
+                            + "unresolved=${unresolvedAccesses.take(20)}")
+                }
+
+                if (jarFile.entries().toList().any { it.name.endsWith('.class') && it.name.contains('$Mockito') }) {
+                    throw new GradleException("${jar.name} appears to contain generated test/mock classes")
+                }
+                String scannedJarSha256 = sha256(jar)
+                logger.lifecycle("${jar.name} production MC access audit: "
+                        + "sha256=${scannedJarSha256}, minecraftSrgClasses=${minecraftVisibility.classCount()}, "
+                        + "auditedClasses=${auditedClasses}, minecraftFieldRefs=${minecraftFieldReferences}, "
+                        + "minecraftMethodRefs=${minecraftMethodReferences}, resolvedRefs=${resolvedReferences}, "
+                        + "safePublic=${safePublicReferences}, safeProtected=${safeProtectedReferences}, "
+                        + "safePackage=${safePackageReferences}, safeAt=${safeAtReferences}, "
+                        + "atBackedFieldRefs=${atBackedFieldReferences}, atBackedMethodRefs=${atBackedMethodReferences}, "
+                        + "distinctOwnerVisits=${distinctMinecraftOwners}, invalidRefs=0, unresolvedRefs=0, "
+                        + 'invalidAccessorManagedDirectRefs=0')
+            } finally {
+                jarFile.close()
+            }
+        }
+
+        [
+                layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}.jar").get().asFile,
+                layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}-all.jar").get().asFile
+        ].each { verifyJar(it) }
+
+        int auditedAccessMechanisms = atMemberEntries + 7
+        logger.lifecycle('verifyProductionMinecraftAccessBoundary PASS: '
+                + "auditedAccessMechanisms=${auditedAccessMechanisms}, atMemberEntries=${atMemberEntries}, "
+                + 'accessorEntries=7, DimensionDataStorage.dataFolder=f_78146_ via enabled accessor, '
+                + 'LevelLightEngine.blockEngine=f_75802_ and skyEngine=f_75803_ via enabled accessor, '
+                + 'ChunkHolder full/ticking/entity futures=f_140002_/f_140003_/f_140004_ via enabled accessor, '
+                + 'ChunkMap.modified=f_140140_ via enabled setter accessor, '
+                + 'ChunkMap.onFullChunkStatusChange=m_287285_ via enabled invoker, '
+                + 'ServerGamePacketListenerImpl.connection=f_9742_ via enabled getter accessor, '
+                + 'ClipContext block/fluid/collisionContext=f_45684_/f_45685_/f_45686_ via enabled getter accessor, '
+                + 'obsolete direct AT/direct field access absent, staleNamedAtEntries=0, reflectionWorkarounds=0')
     }
 }
 

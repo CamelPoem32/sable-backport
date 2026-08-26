@@ -14,6 +14,7 @@ import dev.ryanhcode.sable.mixinterface.entity.entity_sublevel_collision.LevelEx
 import dev.ryanhcode.sable.mixinterface.entity.entity_sublevel_collision.LivingEntityMovementExtension;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.entity_collision.SubLevelEntityCollision;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
@@ -284,7 +285,7 @@ public abstract class EntityMixin implements EntityMovementExtension {
             final SubLevel subLevel = iter.next();
             final BlockPos localBlockPos = BlockPos.containing(
                     subLevel.logicalPose().transformPositionInverse(this.position.add(0.0, 0.001, 0.0)));
-            resolvedState = this.level().getBlockState(localBlockPos);
+            resolvedState = SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, localBlockPos);
             this.sable$inBlockStatePos = localBlockPos;
         }
 

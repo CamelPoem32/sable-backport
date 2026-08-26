@@ -3,6 +3,7 @@ package dev.ryanhcode.sable.mixin.fluids_on_sub_levels;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
@@ -39,7 +40,7 @@ public class FlowingFluidMixin {
             while (subLevel.getPlot().getBoundingBox().contains(mut.getX(), mut.getY(), mut.getZ())) {
                 mut = mut.below();
 
-                if (mut.getY() < 0 || !pLevel.getBlockState(mut).isAir()) {
+                if (mut.getY() < 0 || !SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, mut).isAir()) {
                     ableToFlow = true;
                     break;
                 }

@@ -6,6 +6,7 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.client.Camera;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
@@ -45,7 +46,7 @@ public abstract class CameraMixin {
             final Iterable<SubLevel> intersecting = Sable.HELPER.getAllIntersecting((Level) this.level, bounds);
 
             for (final SubLevel subLevel : intersecting) {
-                final FogType fogType = this.sable$getFluidInCameraAt(((ClientSubLevel) subLevel).renderPose());
+                final FogType fogType = this.sable$getFluidInCameraAt(subLevel, ((ClientSubLevel) subLevel).renderPose());
 
                 if (fogType != null) {
                     cir.setReturnValue(fogType);
@@ -56,11 +57,11 @@ public abstract class CameraMixin {
     }
 
     @Unique
-    private FogType sable$getFluidInCameraAt(final Pose3dc pose) {
+    private FogType sable$getFluidInCameraAt(final SubLevel subLevel, final Pose3dc pose) {
         final Vec3 localPosition = pose.transformPositionInverse(this.position);
         final BlockPos localBlockPosition = BlockPos.containing(localPosition);
 
-        final FluidState fluidState = this.level.getFluidState(localBlockPosition);
+        final FluidState fluidState = SubLevelBlockStateLookup.getFluidStateOrEmpty(subLevel, localBlockPosition);
         if (fluidState.is(FluidTags.WATER) && localPosition.y < (double) ((float) localBlockPosition.getY() + fluidState.getHeight(this.level, localBlockPosition))) {
             return FogType.WATER;
         } else {
@@ -70,13 +71,13 @@ public abstract class CameraMixin {
                 final Vec3 localPos = pose.transformPositionInverse(this.position.add(planeDir));
 
                 final BlockPos blockPos = BlockPos.containing(localPos);
-                final FluidState fluidState2 = this.level.getFluidState(blockPos);
+                final FluidState fluidState2 = SubLevelBlockStateLookup.getFluidStateOrEmpty(subLevel, blockPos);
                 if (fluidState2.is(FluidTags.LAVA)) {
                     if (localPos.y <= (double) (fluidState2.getHeight(this.level, blockPos) + (float) blockPos.getY())) {
                         return FogType.LAVA;
                     }
                 } else {
-                    final BlockState blockState = this.level.getBlockState(blockPos);
+                    final BlockState blockState = SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, blockPos);
                     if (blockState.is(Blocks.POWDER_SNOW)) {
                         return FogType.POWDER_SNOW;
                     }

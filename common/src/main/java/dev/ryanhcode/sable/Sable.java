@@ -48,7 +48,7 @@ public final class Sable {
      * @return a {@link ResourceLocation} with a {@link Sable#MOD_ID} namespace
      */
     public static ResourceLocation sablePath(final String path) {
-        return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
+        return new ResourceLocation(MOD_ID, path);
     }
 
     /**

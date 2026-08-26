@@ -24,7 +24,7 @@ public final class SableSubLevelRenderPlatformImpl implements SableSubLevelRende
                                final int packedOverlay, @Nullable final RenderType renderType) {
         final ModelData modelData = bakedModel.getModelData(
                 blockAndTintGetter, pos, blockState, ModelData.EMPTY);
-        Minecraft.getInstance().getBlockRenderer().modelRenderer.tesselateWithoutAO(
+        Minecraft.getInstance().getBlockRenderer().getModelRenderer().tesselateWithoutAO(
                 blockAndTintGetter, bakedModel, blockState, pos, poseStack, vertexConsumer, true, randomSource, seed,
                 packedOverlay, modelData, renderType);
     }
