@@ -85,6 +85,7 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
     private final ReferenceList<PhysicsPipelineBody> queuedWakeUps = new ReferenceArrayList<>();
     private final double[] poseCache;
     private RapierPhysicsScene scene;
+    private double universalDrag = Double.NaN;
 
     public RapierPhysicsPipeline(final ServerLevel level) {
         this.level = level;
@@ -118,6 +119,7 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
     @Override
     public void init(@Nullable final Vector3dc gravity, final double universalDrag) {
         try {
+            this.universalDrag = universalDrag;
             this.scene = new RapierPhysicsScene(Rapier3D.initialize(gravity.x(), gravity.y(), gravity.z(), universalDrag));
         } catch (final UnsatisfiedLinkError e) {
             Sable.LOGGER.error("Sable has failed to link with the natives for its Rapier pipeline. Please report with system details to " + Sable.ISSUE_TRACKER_URL, e);
@@ -136,6 +138,7 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
         if (this.scene != null) {
             Rapier3D.dispose(this.scene.handle());
             this.scene = null;
+            this.universalDrag = Double.NaN;
         }
     }
 
@@ -483,15 +486,47 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
     @Override
     public Vector3d getLinearVelocity(final PhysicsPipelineBody body, final Vector3d dest) {
         this.assertBodyValid(body);
-        Rapier3D.getLinearVelocity(this.scene.handle(), Rapier3D.getID(body), this.poseCache);
-        return dest.set(this.poseCache);
+        return this.readLinearVelocity(body, dest);
     }
 
     @Override
     public Vector3d getAngularVelocity(final PhysicsPipelineBody body, final Vector3d dest) {
         this.assertBodyValid(body);
-        Rapier3D.getAngularVelocity(this.scene.handle(), Rapier3D.getID(body), this.poseCache);
-        return dest.set(this.poseCache);
+        return this.readAngularVelocity(body, dest);
+    }
+
+    @Override
+    public double getAngularDamping(final PhysicsPipelineBody body) {
+        this.assertBodyValid(body);
+        return this.universalDrag;
+    }
+
+    @Override
+    public Boolean isSleeping(final PhysicsPipelineBody body) {
+        return null;
+    }
+
+    @Override
+    public Boolean canSleep(final PhysicsPipelineBody body) {
+        this.assertBodyValid(body);
+        return true;
+    }
+
+    @Override
+    public String getRigidBodyType(final PhysicsPipelineBody body) {
+        this.assertBodyValid(body);
+        return "dynamic";
+    }
+
+    @Override
+    public Boolean isEnabled(final PhysicsPipelineBody body) {
+        this.assertBodyValid(body);
+        return true;
+    }
+
+    @Override
+    public boolean isBodyRegistered(final PhysicsPipelineBody body) {
+        return !body.isRemoved() && this.activeSubLevels.containsKey(Rapier3D.getID(body));
     }
 
     /**
@@ -579,6 +614,16 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
         if (body.isRemoved()) {
             throw new RuntimeException("Body has been removed");
         }
+    }
+
+    private Vector3d readLinearVelocity(final PhysicsPipelineBody body, final Vector3d dest) {
+        Rapier3D.getLinearVelocity(this.scene.handle(), Rapier3D.getID(body), this.poseCache);
+        return dest.set(this.poseCache);
+    }
+
+    private Vector3d readAngularVelocity(final PhysicsPipelineBody body, final Vector3d dest) {
+        Rapier3D.getAngularVelocity(this.scene.handle(), Rapier3D.getID(body), this.poseCache);
+        return dest.set(this.poseCache);
     }
 
     private void updateContraptionPoses() {

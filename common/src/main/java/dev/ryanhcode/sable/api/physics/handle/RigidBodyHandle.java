@@ -188,6 +188,16 @@ public class RigidBodyHandle {
     }
 
     /**
+     * Replaces linear and angular velocities.
+     *
+     * @param linearVelocity  the global linear velocity to set [m/s]
+     * @param angularVelocity the global angular velocity to set [rad/s]
+     */
+    public void setLinearAndAngularVelocity(final Vector3dc linearVelocity, final Vector3dc angularVelocity) {
+        this.physicsSystem.getPipeline().setLinearAndAngularVelocity(this.body, linearVelocity, angularVelocity);
+    }
+
+    /**
      * Teleports the physics pipeline body to a given position.
      *
      * @param position    the new position to teleport to

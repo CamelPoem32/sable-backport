@@ -741,6 +741,29 @@ public final class RapierProductionJarMapper {
     }
 
     private static final class ClassHierarchy {
+        private static final Set<String> JAVA_LANG_ENUM_METHODS = Set.of(
+                "name()Ljava/lang/String;",
+                "ordinal()I",
+                "toString()Ljava/lang/String;",
+                "equals(Ljava/lang/Object;)Z",
+                "hashCode()I",
+                "compareTo(Ljava/lang/Enum;)I",
+                "getDeclaringClass()Ljava/lang/Class;",
+                "describeConstable()Ljava/util/Optional;");
+        private static final Set<String> JAVA_LANG_OBJECT_METHODS = Set.of(
+                "<init>()V",
+                "getClass()Ljava/lang/Class;",
+                "hashCode()I",
+                "equals(Ljava/lang/Object;)Z",
+                "clone()Ljava/lang/Object;",
+                "toString()Ljava/lang/String;",
+                "notify()V",
+                "notifyAll()V",
+                "wait()V",
+                "wait(J)V",
+                "wait(JI)V",
+                "finalize()V");
+
         private final Map<String, ClassInfo> classes;
         private final Map<String, List<String>> supertypes = new HashMap<>();
 
@@ -845,6 +868,13 @@ public final class RapierProductionJarMapper {
         }
 
         private boolean declaresMethod(String owner, String name, String descriptor) {
+            if ("java/lang/Enum".equals(owner)) {
+                return JAVA_LANG_ENUM_METHODS.contains(name + descriptor)
+                        || JAVA_LANG_OBJECT_METHODS.contains(name + descriptor);
+            }
+            if ("java/lang/Object".equals(owner)) {
+                return JAVA_LANG_OBJECT_METHODS.contains(name + descriptor);
+            }
             ClassInfo info = classes.get(owner);
             return info != null && info.methods.contains(name + descriptor);
         }

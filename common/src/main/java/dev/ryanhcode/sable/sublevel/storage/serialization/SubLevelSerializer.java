@@ -168,6 +168,13 @@ public class SubLevelSerializer {
 
         final SubLevelPhysicsSystem physicsSystem = plotContainer.physicsSystem();
         subLevel.logicalPose().set(pose);
+        final SubLevelPhysicsSystem.CollisionGeometryUpload collisionUpload =
+                physicsSystem.finalizeExistingSubLevelStorage(subLevel, true, "load");
+        Sable.LOGGER.info(
+                "SABLE_COLLISION phase=loaded_sublevel_initial_build id={} blocks={} uploadedSections={} "
+                        + "collisionGeometryPresent={}",
+                subLevel.getUniqueId(), collisionUpload.uploadedBlocks(), collisionUpload.uploadedSections(),
+                collisionUpload.collisionGeometryPresent());
         physicsSystem.getPipeline().teleport(subLevel, position, pose.orientation());
         subLevel.updateLastPose();
 

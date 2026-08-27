@@ -179,6 +179,18 @@ public interface PhysicsPipeline {
     }
 
     /**
+     * Replaces the linear and angular velocities of a physics pipeline body.
+     *
+     * @param body            the physics pipeline body to update
+     * @param linearVelocity  the global linear velocity to set [m/s]
+     * @param angularVelocity the global angular velocity to set [rad/s]
+     */
+    default void setLinearAndAngularVelocity(final PhysicsPipelineBody body, final Vector3dc linearVelocity, final Vector3dc angularVelocity) {
+        this.resetVelocity(body);
+        this.addLinearAndAngularVelocity(body, linearVelocity, angularVelocity);
+    }
+
+    /**
      * Resets the velocity of a physics pipeline body
      *
      * @param body the physics pipeline body to reset the velocity of
@@ -205,6 +217,54 @@ public interface PhysicsPipeline {
      */
     default Vector3d getAngularVelocity(final PhysicsPipelineBody body, final Vector3d dest) {
         return dest.zero();
+    }
+
+    /**
+     * @param body the physics pipeline body to inspect
+     * @return angular damping applied by the physics backend, or NaN if unavailable
+     */
+    default double getAngularDamping(final PhysicsPipelineBody body) {
+        return Double.NaN;
+    }
+
+    /**
+     * @param body the physics pipeline body to inspect
+     * @return sleeping state, or null if unavailable
+     */
+    default Boolean isSleeping(final PhysicsPipelineBody body) {
+        return null;
+    }
+
+    /**
+     * @param body the physics pipeline body to inspect
+     * @return whether the backend may put the body to sleep, or null if unavailable
+     */
+    default Boolean canSleep(final PhysicsPipelineBody body) {
+        return null;
+    }
+
+    /**
+     * @param body the physics pipeline body to inspect
+     * @return backend rigid body type
+     */
+    default String getRigidBodyType(final PhysicsPipelineBody body) {
+        return "unavailable";
+    }
+
+    /**
+     * @param body the physics pipeline body to inspect
+     * @return if the backend body is enabled, or null if unavailable
+     */
+    default Boolean isEnabled(final PhysicsPipelineBody body) {
+        return null;
+    }
+
+    /**
+     * @param body the physics pipeline body to inspect
+     * @return if this body is currently registered with the backend runtime
+     */
+    default boolean isBodyRegistered(final PhysicsPipelineBody body) {
+        return !body.isRemoved();
     }
 
     /**

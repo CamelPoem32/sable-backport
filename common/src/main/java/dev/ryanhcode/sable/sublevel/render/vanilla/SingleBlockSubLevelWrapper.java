@@ -1,22 +1,23 @@
 package dev.ryanhcode.sable.sublevel.render.vanilla;
 
+import dev.ryanhcode.sable.sublevel.ClientSubLevel;
+import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.LightLayer;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public final class SingleBlockSubLevelWrapper implements BlockAndTintGetter {
 
+    private ClientSubLevel subLevel;
     private ClientLevel level;
     private final BlockPos.MutableBlockPos globalPos;
     private final BlockPos.MutableBlockPos localPos;
@@ -28,6 +29,16 @@ public final class SingleBlockSubLevelWrapper implements BlockAndTintGetter {
     }
 
     public void setup(final ClientLevel level, final double x, final double y, final double z, final BlockPos localPos, final BlockState state) {
+        this.subLevel = null;
+        this.level = level;
+        this.globalPos.set(x, y, z);
+        this.localPos.set(localPos);
+        this.state = state;
+    }
+
+    public void setup(final ClientSubLevel subLevel, final ClientLevel level, final double x, final double y,
+                      final double z, final BlockPos localPos, final BlockState state) {
+        this.subLevel = subLevel;
         this.level = level;
         this.globalPos.set(x, y, z);
         this.localPos.set(localPos);
@@ -35,6 +46,7 @@ public final class SingleBlockSubLevelWrapper implements BlockAndTintGetter {
     }
 
     public void clear() {
+        this.subLevel = null;
         this.level = null;
     }
 
@@ -70,6 +82,10 @@ public final class SingleBlockSubLevelWrapper implements BlockAndTintGetter {
 
     @Override
     public @Nullable BlockEntity getBlockEntity(final BlockPos pos) {
+        if (this.subLevel != null) {
+            return SubLevelBlockStateLookup.getBlockEntity(this.subLevel, pos);
+        }
+
         return this.level.getBlockEntity(pos);
     }
 
@@ -79,7 +95,11 @@ public final class SingleBlockSubLevelWrapper implements BlockAndTintGetter {
             return this.state;
         }
 
-        return Blocks.AIR.defaultBlockState();
+        if (this.subLevel != null) {
+            return SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, pos);
+        }
+
+        return this.level.getBlockState(pos);
     }
 
     @Override
@@ -88,7 +108,11 @@ public final class SingleBlockSubLevelWrapper implements BlockAndTintGetter {
             return this.state.getFluidState();
         }
 
-        return Fluids.EMPTY.defaultFluidState();
+        if (this.subLevel != null) {
+            return SubLevelBlockStateLookup.getFluidStateOrEmpty(this.subLevel, pos);
+        }
+
+        return this.level.getFluidState(pos);
     }
 
     @Override

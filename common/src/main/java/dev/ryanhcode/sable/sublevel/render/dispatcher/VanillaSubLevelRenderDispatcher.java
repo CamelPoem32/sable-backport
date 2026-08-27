@@ -21,11 +21,12 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.NotNull;
-import org.joml.Matrix4f;
 import org.joml.Matrix3f;
+import org.joml.Matrix4f;
 import org.joml.Vector3d;
 import org.joml.Vector3f;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -64,25 +65,17 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
 
     @Override
     public SubLevelRenderData resize(final ClientSubLevel subLevel, final SubLevelRenderData renderData) {
-        if (!isSingleBlock(subLevel)) {
-            renderData.close();
-            return this.createRenderData(subLevel);
-        }
-
         if (!(renderData instanceof VanillaSingleSubLevelRenderData)) {
             renderData.close();
             return new VanillaSingleSubLevelRenderData(subLevel);
         }
+        renderData.rebuild();
         return renderData;
     }
 
     @Override
     public SubLevelRenderData createRenderData(final ClientSubLevel subLevel) {
-        if (isSingleBlock(subLevel)) {
-            return new VanillaSingleSubLevelRenderData(subLevel);
-        }
-
-        throw new UnsupportedOperationException("Chunked sub-level rendering is deferred in the Forge 1.20.1 backport");
+        return new VanillaSingleSubLevelRenderData(subLevel);
     }
 
     @Override
@@ -183,9 +176,10 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
             matrices.last().pose().mul(transformation);
             matrices.last().normal().mul(new Matrix3f(transformation));
             if (data instanceof final VanillaSingleSubLevelRenderData singleRenderData) {
-                final BlockEntity renderBlockEntity = singleRenderData.getRenderBlockEntity();
-                if (renderBlockEntity != null) {
-                    blockEntityRenderer.renderSingleBE(renderBlockEntity, matrices, partialTick, -chunkOffset.x, -chunkOffset.y, -chunkOffset.z);
+                final Collection<BlockEntity> renderBlockEntities = singleRenderData.getRenderBlockEntities();
+                if (!renderBlockEntities.isEmpty()) {
+                    blockEntityRenderer.renderBlockEntities(
+                            renderBlockEntities, matrices, partialTick, -chunkOffset.x, -chunkOffset.y, -chunkOffset.z);
                 }
             }
         }

@@ -1733,3 +1733,114 @@ feature family, likely Companion JarJar/standalone packaging or one isolated
 deferred Create/Flywheel compatibility slice. Do not infer coverage for
 Create/Flywheel Mixins, rendering, Rapier, Simulated, Aeronautics, Companion
 JarJar, networking redesign, or Mixin priority changes from this smoke.
+
+## M10 Manual Test Command Harness (2026-08-26)
+
+No Minecraft client/server was launched for harness implementation. Use these
+commands later in the real Forge 1.20.1 target modpack, one M10 gate at a time.
+
+Local edit coordinates are integer offsets from the selected sub-level plot
+center block, the same origin used by `spawn_l`. `spawn_l` creates one sublevel
+with blocks at `(0,0,0)`, `(1,0,0)`, `(2,0,0)`, `(0,0,1)`, `(0,0,2)`.
+
+### M10.1
+
+```text
+/sable m10 spawn_l m10_l
+/sable m10 inspect @l
+/sable m10 validate @l
+```
+
+Expected invariants: one sublevel, `blockCount=5`, finite positive mass, finite
+COM, valid asymmetric X/Z bounds, `physicsSystemPresent=true`, and
+`rigidBodyPresent=true`. Server-side validation now also requires
+`collisionGeometryPresent=true` and nonzero uploaded collision geometry; if that
+is absent, `validate` must report `SABLE_M10_VALIDATE status=FAIL
+reason=no_collision_geometry` rather than a false pass. With the current stone
+properties, five stone blocks should report aggregate mass near `10.000000`.
+
+Client rendering remains a manual/runtime criterion. For this five-block spawn,
+the basic renderer should emit a one-shot client log similar to
+`SABLE_M10_RENDER id=... storedBlocks=5 renderedBlocks=5 ...`, and all five
+blocks must be visible as one rigid L structure.
+
+Optional material variant:
+
+```text
+/sable m10 spawn_l m10_l_oak minecraft:oak_planks
+```
+
+### M10.2
+
+Pose convention: yaw around global Y uses the existing Sable command sign
+(`-yaw` internally), then pitch around X, then roll around Z. Command inputs are
+degrees. Linear velocity is global meters per second. Angular velocity command
+inputs are global degrees per second and inspect reports both radians/second and
+degrees/second.
+
+```text
+/sable m10 set_pose @l 45 10 20
+/sable m10 inspect @l
+/sable m10 set_velocity @l 0 0 0 0 20 0
+/sable m10 inspect @l
+/sable m10 stop @l
+/sable m10 inspect @l
+```
+
+### M10.3
+
+```text
+/sable m10 add_block @l 2 0 1 minecraft:stone
+/sable m10 inspect @l
+/sable m10 validate @l
+/sable m10 remove_block @l 2 0 1
+/sable m10 inspect @l
+/sable m10 validate @l
+```
+
+Expected invariants: add/remove update block count, bounds if the edit changes
+an edge, aggregate mass, COM, collider data, and normal client block/bounds sync
+without command-specific render packets.
+
+### M10.4
+
+```text
+/sable m10 set_pose @l 30 12 17
+/sable m10 set_velocity @l 0.05 0 0 0 5 0
+/sable m10 inspect @l
+```
+
+Then Save & Quit, reopen the same world, and run:
+
+```text
+/sable m10 inspect @l
+/sable m10 validate @l
+```
+
+Compare name/id, block count, mass, COM, bounds, orientation/pose, and velocity
+state before and after load. IDs are expected to persist through the existing
+sublevel serializer.
+
+### M10.5
+
+Stationary prep:
+
+```text
+/sable m10 stop @l
+/sable m10 inspect @l
+```
+
+Small-motion prep:
+
+```text
+/sable m10 set_velocity @l 0.03 0 0 0 3 0
+/sable m10 inspect @l
+```
+
+Manual checklist: stand on structure, walk across it, jump on it, jump off it,
+collide with the side, look/target blocks, interact while stationary, interact
+with small linear/angular motion, then stop with:
+
+```text
+/sable m10 stop @l
+```

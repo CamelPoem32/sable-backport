@@ -1149,8 +1149,8 @@ tasks.register('verifyRapierNativeBackportStatic') {
                             + "but source contains ${rawNativeKeywordCount} native keywords"
             )
         }
-        if (javaNativeMethods.size() != 53) {
-            throw new GradleException("Expected 53 Rapier3D native methods, found ${javaNativeMethods.size()}: ${javaNativeMethods}")
+        if (javaNativeMethods.size() != 55) {
+            throw new GradleException("Expected 55 Rapier3D native methods, found ${javaNativeMethods.size()}: ${javaNativeMethods}")
         }
 
         Set<String> expectedJniExports = javaNativeMethods.collect { ("${nativePrefix}${it}").toString() } as Set
@@ -1331,6 +1331,147 @@ tasks.register('verifyRapierNativeBackportStatic') {
                 + "loaderResource=${archiveResourcePath}, extractionDir=.sable/natives, "
                 + "rapierRevision=38e92f117590862481a53df6fc69a5d893e29186, "
                 + "rustToolchain=nightly-2026-01-29, serviceRuntimeStillStatic=true")
+    }
+}
+
+tasks.register('verifyRapierWindowsX64NativeValidationArtifact') {
+    group = 'verification'
+    description = 'LOCAL M10.2 WINDOWS VALIDATION ONLY: verifies the x86_64 Windows Rapier DLL inside the mixed native payload.'
+
+    doLast {
+        File rapierJavaRoot = rootProject.file('sable_rapier/src/main/java')
+        File rapierRustRoot = rootProject.file('sable_rapier/src/main/rust')
+        File rapierResourcesRoot = rootProject.file('sable_rapier/src/main/resources')
+        File nativePayload = new File(rapierResourcesRoot, 'natives/sable_rapier/sable_rapier_binaries.zip.l4z')
+        File builtWindowsDll = new File(rapierRustRoot,
+                'target/x86_64-pc-windows-msvc/release/sable_rapier.dll')
+        File rapier3DSource = new File(rapierJavaRoot,
+                'dev/ryanhcode/sable/physics/impl/rapier/Rapier3D.java')
+        String windowsEntryName = 'sable_rapier_x86_64_windows.dll'
+        String nativePrefix = 'Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_'
+
+        if (!nativePayload.isFile()) {
+            throw new GradleException("Rapier native payload is missing: ${nativePayload}")
+        }
+        if (!builtWindowsDll.isFile()) {
+            throw new GradleException("Built Windows x86_64 Rapier DLL is missing: ${builtWindowsDll}")
+        }
+        if (rapierLz4Jar == null || !rapierLz4Jar.isFile()) {
+            throw new GradleException("Cached at.yawk.lz4:lz4-java:1.11.0 jar is missing; checked ${rapierLz4JarCandidates}")
+        }
+
+        def readNativeArchive = {
+            URLClassLoader loader = new URLClassLoader([rapierLz4Jar.toURI().toURL()] as URL[], (ClassLoader) null)
+            try {
+                Class<?> lz4InputType = loader.loadClass('net.jpountz.lz4.LZ4FrameInputStream')
+                InputStream fileInput = Files.newInputStream(nativePayload.toPath())
+                InputStream lz4Input = (InputStream) lz4InputType
+                        .getConstructor(InputStream)
+                        .newInstance(fileInput)
+                Map<String, byte[]> entries = new LinkedHashMap<>()
+                try (ZipInputStream zipInput = new ZipInputStream(lz4Input)) {
+                    ZipEntry entry
+                    while ((entry = zipInput.nextEntry) != null) {
+                        if (!entry.directory) {
+                            entries[entry.name] = zipInput.readAllBytes()
+                        }
+                    }
+                }
+                return entries
+            } finally {
+                loader.close()
+            }
+        }
+
+        def nativeEntries = readNativeArchive()
+        if (nativeEntries.size() != 6 || !nativeEntries.containsKey(windowsEntryName)) {
+            throw new GradleException(
+                    "Expected mixed six-entry payload containing ${windowsEntryName}; actual=${nativeEntries.keySet().sort()}"
+            )
+        }
+        byte[] payloadWindowsDll = nativeEntries[windowsEntryName]
+        byte[] builtWindowsDllBytes = Files.readAllBytes(builtWindowsDll.toPath())
+        if (sha256Bytes(payloadWindowsDll) != sha256Bytes(builtWindowsDllBytes)) {
+            throw new GradleException("${windowsEntryName} in payload does not match the freshly built Windows DLL")
+        }
+
+        String rapier3DText = rapier3DSource.getText('UTF-8')
+        Set<String> javaNativeMethods = new TreeSet<>()
+        rapier3DText.readLines().findAll { it.contains(' native ') }.each { String line ->
+            def matcher = line =~ /\bnative\s+[A-Za-z0-9_<>\[\].?]+\s+([A-Za-z0-9_]+)\s*\(/
+            if (!matcher.find()) {
+                throw new GradleException("Could not parse Rapier3D native declaration: ${line}")
+            }
+            javaNativeMethods.add(matcher.group(1))
+        }
+        if (javaNativeMethods.size() != 55) {
+            throw new GradleException("Expected 55 Rapier3D native methods, found ${javaNativeMethods.size()}: ${javaNativeMethods}")
+        }
+
+        Set<String> expectedJniExports = javaNativeMethods.collect { ("${nativePrefix}${it}").toString() } as Set
+        String rustSourceText = fileTree(new File(rapierRustRoot, 'rapier/src'))
+                .matching { include '**/*.rs' }
+                .files
+                .sort()
+                .collect { it.getText('UTF-8') }
+                .join('\n')
+        Set<String> rustJniExports = new TreeSet<>()
+        (rustSourceText =~ /Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_[A-Za-z0-9_]+/)
+                .each { match -> rustJniExports.add(match.toString()) }
+        def missingRustExports = (expectedJniExports - rustJniExports).sort()
+        if (!missingRustExports.isEmpty()) {
+            throw new GradleException("Rust source is missing JNI exports: ${missingRustExports}")
+        }
+
+        def extractJniSymbols = { byte[] bytes ->
+            StringBuilder current = new StringBuilder()
+            Set<String> symbols = new TreeSet<>()
+            Set<String> unexpected = new TreeSet<>()
+            def expectedByLength = expectedJniExports.sort { a, b -> b.length() <=> a.length() }
+            def flush = {
+                if (current.length() >= nativePrefix.length()) {
+                    String text = current.toString()
+                    int start = text.indexOf(nativePrefix)
+                    while (start >= 0) {
+                        String tail = text.substring(start)
+                        String matched = expectedByLength.find { tail.startsWith(it) }
+                        if (matched != null) {
+                            symbols.add(matched)
+                        } else {
+                            def matcher = tail =~ /Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_[A-Za-z0-9_]+/
+                            if (matcher.find()) {
+                                unexpected.add(matcher.group(0))
+                            }
+                        }
+                        start = text.indexOf(nativePrefix, start + nativePrefix.length())
+                    }
+                }
+                current.setLength(0)
+            }
+            bytes.each { byte raw ->
+                int value = raw & 0xFF
+                if (value >= 32 && value <= 126) {
+                    current.append((char) value)
+                } else {
+                    flush()
+                }
+            }
+            flush()
+            [expected: symbols, unexpected: unexpected]
+        }
+
+        def scan = extractJniSymbols(payloadWindowsDll)
+        def missingBinaryExports = (expectedJniExports - scan.expected).sort()
+        if (!missingBinaryExports.isEmpty()) {
+            throw new GradleException("${windowsEntryName} is missing JNI exports: ${missingBinaryExports}")
+        }
+        if (!scan.unexpected.isEmpty()) {
+            throw new GradleException("${windowsEntryName} contains unexpected Sable Rapier JNI exports: ${scan.unexpected.sort()}")
+        }
+
+        logger.lifecycle("verifyRapierWindowsX64NativeValidationArtifact PASS: LOCAL M10.2 WINDOWS VALIDATION ONLY, "
+                + "payloadSha256=${sha256(nativePayload)}, windowsDllSha256=${sha256Bytes(payloadWindowsDll)}, "
+                + "jniExports=${scan.expected.size()}/${javaNativeMethods.size()}, nativeEntries=${nativeEntries.size()}")
     }
 }
 
@@ -4915,10 +5056,797 @@ tasks.register('verifySableSpawnCommandBoundary') {
     }
 }
 
+tasks.register('verifyM10CommandHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Statically verifies the M10 manual test command harness and plot-local edit boundary.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableSpawnCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/PhysicsPipeline.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/handle/RigidBodyHandle.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/LevelChunkMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/SableCommonEvents.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/SingleBlockSubLevelWrapper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/ServerChunkCacheMixin.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java'))
+
+    doLast {
+        File commandSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java')
+        File spawnSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableSpawnCommands.java')
+        File m10Source = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java')
+        File editHelperSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java')
+        File pipelineSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/PhysicsPipeline.java')
+        File handleSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/handle/RigidBodyHandle.java')
+        File levelChunkMixinSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/LevelChunkMixin.java')
+        File commonEventsSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/SableCommonEvents.java')
+        File physicsSystemSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java')
+        File serverPlotSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java')
+        File clientPlotSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java')
+        File serializerSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java')
+        File vanillaDispatcherSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java')
+        File vanillaRenderSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java')
+        File singleBlockWrapperSource = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/SingleBlockSubLevelWrapper.java')
+        File serverChunkCacheMixinSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/ServerChunkCacheMixin.java')
+        File rapierPipelineSource = rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java')
+
+        String commandText = commandSource.getText('UTF-8')
+        String spawnText = spawnSource.getText('UTF-8')
+        String m10Text = m10Source.getText('UTF-8')
+        String editHelperText = editHelperSource.getText('UTF-8')
+        String pipelineText = pipelineSource.getText('UTF-8')
+        String handleText = handleSource.getText('UTF-8')
+        String levelChunkMixinText = levelChunkMixinSource.getText('UTF-8')
+        String commonEventsText = commonEventsSource.getText('UTF-8')
+        String physicsSystemText = physicsSystemSource.getText('UTF-8')
+        String serverPlotText = serverPlotSource.getText('UTF-8')
+        String clientPlotText = clientPlotSource.getText('UTF-8')
+        String serializerText = serializerSource.getText('UTF-8')
+        String vanillaDispatcherText = vanillaDispatcherSource.getText('UTF-8')
+        String vanillaRenderText = vanillaRenderSource.getText('UTF-8')
+        String singleBlockWrapperText = singleBlockWrapperSource.getText('UTF-8')
+        String serverChunkCacheMixinText = serverChunkCacheMixinSource.getText('UTF-8')
+        String rapierPipelineText = rapierPipelineSource.getText('UTF-8')
+
+        [
+                'SableSpawnCommands.register(sableBuilder, buildContext)',
+                'M10TestCommands.register(sableBuilder, buildContext)',
+                'Commands.literal("info").then(Commands.argument("sub_level", SubLevelArgumentType.subLevels())'
+        ].each { canary ->
+            if (!commandText.contains(canary)) {
+                throw new GradleException("Root /sable command tree lost M9/M10 canary: ${canary}")
+            }
+        }
+        if (!spawnText.contains('.then(Commands.literal("block")')
+                || !spawnText.contains('finishInitialSpawnBlock(subLevel, BlockPos.ZERO, oldState, material)')) {
+            throw new GradleException('M9 /sable spawn block baseline is not present while adding M10 harness')
+        }
+
+        [
+                'Commands.literal("m10")',
+                'Commands.literal("spawn_l")',
+                'Commands.literal("inspect")',
+                'Commands.literal("set_pose")',
+                'Commands.literal("set_velocity")',
+                'Commands.literal("stop")',
+                'Commands.literal("add_block")',
+                'Commands.literal("remove_block")',
+                'Commands.literal("validate")',
+                'Commands.argument("target", SubLevelArgumentType.singleSubLevel())',
+                'BlockStateArgument.block(buildContext)'
+        ].each { canary ->
+            if (!m10Text.contains(canary)) {
+                throw new GradleException("/sable m10 command tree lost canary: ${canary}")
+            }
+        }
+
+        [
+                'new BlockPos(0, 0, 0)',
+                'new BlockPos(1, 0, 0)',
+                'new BlockPos(2, 0, 0)',
+                'new BlockPos(0, 0, 1)',
+                'new BlockPos(0, 0, 2)'
+        ].each { canary ->
+            if (!m10Text.contains(canary)) {
+                throw new GradleException("spawn_l lost L-shape local coordinate canary: ${canary}")
+            }
+        }
+
+        int spawnLStart = m10Text.indexOf('private static int spawnL(')
+        int inspectStart = m10Text.indexOf('private static int inspect(', spawnLStart)
+        if (spawnLStart < 0 || inspectStart < 0) {
+            throw new GradleException('Unable to isolate M10 spawn_l handler source')
+        }
+        String spawnLText = m10Text.substring(spawnLStart, inspectStart)
+        if (spawnLText.count('plotContainer.allocateNewSubLevel(pose)') != 1) {
+            throw new GradleException('spawn_l must create exactly one sub-level')
+        }
+        [
+                'SubLevelBlockEditHelper.setLocalBlock(subLevel, localBlock, material, 3, false)',
+                'SubLevelBlockEditHelper.finalizeBlockChanges(subLevel, changes)',
+                'SABLE_M10_COLLISION phase=initial_build',
+                'SABLE_M10 phase=spawn_begin',
+                'SABLE_M10 phase=blocks_set',
+                'SABLE_M10 phase=physics_finalized',
+                'SABLE_M10 phase=registered',
+                'rollbackSpawnSubLevel(plotContainer, subLevel, name, exception)'
+        ].each { canary ->
+            if (!spawnLText.contains(canary)) {
+                throw new GradleException("spawn_l lost lifecycle canary: ${canary}")
+            }
+        }
+
+        [
+                'public static BlockPos localOffsetToPlotBlock',
+                'return subLevel.getPlot().getCenterBlock().offset(localOffset)',
+                'private static PlotChunkHolder getOrCreatePlotChunk',
+                'if (!plot.contains(globalChunk))',
+                'plot.getChunkHolder(plot.toLocal(globalChunk))',
+                'plot.newEmptyChunk(globalChunk)',
+                'final BlockState oldState = chunk.getBlockState(plotBlockPos)',
+                'final BlockState previousState = chunk.setBlockState(plotBlockPos, newState, false)',
+                'subLevel.getLevel().sendBlockUpdated(plotBlockPos, oldState, newState, updateFlags)',
+                'SubLevelPhysicsSystem.get(subLevel.getLevel())',
+                'physicsSystem.finalizeExistingSubLevelStorage(subLevel, false, "block_edit")',
+                'public static MassTracker recomputeSelfMassData'
+        ].each { canary ->
+            if (!editHelperText.contains(canary)) {
+                throw new GradleException("SubLevelBlockEditHelper lost plot-local edit canary: ${canary}")
+            }
+        }
+        [
+                '.getLevel().setBlock(',
+                '.getLevel().getBlockState(',
+                'level.setBlock(',
+                'level.getBlockState('
+        ].each { forbidden ->
+            if (editHelperText.contains(forbidden)) {
+                throw new GradleException("SubLevelBlockEditHelper must not use parent Level storage for plot block edits: ${forbidden}")
+            }
+        }
+
+        [
+                'SableCommonEvents.handleBlockChange(serverLevel, (LevelChunk) (Object) this, pX, pY, pZ, oldState, newState)',
+                'plotChunk.handleBlockChange(localX, y, localZ, oldState, newState)',
+                'plot.updateBoundingBox()',
+                'plot.expandIfNecessary(blockPos)',
+                'floatingBlockController.queueRemoveFloatingBlock(oldState, blockPos)',
+                'floatingBlockController.queueAddFloatingBlock(newState, blockPos)',
+                'container.physicsSystem().handleBlockChange(sectionPos, section, localX, y & 15, localZ, oldState, newState)',
+                'this.updateMassDataFromBlockChange(subLevel, globalBlockPos, oldState, newState, !IN_PHYSICS_STEP)',
+                'this.pipeline.handleBlockChange(sectionPos, section, localX, localY, localZ, oldState, newState)',
+                'Rapier3D.changeBlock(this.scene.handle()'
+        ].each { canary ->
+            if (!(levelChunkMixinText + commonEventsText + physicsSystemText + rapierPipelineText).contains(canary)) {
+                throw new GradleException("M10 dynamic edit no longer reaches canonical block-change/physics path: ${canary}")
+            }
+        }
+
+        [
+                'subLevel.getLevel().sendBlockUpdated(plotBlockPos, oldState, newState, updateFlags)',
+                'public void onBlockChange(final BlockPos pos, final BlockState state)',
+                'subLevel.updateRenderData()',
+                'SABLE_M10 phase=client_render_invalidated',
+                'private void blockChanged(final BlockPos blockPos',
+                'holder.blockChanged(blockPos)',
+                'new ClientboundChangeBoundsSubLevelPacket(l, plotBounds)'
+        ].each { canary ->
+            if (!(editHelperText + clientPlotText + serverChunkCacheMixinText + rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelTrackingSystem.java').getText('UTF-8')).contains(canary)) {
+                throw new GradleException("M10 edit sync/bounds tracking path lost canary: ${canary}")
+            }
+        }
+        if (m10Text.contains('Clientbound') || m10Text.contains('SableTCPPackets.sendToPlayer')) {
+            throw new GradleException('M10 command harness must not invent command-specific rendering or sync packets')
+        }
+
+        [
+                'public CollisionGeometryUpload uploadExistingSubLevelCollisionGeometry',
+                'this.ticketManager.addTicketForSection(this.level, SectionPos.of(global.x, sectionY, global.z))',
+                'this.pipeline.handleChunkSectionAddition(section, global.x, sectionY, global.z, true)',
+                'this.uploadedCollisionSections.put(serverSubLevel.getUniqueId(), uploadedSections)',
+                'this.uploadedCollisionBlocks.put(serverSubLevel.getUniqueId(), uploadedBlocks)',
+                'public boolean hasUploadedCollisionGeometry',
+                'public record CollisionGeometryUpload'
+        ].each { canary ->
+            if (!physicsSystemText.contains(canary)) {
+                throw new GradleException("M10 initial collider lifecycle lost physics-system canary: ${canary}")
+            }
+        }
+        [
+                'plot.load(plotTag)',
+                'physicsSystem.finalizeExistingSubLevelStorage(subLevel, true, "load")',
+                'SABLE_COLLISION phase=loaded_sublevel_initial_build'
+        ].each { canary ->
+            if (!serializerText.contains(canary)) {
+                throw new GradleException("Loaded sub-level ready lifecycle lost generic finalization canary: ${canary}")
+            }
+        }
+        [
+                'collisionGeometryPresent',
+                'no_collision_geometry',
+                'reason=',
+                'collisionGeometryUploadedSections',
+                'collisionGeometryUploadedBlocks',
+                'colliderCount=unavailable'
+        ].each { canary ->
+            if (!m10Text.contains(canary)) {
+                throw new GradleException("M10 inspect/validate lost collision diagnostic canary: ${canary}")
+            }
+        }
+        [
+                'return new VanillaSingleSubLevelRenderData(subLevel)',
+                'renderSingleBlock(layer, consumer, modelView, cameraX, cameraY, cameraZ)'
+        ].each { canary ->
+            if (!vanillaDispatcherText.contains(canary)) {
+                throw new GradleException("M10 basic renderer dispatcher lost multi-block reachability canary: ${canary}")
+            }
+        }
+        if (vanillaDispatcherText.contains('throw new UnsupportedOperationException("Chunked sub-level rendering is deferred')) {
+            throw new GradleException('VanillaSubLevelRenderDispatcher still rejects multi-block sub-levels')
+        }
+        [
+                'private final List<RenderBlock> renderBlocks',
+                'for (final PlotChunkHolder holder : this.subLevel.getPlot().getLoadedChunks())',
+                'for (int x = minX; x <= maxX; x++)',
+                'this.renderBlocks.add(new RenderBlock(pos, blockState, blockState.getSeed(pos)))',
+                'SABLE_M10_RENDER id={}',
+                'renderedBlocks++'
+        ].each { canary ->
+            if (!vanillaRenderText.contains(canary)) {
+                throw new GradleException("M10 basic renderer lost multi-block enumeration canary: ${canary}")
+            }
+        }
+        [
+                'SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, pos)',
+                'SubLevelBlockStateLookup.getFluidStateOrEmpty(this.subLevel, pos)',
+                'SubLevelBlockStateLookup.getBlockEntity(this.subLevel, pos)'
+        ].each { canary ->
+            if (!singleBlockWrapperText.contains(canary)) {
+                throw new GradleException("M10 basic render wrapper lost plot-aware neighbor lookup canary: ${canary}")
+            }
+        }
+
+        [
+                'default void setLinearAndAngularVelocity',
+                'this.resetVelocity(body)',
+                'this.addLinearAndAngularVelocity(body, linearVelocity, angularVelocity)',
+                'public void setLinearAndAngularVelocity',
+                'this.physicsSystem.getPipeline().setLinearAndAngularVelocity(this.body, linearVelocity, angularVelocity)',
+                'Math.toRadians(DoubleArgumentType.getDouble(ctx, "wx_deg_s"))',
+                'convention=global_linear_m_per_s_global_angular_deg_per_s_input',
+                'convention=yawY(-deg)->pitchX(+deg)->rollZ(+deg)'
+        ].each { canary ->
+            if (!(pipelineText + handleText + m10Text).contains(canary)) {
+                throw new GradleException("M10 pose/velocity boundary lost canary: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifyM10CommandHarnessBoundary PASS: /sable m10 command tree registered; spawn_l has exactly '
+                + 'five local L blocks in one sub-level; local edits convert through SubLevelBlockEditHelper; '
+                + 'dynamic add/remove reach LevelChunkMixin -> SableCommonEvents -> SubLevelPhysicsSystem -> Rapier changeBlock; '
+                + 'post-finalization owned collision geometry is uploaded; basic renderer enumerates multiple bounded '
+                + 'plot blocks; normal block/bounds sync path is reused; pose and set-velocity conventions are explicit')
+    }
+}
+
+tasks.register('verifyM10InitialColliderLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Verifies initial populated sub-levels upload owned collision geometry after physics body creation.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java'))
+
+    doLast {
+        String editHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java')
+                .getText('UTF-8')
+        String physicsSystemText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java')
+                .getText('UTF-8')
+        String serializerText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java')
+                .getText('UTF-8')
+        String rapierPipelineText = rootProject.file(
+                'sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java')
+                .getText('UTF-8')
+
+        if (!editHelperText.contains('physicsSystem.finalizeExistingSubLevelStorage(subLevel, false, "block_edit")')) {
+            throw new GradleException('Initial/edit M10 block finalization must route through shared ready-state finalization')
+        }
+        int readyStart = physicsSystemText.indexOf('public CollisionGeometryUpload finalizeExistingSubLevelStorage(')
+        int uploadStart = physicsSystemText.indexOf('public CollisionGeometryUpload uploadExistingSubLevelCollisionGeometry(', readyStart)
+        if (readyStart < 0 || uploadStart < 0) {
+            throw new GradleException('Unable to isolate shared sub-level ready finalization helper')
+        }
+        String readyText = physicsSystemText.substring(readyStart, uploadStart)
+        int buildMass = readyText.indexOf('serverSubLevel.buildMassTracker()')
+        int updateMass = readyText.indexOf('serverSubLevel.updateMergedMassData(1.0f)')
+        int removeBody = readyText.indexOf('this.pipeline.remove(serverSubLevel)')
+        int addBody = readyText.indexOf('this.pipeline.add(serverSubLevel, serverSubLevel.logicalPose())')
+        int uploadCollision = readyText.indexOf('this.uploadExistingSubLevelCollisionGeometry(serverSubLevel)')
+        if (buildMass < 0 || updateMass < buildMass || removeBody < updateMass || addBody < removeBody || uploadCollision < addBody) {
+            throw new GradleException('Shared ready finalization must rebuild mass from storage before recreating body and uploading collision')
+        }
+        [
+                'public CollisionGeometryUpload finalizeExistingSubLevelStorage(final ServerSubLevel serverSubLevel,',
+                'final boolean bodyWasRegistered = this.pipeline.isBodyRegistered(serverSubLevel)',
+                'SABLE_SUBLEVEL_READY phase={}',
+                'public CollisionGeometryUpload uploadExistingSubLevelCollisionGeometry(final ServerSubLevel serverSubLevel)',
+                'for (final PlotChunkHolder holder : plot.getLoadedChunks())',
+                'if (section.hasOnlyAir())',
+                'this.ticketManager.addTicketForSection(this.level, SectionPos.of(global.x, sectionY, global.z))',
+                'this.pipeline.handleChunkSectionAddition(section, global.x, sectionY, global.z, true)',
+                'return new CollisionGeometryUpload(uploadedSections, uploadedBlocks)',
+                'public boolean hasUploadedCollisionGeometry'
+        ].each { canary ->
+            if (!physicsSystemText.contains(canary)) {
+                throw new GradleException("Initial collider upload lost canonical physics-system canary: ${canary}")
+            }
+        }
+        [
+                'final LevelPlot plot = SubLevelContainer.getContainer(this.level).getPlot(x, z)',
+                'final boolean global = plot == null',
+                'if (plot != null && uploadDataIfGlobal) id = Rapier3D.getID(((ServerSubLevel) plot.getSubLevel()))',
+                'Rapier3D.addChunk(this.scene.handle(), x, y, z, array, global, id)'
+        ].each { canary ->
+            if (!rapierPipelineText.contains(canary)) {
+                throw new GradleException("Rapier owned chunk upload boundary lost canary: ${canary}")
+            }
+        }
+        [
+                'plot.load(plotTag)',
+                'physicsSystem.finalizeExistingSubLevelStorage(subLevel, true, "load")',
+                'SABLE_COLLISION phase=loaded_sublevel_initial_build'
+        ].each { canary ->
+            if (!serializerText.contains(canary)) {
+                throw new GradleException("Loaded sub-level no longer uses canonical ready finalization helper: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM10InitialColliderLifecycleBoundary PASS: populated sub-level finalization/reload '
+                + 'rebuilds mass from authoritative storage, recreates a registered body, and uploads owned '
+                + 'non-air plot sections through Rapier handleChunkSectionAddition(..., true)')
+    }
+}
+
+tasks.register('verifyM10DynamicClientRenderSyncBoundary') {
+    group = 'forge backport'
+    description = 'Verifies runtime sub-level block edits use normal block sync and invalidate retained client render data.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/LevelChunkMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ClientSubLevel.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+
+    doLast {
+        String editHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java')
+                .getText('UTF-8')
+        String chunkMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/LevelChunkMixin.java')
+                .getText('UTF-8')
+        String clientPlotText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java')
+                .getText('UTF-8')
+        String clientSubLevelText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ClientSubLevel.java')
+                .getText('UTF-8')
+        String renderText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java')
+                .getText('UTF-8')
+
+        [
+                'subLevel.getLevel().sendBlockUpdated(plotBlockPos, oldState, newState, updateFlags)',
+                'SableCommonEvents.handleBlockChange(serverLevel, (LevelChunk) (Object) this, pX, pY, pZ, oldState, newState)',
+                'subLevel.getPlot().onBlockChange(this.sable$blockSet, pState)',
+                'public void onBlockChange(final BlockPos pos, final BlockState state)',
+                'super.onBlockChange(pos, state)',
+                'if (subLevel.isFinalized())',
+                'subLevel.updateRenderData()',
+                'SABLE_M10 phase=client_render_invalidated',
+                'this.renderData = SubLevelRenderDispatcher.get().createRenderData(this)',
+                'for (final PlotChunkHolder holder : this.subLevel.getPlot().getLoadedChunks())',
+                'this.renderBlocks.add(new RenderBlock(pos, blockState, blockState.getSeed(pos)))'
+        ].each { canary ->
+            if (!(editHelperText + chunkMixinText + clientPlotText + clientSubLevelText + renderText).contains(canary)) {
+                throw new GradleException("M10 dynamic edit client render sync lost canary: ${canary}")
+            }
+        }
+        if ((editHelperText + clientPlotText).contains('ClientboundM10') || editHelperText.contains('SableTCPPackets.sendToPlayer')) {
+            throw new GradleException('Dynamic edit rendering must use canonical block sync/invalidation, not a command-specific packet')
+        }
+
+        logger.lifecycle('verifyM10DynamicClientRenderSyncBoundary PASS: runtime plot block edits send normal block '
+                + 'updates, client plot block changes invalidate retained render data, and rebuilt basic render data '
+                + 'enumerates bounded non-air blocks')
+    }
+}
+
+tasks.register('verifyM10LoadedMassReconstructionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies loaded sub-level mass/statistics are rebuilt from restored plot contents.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java'))
+
+    doLast {
+        String serializerText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java')
+                .getText('UTF-8')
+        String physicsSystemText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java')
+                .getText('UTF-8')
+        String editHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java')
+                .getText('UTF-8')
+        String m10Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java')
+                .getText('UTF-8')
+
+        int loadIndex = serializerText.indexOf('plot.load(plotTag)')
+        int finalizeIndex = serializerText.indexOf('physicsSystem.finalizeExistingSubLevelStorage(subLevel, true, "load")')
+        if (loadIndex < 0 || finalizeIndex < loadIndex) {
+            throw new GradleException('Loaded sub-levels must restore plot chunks before rebuilding mass/statistics')
+        }
+        [
+                'serverSubLevel.buildMassTracker()',
+                'serverSubLevel.updateMergedMassData(1.0f)',
+                'final MassData mass = serverSubLevel.getMassTracker()',
+                'mass == null || mass.isInvalid() || mass.getCenterOfMass() == null',
+                'public static MassTracker recomputeSelfMassData(final ServerSubLevel subLevel)',
+                'MassTracker.build(new LevelAccelerator(subLevel.getLevel()), subLevel.getPlot().getBoundingBox())',
+                'massConsistent(selfMass, recomputedSelfMass)',
+                'mass_state_mismatch',
+                'recomputedSelfMass='
+        ].each { canary ->
+            if (!(physicsSystemText + editHelperText + m10Text).contains(canary)) {
+                throw new GradleException("M10 loaded mass reconstruction lost canary: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifyM10LoadedMassReconstructionBoundary PASS: reload finalization rebuilds mass and COM '
+                + 'from restored plot storage, and validate compares current self mass against a read-only recomputation')
+    }
+}
+
+tasks.register('verifyM10LoadedPhysicsLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Verifies loaded sub-levels recreate an active physics body and owned collision after restored storage is available.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/PhysicsPipeline.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java'))
+
+    doLast {
+        String serializerText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java')
+                .getText('UTF-8')
+        String physicsSystemText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java')
+                .getText('UTF-8')
+        String pipelineText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/PhysicsPipeline.java')
+                .getText('UTF-8')
+        String rapierPipelineText = rootProject.file(
+                'sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java')
+                .getText('UTF-8')
+        String m10Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java')
+                .getText('UTF-8')
+
+        [
+                'physicsSystem.finalizeExistingSubLevelStorage(subLevel, true, "load")',
+                'physicsSystem.getPipeline().teleport(subLevel, position, pose.orientation())',
+                'physicsSystem.getPipeline().addLinearAndAngularVelocity(subLevel, linearVelocity, angularVelocity)',
+                'final boolean bodyWasRegistered = this.pipeline.isBodyRegistered(serverSubLevel)',
+                'this.pipeline.remove(serverSubLevel)',
+                'this.pipeline.add(serverSubLevel, serverSubLevel.logicalPose())',
+                'this.uploadExistingSubLevelCollisionGeometry(serverSubLevel)',
+                'this.pipeline.onStatsChanged(serverSubLevel)',
+                'SABLE_SUBLEVEL_READY phase={}',
+                'default boolean isBodyRegistered',
+                'this.activeSubLevels.containsKey(Rapier3D.getID(body))',
+                'physics_body_not_registered',
+                'physicsBodyRegistered='
+        ].each { canary ->
+            if (!(serializerText + physicsSystemText + pipelineText + rapierPipelineText + m10Text).contains(canary)) {
+                throw new GradleException("M10 loaded physics lifecycle lost canary: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifyM10LoadedPhysicsLifecycleBoundary PASS: loaded sub-levels rebuild ready state with an '
+                + 'active registered body, owned collision geometry, pose restoration, retained velocity application, '
+                + 'and validate diagnostics for unregistered bodies')
+    }
+}
+
+tasks.register('verifyM10PostLoadDynamicEditBoundary') {
+    group = 'forge backport'
+    description = 'Verifies generic add/remove block commands require and preserve loaded ready-state invariants.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java'))
+
+    doLast {
+        String m10Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java')
+                .getText('UTF-8')
+        String editHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java')
+                .getText('UTF-8')
+        String physicsSystemText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java')
+                .getText('UTF-8')
+
+        [
+                'private static ServerSubLevel requireMutableTarget',
+                'physicsSystem.getPipeline().isBodyRegistered(subLevel)',
+                'Target rigid body is not registered in the physics pipeline',
+                'SubLevelBlockEditHelper.setLocalBlock(subLevel, localOffset',
+                'SubLevelBlockEditHelper.finalizeBlockChanges(subLevel, List.of(change))',
+                'physicsSystem.finalizeExistingSubLevelStorage(subLevel, false, "block_edit")',
+                'plot.expandIfNecessary(change.plotBlockPos())',
+                'plot.updateBoundingBox()',
+                'this.pipeline.onStatsChanged(serverSubLevel)',
+                'this.uploadExistingSubLevelCollisionGeometry(serverSubLevel)'
+        ].each { canary ->
+            if (!(m10Text + editHelperText + physicsSystemText).contains(canary)) {
+                throw new GradleException("M10 post-load dynamic edit boundary lost canary: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifyM10PostLoadDynamicEditBoundary PASS: add/remove commands use the same mutable target '
+                + 'checks and shared ready-state finalization for fresh and reloaded sub-levels')
+    }
+}
+
+tasks.register('verifyM10BasicMultiBlockRenderBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the retained basic renderer can enumerate and draw multiple bounded sub-level blocks.'
+    dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('syncMixinRefmap')
+
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java')
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/SingleBlockSubLevelWrapper.java'))
+    inputs.dir(layout.buildDirectory.dir('classes/java/main'))
+
+    doLast {
+        String forgeRenderEventsText = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java')
+                .getText('UTF-8')
+        String dispatcherText = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java')
+                .getText('UTF-8')
+        String renderText = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java')
+                .getText('UTF-8')
+        String wrapperText = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/SingleBlockSubLevelWrapper.java')
+                .getText('UTF-8')
+
+        [
+                'RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS',
+                'SubLevelRenderDispatcher.get().renderBasicSingleBlockLayer'
+        ].each { canary ->
+            if (!forgeRenderEventsText.contains(canary)) {
+                throw new GradleException("Forge basic render event boundary lost canary: ${canary}")
+            }
+        }
+        if (!dispatcherText.contains('return new VanillaSingleSubLevelRenderData(subLevel)')
+                || dispatcherText.contains('throw new UnsupportedOperationException("Chunked sub-level rendering is deferred')) {
+            throw new GradleException('Basic renderer dispatcher must create render data for multi-block sub-levels')
+        }
+        [
+                'private final List<RenderBlock> renderBlocks',
+                'this.subLevel.getPlot().getLoadedChunks()',
+                'final int minX = java.lang.Math.max(bounds.minX(), chunkMinX)',
+                'final int maxZ = java.lang.Math.min(bounds.maxZ(), chunkMaxZ)',
+                'this.renderBlocks.add(new RenderBlock(pos, blockState, blockState.getSeed(pos)))',
+                'for (final RenderBlock block : this.renderBlocks)',
+                'LEVEL_WRAPPER.setup(this.subLevel, this.subLevel.getLevel()',
+                'SableSubLevelRenderPlatform.INSTANCE.getRenderLayers',
+                'SableSubLevelRenderPlatform.INSTANCE.tesselateBlock',
+                'SABLE_M10_RENDER id={}',
+                'renderedBlocks++'
+        ].each { canary ->
+            if (!renderText.contains(canary)) {
+                throw new GradleException("Basic multi-block renderer lost canary: ${canary}")
+            }
+        }
+        if (renderText.contains('this.singleBlockState = blockState')) {
+            throw new GradleException('Basic multi-block renderer still caches only one render block')
+        }
+        [
+                'private ClientSubLevel subLevel',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, pos)',
+                'SubLevelBlockStateLookup.getFluidStateOrEmpty(this.subLevel, pos)',
+                'SubLevelBlockStateLookup.getBlockEntity(this.subLevel, pos)'
+        ].each { canary ->
+            if (!wrapperText.contains(canary)) {
+                throw new GradleException("Basic multi-block wrapper lost plot-aware lookup canary: ${canary}")
+            }
+        }
+
+        File dispatcherClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.class').get().asFile
+        File renderClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.class').get().asFile
+        if (!dispatcherClass.isFile() || !renderClass.isFile()) {
+            throw new GradleException('Missing compiled M10 basic multi-block render classes')
+        }
+        String classCanaries = [
+                new String(dispatcherClass.bytes, StandardCharsets.ISO_8859_1),
+                new String(renderClass.bytes, StandardCharsets.ISO_8859_1)
+        ].join('\n')
+        [
+                'VanillaSingleSubLevelRenderData',
+                'RenderBlock',
+                'SABLE_M10_RENDER',
+                'storedBlocks',
+                'renderedBlocks'
+        ].each { canary ->
+            if (!classCanaries.contains(canary)) {
+                throw new GradleException("Compiled M10 basic multi-block render canary missing: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM10BasicMultiBlockRenderBoundary PASS: Forge event basic renderer creates data '
+                + 'for bounded multi-block sub-levels, enumerates loaded plot chunks/sections, draws each stored '
+                + 'non-air block through vanilla model tessellation, and keeps plot-aware neighbor lookups')
+    }
+}
+
+tasks.register('verifyM10AngularVelocityPersistenceBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M10.2 set_velocity uses the generic physics API and the temporary native sleep experiment is absent.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/PhysicsPipeline.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/handle/RigidBodyHandle.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/physics/config/dimension_physics/DimensionPhysics.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/Rapier3D.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/rust/rapier/src/lib.rs'))
+
+    doLast {
+        String m10Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M10TestCommands.java')
+                .getText('UTF-8')
+        String pipelineText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/PhysicsPipeline.java')
+                .getText('UTF-8')
+        String handleText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/handle/RigidBodyHandle.java')
+                .getText('UTF-8')
+        String dimensionPhysicsText = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/physics/config/dimension_physics/DimensionPhysics.java')
+                .getText('UTF-8')
+        String rapier3DText = rootProject.file(
+                'sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/Rapier3D.java')
+                .getText('UTF-8')
+        String rapierPipelineText = rootProject.file(
+                'sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java')
+                .getText('UTF-8')
+        String rapierRustText = rootProject.file('sable_rapier/src/main/rust/rapier/src/lib.rs')
+                .getText('UTF-8')
+
+        int setVelocityStart = m10Text.indexOf('private static int setVelocity(')
+        int stopStart = m10Text.indexOf('private static int stop(', setVelocityStart)
+        if (setVelocityStart < 0 || stopStart < 0) {
+            throw new GradleException('Unable to isolate M10 set_velocity handler')
+        }
+        String setVelocityText = m10Text.substring(setVelocityStart, stopStart)
+        if (setVelocityText.count('Math.toRadians(DoubleArgumentType.getDouble(ctx, "wx_deg_s"))') != 1
+                || setVelocityText.count('Math.toRadians(DoubleArgumentType.getDouble(ctx, "wy_deg_s"))') != 1
+                || setVelocityText.count('Math.toRadians(DoubleArgumentType.getDouble(ctx, "wz_deg_s"))') != 1) {
+            throw new GradleException('M10 set_velocity must convert each angular input from deg/s to rad/s exactly once')
+        }
+        [
+                'handle.setLinearAndAngularVelocity(linearVelocity, angularVelocity)',
+                'SABLE_M10_VELOCITY id={}',
+                'requestedAngularDeg={}',
+                'requestedAngularRad={}',
+                'rapierAngularAfterSet={}',
+                'sleepingAfterSet={}',
+                'angularDamping={}',
+                'convention=global_linear_m_per_s_global_angular_deg_per_s_input',
+                'angularDamping=',
+                'sleeping=',
+                'canSleep=',
+                'rigidBodyType=',
+                'enabled='
+        ].each { canary ->
+            if (!m10Text.contains(canary)) {
+                throw new GradleException("M10 angular-velocity diagnostics lost canary: ${canary}")
+            }
+        }
+        [
+                'default void setLinearAndAngularVelocity',
+                'this.resetVelocity(body)',
+                'default double getAngularDamping',
+                'default Boolean isSleeping',
+                'default Boolean canSleep',
+                'default String getRigidBodyType',
+                'default Boolean isEnabled'
+        ].each { canary ->
+            if (!pipelineText.contains(canary)) {
+                throw new GradleException("Generic physics API lost velocity/diagnostic canary: ${canary}")
+            }
+        }
+        if (!handleText.contains('this.physicsSystem.getPipeline().setLinearAndAngularVelocity(this.body, linearVelocity, angularVelocity)')) {
+            throw new GradleException('RigidBodyHandle no longer delegates setLinearAndAngularVelocity through the generic pipeline')
+        }
+        [
+                'public static native void addLinearAngularVelocities'
+        ].each { canary ->
+            if (!rapier3DText.contains(canary)) {
+                throw new GradleException("Rapier3D Java velocity surface lost canary: ${canary}")
+            }
+        }
+        [
+                'public static native void setLinearAngularVelocities',
+                'public static native boolean isSleeping'
+        ].each { forbidden ->
+            if (rapier3DText.contains(forbidden)) {
+                throw new GradleException("Temporary native sleep/direct-set experiment must remain removed: ${forbidden}")
+            }
+        }
+        [
+                'private double universalDrag = Double.NaN',
+                'this.universalDrag = universalDrag',
+                'public void addLinearAndAngularVelocity',
+                'Rapier3D.addLinearAngularVelocities(this.scene.handle(), Rapier3D.getID(body)',
+                'public Boolean isSleeping(final PhysicsPipelineBody body) {',
+                'return null',
+                'return this.universalDrag',
+                'return "dynamic"'
+        ].each { canary ->
+            if (!rapierPipelineText.contains(canary)) {
+                throw new GradleException("Rapier pipeline lost direct set/diagnostic canary: ${canary}")
+            }
+        }
+        if (rapierPipelineText.contains('public void setLinearAndAngularVelocity')
+                || rapierPipelineText.contains('Rapier3D.setLinearAngularVelocities')) {
+            throw new GradleException('Rapier pipeline must not carry the temporary direct native set velocity override')
+        }
+        [
+                'activation_params.angular_threshold = 0.15',
+                'activation_params.normalized_linear_threshold = 0.15',
+                'rb.set_angvel(',
+                'Vec3::new(angular_x as Real, angular_y as Real, angular_z as Real)',
+                'wake_up > 0'
+        ].each { canary ->
+            if (!rapierRustText.contains(canary)) {
+                throw new GradleException("Rapier native angular persistence boundary lost canary: ${canary}")
+            }
+        }
+        [
+                'SUB_LEVEL_ANGULAR_SLEEP_THRESHOLD',
+                'SUB_LEVEL_NORMALIZED_LINEAR_SLEEP_THRESHOLD',
+                'Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_setLinearAngularVelocities',
+                'Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_isSleeping'
+        ].each { forbidden ->
+            if (rapierRustText.contains(forbidden)) {
+                throw new GradleException("Temporary native sleep experiment must remain removed: ${forbidden}")
+            }
+        }
+        if (!dimensionPhysicsText.contains('private static final float DEFAULT_UNIVERSAL_DRAG = 0.09f')) {
+            throw new GradleException('Default universal drag changed; update the M10.2 decay expectation')
+        }
+
+        double initial = Math.toRadians(15.0d)
+        double damping = 0.09d
+        double afterHalfSecond = initial * Math.exp(-damping * 0.5d)
+        double oneDegreePerSecond = Math.toRadians(1.0d)
+        if (afterHalfSecond <= oneDegreePerSecond) {
+            throw new GradleException("15 deg/s damping expectation unexpectedly reaches sleep threshold: ${afterHalfSecond}")
+        }
+        logger.lifecycle('verifyM10AngularVelocityPersistenceBoundary PASS: set_velocity converts deg/s to rad/s '
+                + 'once and uses RigidBodyHandle -> PhysicsPipeline; Rapier uses the generic reset/add velocity API, '
+                + 'the temporary direct native setter/sleep probe is absent, and upstream activation thresholds are restored')
+    }
+}
+
 tasks.register('verifySubLevelEntityCollisionBoundary') {
     group = 'forge backport'
     description = 'Verifies active entity/sublevel collision queries do not load plot-storage blocks through the parent ServerChunkCache.'
     dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('syncMixinRefmap')
 
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/ServerChunkCacheMixin.java'))
@@ -5158,8 +6086,9 @@ tasks.register('verifySubLevelEntityCollisionBoundary') {
 
 tasks.register('verifyBasicSubLevelRenderLifecycle') {
     group = 'forge backport'
-    description = 'Verifies retained basic single-block rendering reads client plot storage and remains wired without deferred render features.'
+    description = 'Verifies retained basic rendering reads client plot storage and remains wired without deferred render features.'
     dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('syncMixinRefmap')
 
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableClientPacketHandlers.java'))
@@ -5286,13 +6215,15 @@ tasks.register('verifyBasicSubLevelRenderLifecycle') {
             throw new GradleException('SubLevelRenderDispatcher lost Forge-event basic single-block entry point')
         }
         [
-                'SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, pos)',
-                'SubLevelBlockStateLookup.getBlockEntity(this.subLevel, pos)',
-                'this.singleBlockState = blockState',
+                'SubLevelBlockStateLookup.getBlockEntity(this.subLevel, block.pos())',
+                'private final List<RenderBlock> renderBlocks',
+                'this.renderBlocks.add(new RenderBlock(pos, blockState, blockState.getSeed(pos)))',
+                'for (final RenderBlock block : this.renderBlocks)',
                 'SableSubLevelRenderPlatform.INSTANCE.getRenderLayers',
                 'SableSubLevelRenderPlatform.INSTANCE.tesselateBlock',
                 'SABLE_RENDER phase=state',
-                'SABLE_RENDER phase=draw'
+                'SABLE_RENDER phase=draw',
+                'SABLE_M10_RENDER id={}'
         ].each { canary ->
             if (!singleRenderText.contains(canary)) {
                 throw new GradleException("VanillaSingleSubLevelRenderData lost plot-aware render canary: ${canary}")
@@ -5305,7 +6236,9 @@ tasks.register('verifyBasicSubLevelRenderLifecycle') {
         [
                 'public final class SingleBlockSubLevelWrapper implements BlockAndTintGetter',
                 'return this.state',
-                'return Blocks.AIR.defaultBlockState()'
+                'SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, pos)',
+                'SubLevelBlockStateLookup.getFluidStateOrEmpty(this.subLevel, pos)',
+                'SubLevelBlockStateLookup.getBlockEntity(this.subLevel, pos)'
         ].each { canary ->
             if (!wrapperText.contains(canary)) {
                 throw new GradleException("SingleBlockSubLevelWrapper lost retained single-block wrapper canary: ${canary}")
@@ -5391,7 +6324,7 @@ tasks.register('verifyBasicSubLevelRenderLifecycle') {
         }
 
         logger.lifecycle('verifyBasicSubLevelRenderLifecycle PASS: Forge RenderLevelStageEvent AFTER_SOLID_BLOCKS '
-                + 'drives retained vanilla single-block render dispatch, reads state/block entities from client plot storage, '
+                + 'drives retained vanilla basic render dispatch, reads state/block entities from client plot storage, '
                 + 'logs create/register/chunk/finalize/dispatch/state/draw for the next runtime, rejects unsafe '
                 + 'LevelRenderer renderSectionLayer/renderChunkLayer injection, and still avoids deferred chunked/advanced rendering')
     }

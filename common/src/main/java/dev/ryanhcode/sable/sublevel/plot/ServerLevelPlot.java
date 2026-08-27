@@ -5,7 +5,6 @@ import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.block.BlockSubLevelLiftProvider;
 import dev.ryanhcode.sable.api.entity.EntitySubLevelUtil;
 import dev.ryanhcode.sable.api.sublevel.KinematicContraption;
-import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.index.SableTags;
@@ -17,7 +16,6 @@ import dev.ryanhcode.sable.platform.SableChunkEventPlatform;
 import dev.ryanhcode.sable.platform.SablePlotPlatform;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
-import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectCollection;
@@ -569,8 +567,6 @@ public class ServerLevelPlot extends LevelPlot {
             this.lightEngine.runLightUpdates();
         } while (this.lightEngine.hasLightWork());
 
-        final SubLevelPhysicsSystem physicsSystem = ((ServerSubLevelContainer) this.container).physicsSystem();
-
         final BlockPos.MutableBlockPos globalBlockPos = new BlockPos.MutableBlockPos();
 
         // go through them all again
@@ -618,47 +614,18 @@ public class ServerLevelPlot extends LevelPlot {
                                     chunkHolder.handleBlockChange(xOff, chunkMinY + yOff, zOff, airState, state);
                                     subLevel.getHeatMapManager().onSolidAdded(immutable);
                                     subLevel.getFloatingBlockController().queueAddFloatingBlock(state, immutable);
-                                    physicsSystem.updateMassDataFromBlockChange(subLevel, globalBlockPos, airState, state, false);
                                     this.onBlockChange(immutable, state);
                                 }
                             }
                         }
                     }
 
-                    // upload
                     this.expandPlotIfNecessary = expandPlotBackup;
                 }
             }
         }
 
         this.updateBoundingBox();
-        subLevel.updateMergedMassData(1.0f);
-        physicsSystem.getPipeline().onStatsChanged(subLevel);
-
-        for (final String key : chunks.getAllKeys()) {
-            final long chunkPos = Long.parseLong(key);
-
-            final int x = ChunkPos.getX(chunkPos);
-            final int z = ChunkPos.getZ(chunkPos);
-            final ChunkPos local = new ChunkPos(x, z);
-            final ChunkPos global = this.toGlobal(local);
-
-            final LevelChunk chunk = this.getChunk(local);
-            final LevelChunkSection[] levelChunkSections = chunk.getSections();
-
-            for (int i = 0; i < chunk.getSectionsCount(); i++) {
-                final LevelChunkSection section = levelChunkSections[i];
-                if (!section.hasOnlyAir()) {
-                    final int sectionY = chunk.getSectionYFromSectionIndex(i);
-                    physicsSystem.getTicketManager().addTicketForSection(level, SectionPos.of(global.x, sectionY, global.z));
-                    physicsSystem.getPipeline().handleChunkSectionAddition(section, global.x, sectionY, global.z, true);
-                }
-            }
-        }
-
-        subLevel.updateMergedMassData(1.0f);
-        physicsSystem.getPipeline().onStatsChanged(subLevel);
-
     }
 
     /**

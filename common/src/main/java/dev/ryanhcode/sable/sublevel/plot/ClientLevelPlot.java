@@ -1,13 +1,16 @@
 package dev.ryanhcode.sable.sublevel.plot;
 
+import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 
@@ -62,6 +65,18 @@ public class ClientLevelPlot extends LevelPlot {
             if (actor != null) {
                 this.blockEntityActors.put(blockEntity.getBlockPos(), actor);
             }
+        }
+    }
+
+    @Override
+    public void onBlockChange(final BlockPos pos, final BlockState state) {
+        super.onBlockChange(pos, state);
+
+        final ClientSubLevel subLevel = this.getSubLevel();
+        if (subLevel.isFinalized()) {
+            subLevel.updateRenderData();
+            Sable.LOGGER.info("SABLE_M10 phase=client_render_invalidated id={} pos={} state={}",
+                    subLevel.getUniqueId(), pos, state);
         }
     }
 }

@@ -6,6 +6,7 @@ import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
 import dev.ryanhcode.sable.api.physics.PhysicsPipelineProvider;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
+import dev.ryanhcode.sable.api.physics.mass.MassData;
 import dev.ryanhcode.sable.api.physics.mass.MassTracker;
 import dev.ryanhcode.sable.api.physics.object.ArbitraryPhysicsObject;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
@@ -13,6 +14,8 @@ import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelObserver;
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
+import dev.ryanhcode.sable.companion.math.BoundingBox3i;
+import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.Pose3d;
 import dev.ryanhcode.sable.mixinterface.plot.SubLevelContainerHolder;
 import dev.ryanhcode.sable.mixinterface.toast.SableToastableServer;
@@ -87,6 +90,14 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
      * Punch cooldowns for every player
      */
     private final Object2IntMap<UUID> punchCooldowns = new Object2IntOpenHashMap<>();
+    /**
+     * Non-empty plot sections uploaded as owned collision geometry for each sub-level.
+     */
+    private final Object2IntMap<UUID> uploadedCollisionSections = new Object2IntOpenHashMap<>();
+    /**
+     * Non-air blocks in the last owned collision-geometry upload for each sub-level.
+     */
+    private final Object2IntMap<UUID> uploadedCollisionBlocks = new Object2IntOpenHashMap<>();
     /**
      * The current physics config
      */
@@ -198,6 +209,8 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
     public void onSubLevelRemoved(final SubLevel subLevel, final SubLevelRemovalReason reason) {
         if (subLevel instanceof final ServerSubLevel serverSubLevel) {
             this.pipeline.remove(serverSubLevel);
+            this.uploadedCollisionSections.removeInt(serverSubLevel.getUniqueId());
+            this.uploadedCollisionBlocks.removeInt(serverSubLevel.getUniqueId());
         } else {
             throw new UnsupportedOperationException("Client sub-levels are not supported by the physics system");
         }
@@ -355,38 +368,139 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
             toastable.sable$reportSubLevelPhysicsFailure(serverSubLevel);
         }
 
-        // The sub-level has NaN'ed!
-        // We need to remove it and re-add from the physics world.
-        this.pipeline.remove(serverSubLevel);
-
-        serverSubLevel.buildMassTracker();
-        this.pipeline.add(serverSubLevel, serverSubLevel.logicalPose());
-
-        if (serverSubLevel.getMassTracker().getCenterOfMass() == null) {
-            // there's no center of mass for the body, which means it's effectively removed
-            Sable.LOGGER.info("Sub-level recovery added sub-level to pipeline, but center of mass is null. Aborting and removing sub-level.");
+        try {
+            this.finalizeExistingSubLevelStorage(serverSubLevel, true, "recovery");
+            return true;
+        } catch (final RuntimeException exception) {
+            Sable.LOGGER.info("Sub-level recovery failed to rebuild ready state. Aborting and removing sub-level.", exception);
             SubLevelContainer.getContainer(this.level).removeSubLevel(serverSubLevel, SubLevelRemovalReason.REMOVED);
             return false;
         }
+    }
+
+    /**
+     * Rebuilds the runtime physics-ready state from the authoritative stored plot blocks.
+     * <p>
+     * This is the shared finalization point for populated initial creation, dynamic edits, reload,
+     * and recovery. It keeps mass/statistics, local bounds, Rapier body registration, and owned
+     * collision geometry consistent with the current plot storage.
+     *
+     * @param serverSubLevel the sub-level whose plot storage is authoritative
+     * @param recreateBody whether to recreate the backend rigid body before uploading stats/collision
+     * @param phase concise log phase
+     * @return objective diagnostics for the owned collision upload
+     */
+    public CollisionGeometryUpload finalizeExistingSubLevelStorage(final ServerSubLevel serverSubLevel,
+                                                                   final boolean recreateBody,
+                                                                   final String phase) {
+        final ServerLevelPlot plot = serverSubLevel.getPlot();
+        plot.updateBoundingBox();
+
+        final BoundingBox3ic bounds = plot.getBoundingBox();
+        if (bounds == BoundingBox3i.EMPTY || bounds.volume() <= 0) {
+            throw new IllegalStateException("Cannot finalize sub-level with invalid plot bounds: " + bounds);
+        }
+
+        final boolean bodyWasRegistered = this.pipeline.isBodyRegistered(serverSubLevel);
+        serverSubLevel.buildMassTracker();
+        serverSubLevel.updateMergedMassData(1.0f);
+
+        final MassData mass = serverSubLevel.getMassTracker();
+        if (mass == null || mass.isInvalid() || mass.getCenterOfMass() == null) {
+            throw new IllegalStateException("Cannot finalize sub-level with invalid mass data: mass=" + mass);
+        }
+
+        if (recreateBody && bodyWasRegistered) {
+            this.pipeline.remove(serverSubLevel);
+            this.uploadedCollisionSections.removeInt(serverSubLevel.getUniqueId());
+            this.uploadedCollisionBlocks.removeInt(serverSubLevel.getUniqueId());
+        }
+
+        if (recreateBody || !bodyWasRegistered) {
+            this.pipeline.add(serverSubLevel, serverSubLevel.logicalPose());
+        } else {
+            this.pipeline.onStatsChanged(serverSubLevel);
+        }
+
+        serverSubLevel.updateBoundingBox();
+
+        final CollisionGeometryUpload collisionUpload = this.uploadExistingSubLevelCollisionGeometry(serverSubLevel);
+
+        serverSubLevel.updateMergedMassData(1.0f);
+        this.pipeline.onStatsChanged(serverSubLevel);
+
+        Sable.LOGGER.info(
+                "SABLE_SUBLEVEL_READY phase={} id={} recreatedBody={} bodyRegistered={} mass={} centerOfMass={} "
+                        + "bounds={} uploadedSections={} uploadedBlocks={} collisionGeometryPresent={}",
+                phase, serverSubLevel.getUniqueId(), recreateBody, this.pipeline.isBodyRegistered(serverSubLevel),
+                mass.getMass(), mass.getCenterOfMass(), bounds, collisionUpload.uploadedSections(),
+                collisionUpload.uploadedBlocks(), collisionUpload.collisionGeometryPresent());
+
+        return collisionUpload;
+    }
+
+    /**
+     * Uploads already-populated plot sections as owned collision geometry for a sub-level whose
+     * rigid body and local bounds already exist in the physics pipeline.
+     *
+     * @param serverSubLevel the populated sub-level to upload
+     * @return objective diagnostics for the upload
+     */
+    public CollisionGeometryUpload uploadExistingSubLevelCollisionGeometry(final ServerSubLevel serverSubLevel) {
+        int uploadedSections = 0;
+        int uploadedBlocks = 0;
 
         final ServerLevelPlot plot = serverSubLevel.getPlot();
-
         for (final PlotChunkHolder holder : plot.getLoadedChunks()) {
             final LevelChunk chunk = holder.getChunk();
             final ChunkPos global = chunk.getPos();
-
             final LevelChunkSection[] levelChunkSections = chunk.getSections();
+
             for (int i = 0; i < chunk.getSectionsCount(); i++) {
                 final LevelChunkSection section = levelChunkSections[i];
-
-                if (!section.hasOnlyAir()) {
-                    final int sectionY = chunk.getSectionYFromSectionIndex(i);
-                    this.pipeline.handleChunkSectionAddition(section, global.x, sectionY, global.z, true);
+                if (section.hasOnlyAir()) {
+                    continue;
                 }
+
+                final int sectionY = chunk.getSectionYFromSectionIndex(i);
+                this.ticketManager.addTicketForSection(this.level, SectionPos.of(global.x, sectionY, global.z));
+                this.pipeline.handleChunkSectionAddition(section, global.x, sectionY, global.z, true);
+                uploadedSections++;
+                uploadedBlocks += countNonAirBlocks(section);
             }
         }
 
-        return true;
+        this.uploadedCollisionSections.put(serverSubLevel.getUniqueId(), uploadedSections);
+        this.uploadedCollisionBlocks.put(serverSubLevel.getUniqueId(), uploadedBlocks);
+
+        return new CollisionGeometryUpload(uploadedSections, uploadedBlocks);
+    }
+
+    public boolean hasUploadedCollisionGeometry(final ServerSubLevel serverSubLevel) {
+        return this.getUploadedCollisionSectionCount(serverSubLevel) > 0
+                && this.getUploadedCollisionBlockCount(serverSubLevel) > 0;
+    }
+
+    public int getUploadedCollisionSectionCount(final ServerSubLevel serverSubLevel) {
+        return this.uploadedCollisionSections.getInt(serverSubLevel.getUniqueId());
+    }
+
+    public int getUploadedCollisionBlockCount(final ServerSubLevel serverSubLevel) {
+        return this.uploadedCollisionBlocks.getInt(serverSubLevel.getUniqueId());
+    }
+
+    private static int countNonAirBlocks(final LevelChunkSection section) {
+        int blocks = 0;
+        for (int x = 0; x < 16; x++) {
+            for (int y = 0; y < 16; y++) {
+                for (int z = 0; z < 16; z++) {
+                    if (!section.getBlockState(x, y, z).isAir()) {
+                        blocks++;
+                    }
+                }
+            }
+        }
+        return blocks;
     }
 
     private void tickPunchCooldowns() {
@@ -460,6 +574,11 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
 
         this.updateMassDataFromBlockChange(subLevel, globalBlockPos, oldState, newState, !IN_PHYSICS_STEP);
         this.pipeline.handleBlockChange(sectionPos, section, localX, localY, localZ, oldState, newState);
+        if (subLevel instanceof final ServerSubLevel serverSubLevel && this.hasUploadedCollisionGeometry(serverSubLevel)) {
+            this.uploadedCollisionBlocks.put(serverSubLevel.getUniqueId(),
+                    java.lang.Math.max(0, this.uploadedCollisionBlocks.getInt(serverSubLevel.getUniqueId())
+                            + (newState.isAir() ? 0 : 1) - (oldState.isAir() ? 0 : 1)));
+        }
 
         this.wakeUpObjectsAt(x, y, z);
     }
@@ -612,5 +731,11 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
      */
     public int getNextRuntimeID() {
         return this.pipeline.getNextRuntimeID();
+    }
+
+    public record CollisionGeometryUpload(int uploadedSections, int uploadedBlocks) {
+        public boolean collisionGeometryPresent() {
+            return this.uploadedSections > 0 && this.uploadedBlocks > 0;
+        }
     }
 }
