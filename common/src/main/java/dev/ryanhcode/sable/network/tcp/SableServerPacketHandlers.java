@@ -3,12 +3,16 @@ package dev.ryanhcode.sable.network.tcp;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.SableConfig;
 import dev.ryanhcode.sable.api.physics.mass.MassData;
+import dev.ryanhcode.sable.api.sublevel.SubLevelCreateValueSettingsHelper;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
+import dev.ryanhcode.sable.api.sublevel.SubLevelInteractionHelper;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.companion.math.Pose3d;
 import dev.ryanhcode.sable.index.SableAttributes;
+import dev.ryanhcode.sable.network.packets.tcp.ServerboundCreateValueSettingsSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ServerboundPunchSubLevelPacket;
+import dev.ryanhcode.sable.network.packets.tcp.ServerboundUseItemOnSubLevelPacket;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
@@ -16,6 +20,7 @@ import java.util.Objects;
 import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.FluidTags;
@@ -113,6 +118,26 @@ public final class SableServerPacketHandlers {
         } else {
             sendFluidParticles(packet, level, blockState, globalDirection);
         }
+    }
+
+    public static void handleUseItemOnSubLevel(final ServerboundUseItemOnSubLevelPacket packet,
+                                               final SablePacketContext context) {
+        if (!(context.level() instanceof final ServerLevel level) || !(context.player() instanceof final ServerPlayer player)) {
+            Sable.LOGGER.error("SABLE_M11_INTERACT_SERVER rejected=wrong_context sublevel={}", packet.subLevelId());
+            return;
+        }
+
+        SubLevelInteractionHelper.handleUseItemOnSubLevel(level, player, packet);
+    }
+
+    public static void handleCreateValueSettingsOnSubLevel(final ServerboundCreateValueSettingsSubLevelPacket packet,
+                                                           final SablePacketContext context) {
+        if (!(context.level() instanceof final ServerLevel level) || !(context.player() instanceof final ServerPlayer player)) {
+            Sable.LOGGER.error("SABLE_M11_VALUE_SERVER rejected=wrong_context sublevel={}", packet.subLevelId());
+            return;
+        }
+
+        SubLevelCreateValueSettingsHelper.handleValueSettingsOnSubLevel(level, player, packet);
     }
 
     private static void sendFluidParticles(final ServerboundPunchSubLevelPacket packet,

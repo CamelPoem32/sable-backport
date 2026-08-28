@@ -273,8 +273,8 @@ public class SubLevelArgumentType implements ArgumentType<SubLevelSelector> {
         }
 
         public void serializeToJson(final SubLevelArgumentType.Info.Template arg, final JsonObject jsonObject) {
-            jsonObject.addProperty("amount", arg.allowMultiple ? "single" : "multiple");
-            jsonObject.addProperty("type", arg.allowStaticLevel ? "players" : "entities");
+            jsonObject.addProperty("amount", arg.allowMultiple ? "multiple" : "single");
+            jsonObject.addProperty("type", arg.allowStaticLevel ? "sub_levels_or_static_world" : "sub_levels");
         }
 
         public SubLevelArgumentType.Info.Template unpack(final SubLevelArgumentType arg) {

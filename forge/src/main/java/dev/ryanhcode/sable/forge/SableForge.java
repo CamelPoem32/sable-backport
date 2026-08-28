@@ -4,12 +4,15 @@ import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.SableCommonEvents;
 import dev.ryanhcode.sable.SableConfig;
 import dev.ryanhcode.sable.command.SableCommand;
+import dev.ryanhcode.sable.command.SableCommandArgumentTypes;
 import dev.ryanhcode.sable.command.argument.SubLevelSelectorModifiers;
 import dev.ryanhcode.sable.index.SableAttributes;
 import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
 import dev.ryanhcode.sable.physics.config.FloatingBlockMaterialDataHandler;
 import dev.ryanhcode.sable.physics.config.block_properties.PhysicsBlockPropertiesDefinitionLoader;
 import dev.ryanhcode.sable.physics.config.dimension_physics.DimensionPhysicsData;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.commands.synchronization.ArgumentTypeInfo;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
@@ -26,6 +29,7 @@ import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegisterEvent;
 
 @Mod(Sable.MOD_ID)
 public final class SableForge {
@@ -39,6 +43,7 @@ public final class SableForge {
         MinecraftForge.EVENT_BUS.addListener(this::registerReloadListeners);
         MinecraftForge.EVENT_BUS.addListener(this::syncDataPack);
         modBus.addListener(SableAttributes::register);
+        modBus.addListener(this::registerCommandArgumentTypes);
         modBus.addListener(this::commonSetup);
 
         SubLevelSelectorModifiers.registerModifiers();
@@ -70,6 +75,15 @@ public final class SableForge {
     private void registerCommand(final RegisterCommandsEvent event) {
         SableCommand.register(event.getDispatcher(), event.getBuildContext());
         SableForgeRuntimeSmoke.commandRegistered();
+    }
+
+    private void registerCommandArgumentTypes(final RegisterEvent event) {
+        event.register(Registries.COMMAND_ARGUMENT_TYPE, helper -> {
+            final ArgumentTypeInfo<?, ?> subLevelInfo = SableCommandArgumentTypes.registerSubLevelByClass();
+            final ArgumentTypeInfo<?, ?> vec3AbsoluteInfo = SableCommandArgumentTypes.registerVec3AbsoluteByClass();
+            helper.register(SableCommandArgumentTypes.SUB_LEVEL_ID, subLevelInfo);
+            helper.register(SableCommandArgumentTypes.VEC3_ABSOLUTE_ID, vec3AbsoluteInfo);
+        });
     }
 
     private void syncDataPack(final OnDatapackSyncEvent event) {

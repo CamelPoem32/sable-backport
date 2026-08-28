@@ -13,7 +13,9 @@ import dev.ryanhcode.sable.network.packets.tcp.ClientboundSableUDPActivationPack
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundStartTrackingSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundStopMovingSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundStopTrackingSubLevelPacket;
+import dev.ryanhcode.sable.network.packets.tcp.ServerboundCreateValueSettingsSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ServerboundPunchSubLevelPacket;
+import dev.ryanhcode.sable.network.packets.tcp.ServerboundUseItemOnSubLevelPacket;
 import dev.ryanhcode.sable.platform.SablePlatformUtil;
 import java.util.ArrayList;
 import java.util.List;
@@ -93,6 +95,8 @@ public final class SableTCPPackets {
             case 11 -> (BiConsumer<ClientboundRecentlySplitSubLevelPacket, SablePacketContext>) SableClientPacketHandlers::handleRecentlySplit;
             case 12 -> (BiConsumer<ClientboundSableUDPActivationPacket, SablePacketContext>) SableClientPacketHandlers::handleUdpActivation;
             case 13 -> (BiConsumer<ServerboundPunchSubLevelPacket, SablePacketContext>) SableServerPacketHandlers::handlePunch;
+            case 14 -> (BiConsumer<ServerboundUseItemOnSubLevelPacket, SablePacketContext>) SableServerPacketHandlers::handleUseItemOnSubLevel;
+            case 15 -> (BiConsumer<ServerboundCreateValueSettingsSubLevelPacket, SablePacketContext>) SableServerPacketHandlers::handleCreateValueSettingsOnSubLevel;
             default -> throw new IllegalArgumentException("Unknown Sable TCP packet id: " + id);
         };
     }

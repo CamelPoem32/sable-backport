@@ -40,7 +40,6 @@ public class VanillaSubLevelBlockEntityRenderer implements SubLevelRenderDispatc
         MultiBufferSource source = this.renderBuffers.bufferSource();
 
         poseStack.pushPose();
-        poseStack.translate((double) pos.getX() - cameraX, (double) pos.getY() - cameraY, (double) pos.getZ() - cameraZ);
 
         final SortedSet<BlockDestructionProgress> destructionProgresses = this.destructionProgress.get(pos.asLong());
         if (destructionProgresses != null && !destructionProgresses.isEmpty()) {

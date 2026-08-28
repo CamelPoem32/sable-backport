@@ -15,6 +15,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Vector2i;
 import org.joml.Vector3d;
 
 import java.util.*;
@@ -119,7 +120,12 @@ public class SubLevelSelector {
                 if (subLevels.isEmpty()) {
                     yield Collections.emptySet();
                 }
-                yield Collections.singleton(subLevels.get(subLevels.size() - 1));
+                final Vector2i origin = container.getOrigin();
+                yield Collections.singleton(subLevels.stream()
+                        .max(Comparator.comparingInt(subLevel -> container.getIndex(
+                                subLevel.getPlot().plotPos.x - origin.x,
+                                subLevel.getPlot().plotPos.z - origin.y)))
+                        .orElseThrow());
             }
         };
 

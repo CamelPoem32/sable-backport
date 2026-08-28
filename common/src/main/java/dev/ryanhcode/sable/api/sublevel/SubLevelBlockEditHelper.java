@@ -3,13 +3,18 @@ package dev.ryanhcode.sable.api.sublevel;
 import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.api.physics.mass.MassTracker;
+import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.physics.config.block_properties.PhysicsBlockPropertyHelper;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
 import dev.ryanhcode.sable.sublevel.plot.ServerLevelPlot;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientGamePacketListener;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -50,9 +55,42 @@ public final class SubLevelBlockEditHelper {
 
         if (notifyClients && !oldState.equals(newState)) {
             subLevel.getLevel().sendBlockUpdated(plotBlockPos, oldState, newState, updateFlags);
+            sendBlockEntityUpdate(subLevel, chunk, plotBlockPos, newState);
         }
 
         return new BlockChange(localOffset.immutable(), plotBlockPos.immutable(), oldState, newState);
+    }
+
+    /** Sends the ordinary BlockEntity update packet after the ordinary block-state update. */
+    private static void sendBlockEntityUpdate(final ServerSubLevel subLevel, final LevelChunk chunk,
+                                              final BlockPos plotBlockPos, final BlockState newState) {
+        if (!newState.hasBlockEntity()) {
+            return;
+        }
+
+        final BlockEntity blockEntity = chunk.getBlockEntity(plotBlockPos);
+        if (blockEntity == null || blockEntity.isRemoved()) {
+            Sable.LOGGER.warn("SABLE_M11_BE phase=runtime_edit_missing_entity id={} pos={} state={}",
+                    subLevel.getUniqueId(), plotBlockPos, newState);
+            return;
+        }
+
+        final Packet<ClientGamePacketListener> updatePacket = blockEntity.getUpdatePacket();
+        if (updatePacket == null) {
+            return;
+        }
+
+        int sent = 0;
+        for (final java.util.UUID uuid : subLevel.getTrackingPlayers()) {
+            final net.minecraft.world.entity.player.Player player = subLevel.getLevel().getPlayerByUUID(uuid);
+            if (player instanceof final ServerPlayer serverPlayer) {
+                serverPlayer.connection.send(updatePacket);
+                sent++;
+            }
+        }
+
+        Sable.LOGGER.info("SABLE_M11_BE phase=runtime_edit_sync id={} pos={} class={} updatePacketSent={}",
+                subLevel.getUniqueId(), plotBlockPos, blockEntity.getClass().getName(), sent);
     }
 
     /**

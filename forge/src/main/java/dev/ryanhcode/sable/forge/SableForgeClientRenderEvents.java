@@ -3,16 +3,23 @@ package dev.ryanhcode.sable.forge;
 import dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.render.dispatcher.SubLevelRenderDispatcher;
+import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaSubLevelBlockEntityRenderer;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.server.level.BlockDestructionProgress;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.common.MinecraftForge;
 
+import java.util.SortedSet;
+
 final class SableForgeClientRenderEvents {
 
     private static final RenderType BASIC_SINGLE_BLOCK_LAYER = RenderType.solid();
+    private static final Long2ObjectMap<SortedSet<BlockDestructionProgress>> NO_DESTRUCTION_PROGRESS = Long2ObjectMaps.emptyMap();
 
     private SableForgeClientRenderEvents() {
     }
@@ -22,7 +29,9 @@ final class SableForgeClientRenderEvents {
     }
 
     private static void onRenderLevelStage(final RenderLevelStageEvent event) {
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS) {
+        final boolean renderBasicBlocks = event.getStage() == RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS;
+        final boolean renderBlockEntities = event.getStage() == RenderLevelStageEvent.Stage.AFTER_ENTITIES;
+        if (!renderBasicBlocks && !renderBlockEntities) {
             return;
         }
 
@@ -38,14 +47,30 @@ final class SableForgeClientRenderEvents {
         }
 
         final Vec3 cameraPosition = event.getCamera().getPosition();
-        SubLevelRenderDispatcher.get().renderBasicSingleBlockLayer(
+        if (renderBasicBlocks) {
+            SubLevelRenderDispatcher.get().renderBasicSingleBlockLayer(
+                    container.getAllSubLevels(),
+                    BASIC_SINGLE_BLOCK_LAYER,
+                    cameraPosition.x,
+                    cameraPosition.y,
+                    cameraPosition.z,
+                    event.getPoseStack().last().pose(),
+                    event.getProjectionMatrix(),
+                    event.getPartialTick());
+            return;
+        }
+
+        final VanillaSubLevelBlockEntityRenderer blockEntityRenderer = new VanillaSubLevelBlockEntityRenderer(
+                minecraft.getBlockEntityRenderDispatcher(),
+                minecraft.renderBuffers(),
+                NO_DESTRUCTION_PROGRESS);
+        SubLevelRenderDispatcher.get().renderBlockEntities(
                 container.getAllSubLevels(),
-                BASIC_SINGLE_BLOCK_LAYER,
+                blockEntityRenderer,
                 cameraPosition.x,
                 cameraPosition.y,
                 cameraPosition.z,
                 event.getPoseStack().last().pose(),
-                event.getProjectionMatrix(),
                 event.getPartialTick());
     }
 }

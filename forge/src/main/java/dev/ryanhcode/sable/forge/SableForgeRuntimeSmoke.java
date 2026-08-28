@@ -350,12 +350,12 @@ public final class SableForgeRuntimeSmoke {
 
     private static void verifyPacketCatalog() {
         final List<SablePacketRegistration<?>> registrations = SableTCPPackets.registrations();
-        require(registrations.size() == 14, "Expected 14 TCP registrations, found " + registrations.size());
+        require(registrations.size() == 15, "Expected 15 TCP registrations, found " + registrations.size());
         for (int id = 0; id < registrations.size(); id++) {
             require(registrations.get(id).id() == id,
                     "Expected TCP registration id " + id + ", found " + registrations.get(id).id());
         }
-        pass("network", "protocol=" + SableTCPPackets.PROTOCOL_VERSION + " registrations=14 ids=0..13");
+        pass("network", "protocol=" + SableTCPPackets.PROTOCOL_VERSION + " registrations=15 ids=0..14");
     }
 
     private static void requireProvider(final String service, final Object provider, final String expectedClass) {

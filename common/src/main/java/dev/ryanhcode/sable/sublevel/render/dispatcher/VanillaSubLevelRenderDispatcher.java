@@ -10,6 +10,7 @@ import dev.ryanhcode.sable.mixinterface.BlockEntityRenderDispatcherExtension;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
 import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaSingleSubLevelRenderData;
+import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaSubLevelRenderTransforms;
 import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderType;
@@ -21,10 +22,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.NotNull;
-import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.joml.Vector3d;
-import org.joml.Vector3f;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -37,6 +36,7 @@ import java.util.function.Consumer;
 public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher {
 
     private static final Set<UUID> LOGGED_DISPATCH = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private static final Set<String> LOGGED_BE_TRANSFORM = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     private final Set<RenderType> singleBlockLayers;
 
@@ -156,35 +156,69 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
     }
 
     @Override
-    public void renderBlockEntities(final Iterable<ClientSubLevel> sublevels, final BlockEntityRenderer blockEntityRenderer, final double cameraX, final double cameraY, final double cameraZ, final float partialTick) {
-        final Vector3f cameraPosition = new Vector3f();
-        final Vector3d chunkOffset = new Vector3d();
-        final Matrix4f transformation = new Matrix4f();
-        final Matrix4f transformationInverse = new Matrix4f();
+    public void renderBlockEntities(final Iterable<ClientSubLevel> sublevels, final BlockEntityRenderer blockEntityRenderer,
+                                    final double cameraX, final double cameraY, final double cameraZ,
+                                    final Matrix4f modelView, final float partialTick) {
         final BlockEntityRenderDispatcherExtension dispatcher = (BlockEntityRenderDispatcherExtension) blockEntityRenderer.getBlockEntityRenderDispatcher();
+        final Vector3d cameraInSubLevel = new Vector3d();
 
-        for (final ClientSubLevel sublevel : sublevels) {
-            final SubLevelRenderData data = sublevel.getRenderData();
-            final PoseStack matrices = new PoseStack();
+        try {
+            for (final ClientSubLevel sublevel : sublevels) {
+                final SubLevelRenderData data = sublevel.getRenderData();
+                if (!(data instanceof final VanillaSingleSubLevelRenderData singleRenderData)) {
+                    continue;
+                }
 
-            sublevel.renderPose().rotationPoint().negate(chunkOffset.zero());
-            data.getTransformation(cameraX, cameraY, cameraZ, transformation);
-
-            transformation.invert(transformationInverse).transformPosition(cameraPosition.zero());
-            dispatcher.sable$setCameraPosition(new Vec3(cameraPosition.x - chunkOffset.x(), cameraPosition.y - chunkOffset.y(), cameraPosition.z - chunkOffset.z()));
-
-            matrices.last().pose().mul(transformation);
-            matrices.last().normal().mul(new Matrix3f(transformation));
-            if (data instanceof final VanillaSingleSubLevelRenderData singleRenderData) {
                 final Collection<BlockEntity> renderBlockEntities = singleRenderData.getRenderBlockEntities();
-                if (!renderBlockEntities.isEmpty()) {
-                    blockEntityRenderer.renderBlockEntities(
-                            renderBlockEntities, matrices, partialTick, -chunkOffset.x, -chunkOffset.y, -chunkOffset.z);
+                if (renderBlockEntities.isEmpty()) {
+                    continue;
+                }
+
+                VanillaSubLevelRenderTransforms.cameraInSubLevelCoordinates(
+                        sublevel.renderPose(), cameraX, cameraY, cameraZ, cameraInSubLevel);
+                dispatcher.sable$setCameraPosition(new Vec3(
+                        cameraInSubLevel.x(), cameraInSubLevel.y(), cameraInSubLevel.z()));
+
+                for (final BlockEntity blockEntity : renderBlockEntities) {
+                    final PoseStack matrices = new PoseStack();
+                    matrices.pushPose();
+                    final Vector3d poseBefore = this.extractTranslation(matrices.last().pose(), new Vector3d());
+                    VanillaSubLevelRenderTransforms.applyBlockTransform(
+                            matrices, modelView, sublevel.renderPose(), blockEntity.getBlockPos(), cameraX, cameraY, cameraZ);
+                    this.logBlockEntityTransform(
+                            sublevel, blockEntity, cameraX, cameraY, cameraZ, poseBefore, matrices.last().pose());
+                    blockEntityRenderer.renderSingleBE(blockEntity, matrices, partialTick, cameraX, cameraY, cameraZ);
+                    matrices.popPose();
                 }
             }
+        } finally {
+            dispatcher.sable$setCameraPosition(null);
+        }
+    }
+
+    private void logBlockEntityTransform(final ClientSubLevel sublevel, final BlockEntity blockEntity,
+                                         final double cameraX, final double cameraY, final double cameraZ,
+                                         final Vector3d poseBefore, final Matrix4f poseBeforeBer) {
+        final BlockPos plotPos = blockEntity.getBlockPos();
+        final String key = sublevel.getUniqueId() + ":" + plotPos.asLong() + ":" + blockEntity.getClass().getName();
+        if (!LOGGED_BE_TRANSFORM.add(key)) {
+            return;
         }
 
-        dispatcher.sable$setCameraPosition(null);
+        final BlockPos localPos = plotPos.subtract(sublevel.getPlot().getCenterBlock());
+        final Vector3d expectedWorldPosition = VanillaSubLevelRenderTransforms.blockWorldPosition(
+                sublevel.renderPose(), plotPos, new Vector3d());
+        final Vector3d cameraRelativePosition = expectedWorldPosition.sub(cameraX, cameraY, cameraZ, new Vector3d());
+        final Vector3d poseBeforeBerTranslation = this.extractTranslation(poseBeforeBer, new Vector3d());
+
+        Sable.LOGGER.info("SABLE_M11_BE_TRANSFORM id={} cameraWorld=({}, {}, {}) subLevelWorldPosition={} subLevelOrientation={} rawPlotBlockPos={} localBlockPos={} expectedBlockWorldPos={} cameraRelativePos={} renderStage=AFTER_ENTITIES poseTranslationBefore={} poseTranslationAfterSubLevel={} poseTranslationBeforeBER={}",
+                sublevel.getUniqueId(), cameraX, cameraY, cameraZ, sublevel.renderPose().position(),
+                sublevel.renderPose().orientation(), plotPos, localPos, expectedWorldPosition, cameraRelativePosition,
+                poseBefore, poseBeforeBerTranslation, poseBeforeBerTranslation);
+    }
+
+    private Vector3d extractTranslation(final Matrix4f matrix, final Vector3d dest) {
+        return dest.set(matrix.m30(), matrix.m31(), matrix.m32());
     }
 
     @Override

@@ -292,7 +292,9 @@ public class FancySubLevelRenderDispatcher implements SubLevelRenderDispatcher {
     }
 
     @Override
-    public void renderBlockEntities(final Iterable<ClientSubLevel> sublevels, final BlockEntityRenderer blockEntityRenderer, final double cameraX, final double cameraY, final double cameraZ, final float partialTick) {
+    public void renderBlockEntities(final Iterable<ClientSubLevel> sublevels, final BlockEntityRenderer blockEntityRenderer,
+                                    final double cameraX, final double cameraY, final double cameraZ,
+                                    final Matrix4f modelView, final float partialTick) {
         // TODO
     }
 

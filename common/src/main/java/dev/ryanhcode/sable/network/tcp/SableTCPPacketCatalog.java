@@ -14,7 +14,9 @@ import dev.ryanhcode.sable.network.packets.tcp.ClientboundSableUDPActivationPack
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundStartTrackingSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundStopMovingSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundStopTrackingSubLevelPacket;
+import dev.ryanhcode.sable.network.packets.tcp.ServerboundCreateValueSettingsSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ServerboundPunchSubLevelPacket;
+import dev.ryanhcode.sable.network.packets.tcp.ServerboundUseItemOnSubLevelPacket;
 import java.util.List;
 
 public final class SableTCPPacketCatalog {
@@ -35,7 +37,10 @@ public final class SableTCPPacketCatalog {
             clientbound(10, ClientboundFloatingBlockMaterialPacket.class, ClientboundFloatingBlockMaterialPacket.CODEC),
             clientbound(11, ClientboundRecentlySplitSubLevelPacket.class, ClientboundRecentlySplitSubLevelPacket.CODEC),
             clientbound(12, ClientboundSableUDPActivationPacket.class, ClientboundSableUDPActivationPacket.CODEC),
-            serverbound(13, ServerboundPunchSubLevelPacket.class, ServerboundPunchSubLevelPacket.CODEC)
+            serverbound(13, ServerboundPunchSubLevelPacket.class, ServerboundPunchSubLevelPacket.CODEC),
+            serverbound(14, ServerboundUseItemOnSubLevelPacket.class, ServerboundUseItemOnSubLevelPacket.CODEC),
+            serverbound(15, ServerboundCreateValueSettingsSubLevelPacket.class,
+                    ServerboundCreateValueSettingsSubLevelPacket.CODEC)
     );
 
     private SableTCPPacketCatalog() {

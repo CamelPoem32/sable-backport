@@ -2644,8 +2644,16 @@ tasks.register('verifyRunClientClasspath') {
         def curatedMixins = new JsonSlurper().parse(file('src/main/resources/sable-common-forge.mixins.json'))
         def selectedMixins = (curatedMixins.mixins + curatedMixins.client)*.toString()
         def createMixins = selectedMixins.findAll { it.toLowerCase(Locale.ROOT).contains('create') }
-        if (!createMixins.isEmpty()) {
-            throw new GradleException("Create Mixins leaked into the generated Forge runtime config: ${createMixins}")
+        def allowedCreateMixins = [
+                'm11.create.BlockEntityConfigurationPacketAccessor',
+                'm11.create.ValueSettingsPacketAccessor',
+                'm11.create.ValueSettingsClientMixin',
+                'm11.create.ValueSettingsScreenMixin',
+                'm11.create.BracketedKineticBlockEntityRendererMixin',
+                'm11.create.KineticBlockEntityRendererMixin'
+        ]
+        if (createMixins != allowedCreateMixins) {
+            throw new GradleException("Unexpected Create mixin set in the Forge runtime config: ${createMixins}")
         }
 
         File resourcesDir = sourceSets.main.output.resourcesDir
@@ -5071,6 +5079,9 @@ tasks.register('verifyM10CommandHarnessBoundary') {
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/AbstractSableMixinPlugin.java'))
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/plugin/SableMixinPlugin.java')
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
@@ -6081,6 +6092,1470 @@ tasks.register('verifySubLevelEntityCollisionBoundary') {
                 + 'LivingEntity.getBlockSpeedFactor/travel plot-coordinate coverage, getOnPos/getBlockStateOn, '
                 + 'feet-block state, climbing redirectPos, clip originalClip lambda, and adjacent active transformed-position '
                 + 'queries use plot-chunk lookup and cannot force parent ServerChunkCache loading for internal plot coordinates')
+    }
+}
+
+tasks.register('verifyM11BlockEntityLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Verifies generic BlockEntity creation, replacement, removal, ticking, and M11 diagnostics.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M11TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java'))
+
+    doLast {
+        String commandText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String m11Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M11TestCommands.java').getText('UTF-8')
+        String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+        String serverPlotText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java').getText('UTF-8')
+        String clientPlotText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java').getText('UTF-8')
+        String mixinPluginText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/AbstractSableMixinPlugin.java').getText('UTF-8')
+        String forgeMixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'M11TestCommands.register(sableBuilder, buildContext)',
+                'Commands.literal("m11")',
+                'Commands.literal("inspect")',
+                'getBlockEntities().values()',
+                'blockEntity.isRemoved()',
+                'blockEntity.getLevel()',
+                'tickerPresent=',
+                'initialized=',
+                'speed=',
+                'clientCounterpart=unavailable_server_command',
+                'LevelChunk.setBlockState is intentionally used',
+                'chunk.registerAllBlockEntitiesAfterLevelLoad()',
+                'chunk.registerTickContainerInLevel(level)',
+                'super.onBlockChange(pos, state)',
+                'mixin.m11.create',
+                'dev.ryanhcode.sable.forge.plugin.SableMixinPlugin',
+                'mixinClassName.startsWith("dev.ryanhcode.sable.mixin.m11.create.")',
+                'computeIfAbsent("create", this::isModLoadedAtMixinSelection)'
+        ].each { canary ->
+            if (!(commandText + m11Text + editText + serverPlotText + clientPlotText + mixinPluginText + forgeMixinConfigText).contains(canary)) {
+                throw new GradleException("M11 BlockEntity lifecycle lost canary: ${canary}")
+            }
+        }
+        int inspectStart = m11Text.indexOf('private static int inspect(')
+        int validateStart = m11Text.indexOf('private static int validateKinetic(', inspectStart)
+        if (inspectStart < 0 || validateStart < inspectStart) {
+            throw new GradleException('Unable to isolate generic M11 inspect handler')
+        }
+        String inspectText = m11Text.substring(inspectStart, validateStart)
+        if (inspectText.contains('create:shaft') || inspectText.contains('create:cogwheel') || inspectText.contains('create:creative_motor')
+                || m11Text.contains('.tick()')) {
+            throw new GradleException('M11 diagnostics must remain generic and must not manually tick or special-case Create blocks')
+        }
+
+        logger.lifecycle('verifyM11BlockEntityLifecycleBoundary PASS: M11 exposes generic BE diagnostics, runtime edits '
+                + 'retain vanilla LevelChunk BE/ticker lifecycle, and loaded chunks use normal registration')
+    }
+}
+
+tasks.register('verifyM11DiagnosticPersistenceBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M11 diagnostics inspect live persisted sublevel contents instead of process-local test metadata.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M11TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/argument/SubLevelSelector.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java'))
+
+    doLast {
+        String m11Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M11TestCommands.java').getText('UTF-8')
+        String selectorText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/argument/SubLevelSelector.java').getText('UTF-8')
+        String serializerText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java').getText('UTF-8')
+
+        int inspectStart = m11Text.indexOf('private static int inspect(')
+        int validateStart = m11Text.indexOf('private static int validateKinetic(', inspectStart)
+        int topologyStart = m11Text.indexOf('private static List<DeterministicKineticTopology> findDeterministicKineticTopologies(')
+        if (inspectStart < 0 || validateStart < inspectStart || topologyStart < validateStart) {
+            throw new GradleException('Unable to isolate M11 inspect/validate/topology diagnostic sections')
+        }
+
+        String inspectText = m11Text.substring(inspectStart, validateStart)
+        String validateText = m11Text.substring(validateStart, topologyStart)
+        String topologyText = m11Text.substring(topologyStart)
+
+        [
+                'final List<BlockEntity> blockEntities = collectBlockEntities(subLevel)',
+                'getBlockEntities().values()',
+                'SABLE_M11_BE',
+                'kineticTopologyCandidates=',
+                'clientCounterpart=unavailable_server_command'
+        ].each { canary ->
+            if (!(inspectText + m11Text).contains(canary)) {
+                throw new GradleException("M11 inspect no longer reads live sublevel BlockEntities: ${canary}")
+            }
+        }
+
+        [
+                'findDeterministicKineticTopologies(subLevel, snapshots)',
+                'discoveredMotorLocal=',
+                'discoveredShaft1Local=',
+                'discoveredShaft2Local=',
+                'topologyCandidates=',
+                'kineticPositions=',
+                'kinetic_topology_not_found',
+                'kinetic_topology_ambiguous'
+        ].each { canary ->
+            if (!validateText.contains(canary)) {
+                throw new GradleException("M11 validate_kinetic lost live topology reconstruction canary: ${canary}")
+            }
+        }
+
+        [
+                'candidateMotor.localPos().relative(Direction.EAST)',
+                'shaftOneLocal.relative(Direction.EAST)',
+                'blockIdMatches(subLevel, candidateMotor.localPos(), CREATIVE_MOTOR_ID)',
+                'new DeterministicKineticTopology(candidateMotor, shaftOne, shaftTwo)'
+        ].each { canary ->
+            if (!topologyText.contains(canary)) {
+                throw new GradleException("M11 deterministic topology discovery lost live-content canary: ${canary}")
+            }
+        }
+
+        [
+                'Map<UUID',
+                'Object2ObjectOpenHashMap<UUID',
+                'spawnKineticMetadata',
+                'lastSpawnKinetic',
+                'persistedM11Speed',
+                'setSpeed(',
+                'setNetwork('
+        ].each { forbidden ->
+            if (m11Text.contains(forbidden)) {
+                throw new GradleException("M11 diagnostics must not depend on process-local descriptors or mutate Create internals: ${forbidden}")
+            }
+        }
+
+        [
+                'case LATEST ->',
+                'container.getIndex(',
+                'subLevel.getPlot().plotPos.x - origin.x',
+                'subLevel.getPlot().plotPos.z - origin.y'
+        ].each { canary ->
+            if (!selectorText.contains(canary)) {
+                throw new GradleException("@l selector must resolve from live sublevels with stable plot ordering after reload: ${canary}")
+            }
+        }
+
+        if (!serializerText.contains('tag.putString("display_name", subLevel.getName())')
+                || !serializerText.contains('subLevel.setName(tag.getString("display_name"))')) {
+            throw new GradleException('Persisted names are required so M11 diagnostics can be targeted unambiguously with selector name filters')
+        }
+
+        logger.lifecycle('verifyM11DiagnosticPersistenceBoundary PASS: M11 inspect reads live BlockEntities, '
+                + 'validate_kinetic reconstructs the deterministic topology from persisted sublevel contents, '
+                + '@l uses stable live plot ordering, and no M11 diagnostic-only metadata or Create internals are persisted')
+    }
+}
+
+tasks.register('verifyM11KineticHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M11.2 deterministic Create kinetic command uses explicit states and normal Create lifecycle.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M11TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(createDevelopmentRuntime)
+
+    doLast {
+        String commandText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String m11Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M11TestCommands.java').getText('UTF-8')
+        String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+
+        [
+                'M11TestCommands.register(sableBuilder, buildContext)',
+                'Commands.literal("spawn_kinetic")',
+                'Commands.literal("validate_kinetic")',
+                'KINETIC_MOTOR_LOCAL = new BlockPos(0, 0, 0)',
+                'KINETIC_SHAFT_ONE_LOCAL = new BlockPos(1, 0, 0)',
+                'KINETIC_SHAFT_TWO_LOCAL = new BlockPos(2, 0, 0)',
+                'CREATIVE_MOTOR_ID = new ResourceLocation("create", "creative_motor")',
+                'SHAFT_ID = new ResourceLocation("create", "shaft")',
+                'setProperty(requireBlockState(CREATIVE_MOTOR_ID), "facing", "east")',
+                'setProperty(requireBlockState(SHAFT_ID), "axis", "x")',
+                'SubLevelBlockEditHelper.setLocalBlock(subLevel, entry.getKey(), entry.getValue(), 3, false)',
+                'SubLevelBlockEditHelper.finalizeBlockChanges(subLevel, changes)',
+                'topology=motor_east_to_two_x_shafts',
+                'Create_kinetics_may_attach_after_server_ticks',
+                'findDeterministicKineticTopologies(subLevel, snapshots)',
+                'candidateMotor.localPos().relative(Direction.EAST)',
+                'requireExpectedState(subLevel, motorLocal, CREATIVE_MOTOR_ID, "facing", "east", failures)',
+                'requireExpectedState(subLevel, shaftOneLocal, SHAFT_ID, "axis", "x", failures)',
+                'requireExpectedState(subLevel, shaftTwoLocal, SHAFT_ID, "axis", "x", failures)',
+                'kinetic_topology_not_found',
+                'kinetic_topology_ambiguous',
+                'discoveredMotorLocal=',
+                'kineticPositions=',
+                'approximatelyEqual(motor.speed(), shaftOne.speed())',
+                'approximatelyEqual(motor.speed(), shaftTwo.speed())',
+                'invokeNoArgRaw(blockEntity, "getSpeed")',
+                'readFieldRaw(blockEntity, "network")',
+                'readFieldRaw(blockEntity, "initialized")',
+                'InitializedDiagnostic='
+        ].each { canary ->
+            if (!(commandText + m11Text + editText).contains(canary)) {
+                throw new GradleException("M11 kinetic harness lost canary: ${canary}")
+            }
+        }
+
+        if (m11Text.contains('_not_initialized')) {
+            throw new GradleException('M11 kinetic validator must not treat Create SmartBlockEntity.initialized as mandatory acceptance')
+        }
+
+        [
+                'setSpeed(',
+                'setSource(',
+                'setNetwork(',
+                'generatedSpeed.value',
+                'RotationPropagator.handleAdded',
+                'attachKinetics()',
+                'create:cogwheel'
+        ].each { forbidden ->
+            if (m11Text.contains(forbidden)) {
+                throw new GradleException("M11 kinetic harness must not manually write Create kinetic internals or unverified topology: ${forbidden}")
+            }
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing staged Create 6.0.8 jar for M11 kinetic preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'com/simibubi/create/content/kinetics/motor/CreativeMotorBlock.class',
+                    'com/simibubi/create/content/kinetics/simpleRelays/AbstractShaftBlock.class',
+                    'com/simibubi/create/content/kinetics/RotationPropagator.class',
+                    'com/simibubi/create/content/kinetics/base/KineticBlockEntity.class'
+            ].each { entryName ->
+                if (jarFile.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 kinetic target class missing: ${entryName}")
+                }
+            }
+
+            String motorText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/kinetics/motor/CreativeMotorBlock.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            String shaftText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/kinetics/simpleRelays/AbstractShaftBlock.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            String propagatorText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/kinetics/RotationPropagator.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            String kineticBeText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/kinetics/base/KineticBlockEntity.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+
+            [
+                    'hasShaftTowards',
+                    'FACING',
+                    'getRotationAxis'
+            ].each { canary ->
+                if (!motorText.contains(canary)) {
+                    throw new GradleException("Create motor bytecode lost topology canary: ${canary}")
+                }
+            }
+            [
+                    'hasShaftTowards',
+                    'AXIS',
+                    'getRotationAxis'
+            ].each { canary ->
+                if (!shaftText.contains(canary)) {
+                    throw new GradleException("Create shaft bytecode lost topology canary: ${canary}")
+                }
+            }
+            [
+                    'handleAdded',
+                    'getConnectedNeighbours',
+                    'getRotationSpeedModifier',
+                    'hasShaftTowards',
+                    'isConnected'
+            ].each { canary ->
+                if (!propagatorText.contains(canary)) {
+                    throw new GradleException("Create RotationPropagator bytecode lost propagation canary: ${canary}")
+                }
+            }
+            [
+                    'tick',
+                    'needsSpeedUpdate',
+                    'attachKinetics',
+                    'getSpeed',
+                    'getTheoreticalSpeed',
+                    'hasNetwork',
+                    'hasSource'
+            ].each { canary ->
+                if (!kineticBeText.contains(canary)) {
+                    throw new GradleException("Create KineticBlockEntity bytecode lost lifecycle canary: ${canary}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM11KineticHarnessBoundary PASS: /sable m11 spawn_kinetic builds one explicit '
+                + 'creative_motor[facing=east] -> shaft[axis=x] -> shaft[axis=x] topology through Sable block '
+                + 'storage/finalization only, validate_kinetic is read-only, and Create 6.0.8 bytecode exposes '
+                + 'the same shaft/axis propagation lifecycle')
+    }
+}
+
+tasks.register('verifyM11SubLevelInteractionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Sable right-click block interactions use a client intent packet and server-authoritative vanilla delegation.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelInteractionHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MultiPlayerGameModeMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundUseItemOnSubLevelPacket.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableTCPPacketCatalog.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableTCPPackets.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableServerPacketHandlers.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/BlockGetterMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/PlayerMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java'))
+    inputs.file(rootProject.file('common/src/main/resources/sable.mixins.json'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.file(createDevelopmentRuntime)
+
+    doLast {
+        String helperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelInteractionHelper.java').getText('UTF-8')
+        String clientHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java').getText('UTF-8')
+        String minecraftMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java').getText('UTF-8')
+        String clientMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MultiPlayerGameModeMixin.java').getText('UTF-8')
+        String packetText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundUseItemOnSubLevelPacket.java').getText('UTF-8')
+        String catalogText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableTCPPacketCatalog.java').getText('UTF-8')
+        String tcpText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableTCPPackets.java').getText('UTF-8')
+        String serverHandlersText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableServerPacketHandlers.java').getText('UTF-8')
+        String clipText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/BlockGetterMixin.java').getText('UTF-8')
+        String reachText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/PlayerMixin.java').getText('UTF-8')
+        String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+        String lookupText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java').getText('UTF-8')
+        String commonMixinText = rootProject.file('common/src/main/resources/sable.mixins.json').getText('UTF-8')
+        String forgeMixinText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'm11.interaction.MinecraftMixin',
+                'method = "startUseItem"',
+                'ClientSubLevelInteractionHelper.tryUseOnCurrentTarget(this.player, this.level, hand, this.hitResult)',
+                'this.rightClickDelay = 4',
+                'ci.cancel()',
+                'method = "tick"',
+                'ClientSubLevelInteractionHelper.refreshHeldUseTarget(this.player, this.level, this.hitResult)',
+                'm11.interaction.MultiPlayerGameModeMixin',
+                'method = "useItemOn"',
+                'ClientSubLevelInteractionHelper.tryUseOnSubLevel(player, player.level(), hand, hitResult)',
+                'cir.setReturnValue(result)'
+        ].each { canary ->
+            if (!(minecraftMixinText + clientMixinText + commonMixinText + forgeMixinText).contains(canary)) {
+                throw new GradleException("M11 interaction client mixin lost packet bridge canary: ${canary}")
+            }
+        }
+
+        [
+                'ItemInvoker.sable$getPlayerPOVHitResult(level, player, ClipContext.Fluid.NONE)',
+                'sendIfSubLevelHit(player, level, hand, povHitResult, currentHit, "sable")',
+                'ForgeHooks.onRightClickBlock(player, hand, blockPos, hitResult)',
+                'event.isCanceled()',
+                'event.getCancellationResult()',
+                'stack.onItemUseFirst(context)',
+                'blockState.use(level, player, hand, hitResult)',
+                'stack.useOn(context)',
+                'refreshHeldUseTarget',
+                'minecraft.hitResult = povHitResult',
+                'Sable.HELPER.getContaining(level, hitResult.getBlockPos())',
+                'hitResult.getBlockPos().subtract(center)',
+                'JOMLConversion.toJOML(hitResult.getLocation())',
+                '.sub(center.getX(), center.getY(), center.getZ())',
+                'final Direction localFace = hitResult.getDirection()',
+                'clientSubLevel.renderPose().transformPosition(hitResult.getLocation())',
+                'SableTCPPackets.sendToServer(new ServerboundUseItemOnSubLevelPacket',
+                'clientSubLevel.getUniqueId()',
+                'localBlockPos.immutable()',
+                'SABLE_M11_INTERACT_CLIENT',
+                'SABLE_M11_WRENCH_CLIENT',
+                'SABLE_M11_MOTOR_CLIENT',
+                'vanillaHitType=',
+                'sableHit=',
+                'packetPath=',
+                'hand=',
+                'item=',
+                'result='
+        ].each { canary ->
+            if (!clientHelperText.contains(canary)) {
+                throw new GradleException("M11 interaction client helper lost hit/packet canary: ${canary}")
+            }
+        }
+
+        [
+                'public record ServerboundUseItemOnSubLevelPacket(UUID subLevelId, BlockPos localBlockPos',
+                'Vector3dc localHit, Direction localFace',
+                'InteractionHand hand',
+                'buf.readUUID()',
+                'buf.readBlockPos()',
+                'SableBufferUtils.read(buf, new Vector3d())',
+                'buf.readEnum(Direction.class)',
+                'buf.readEnum(InteractionHand.class)',
+                'buf.writeUUID(this.subLevelId)',
+                'buf.writeBlockPos(this.localBlockPos)',
+                'SableBufferUtils.write(buf, this.localHit)',
+                'buf.writeEnum(this.localFace)',
+                'buf.writeEnum(this.hand)'
+        ].each { canary ->
+            if (!packetText.contains(canary)) {
+                throw new GradleException("M11 interaction packet lost intent-only payload canary: ${canary}")
+            }
+        }
+        if (packetText.contains('BlockState') || packetText.contains('ResourceLocation') || packetText.contains('axis')
+                || packetText.contains('facing') || packetText.contains('desired') || packetText.contains('newState')) {
+            throw new GradleException('M11 interaction packet must not carry authoritative state or arbitrary actions')
+        }
+
+        [
+                'serverbound(14, ServerboundUseItemOnSubLevelPacket.class, ServerboundUseItemOnSubLevelPacket.CODEC)',
+                'case 14 -> (BiConsumer<ServerboundUseItemOnSubLevelPacket, SablePacketContext>) SableServerPacketHandlers::handleUseItemOnSubLevel',
+                'contextSupplier.get()',
+                'forgeContext::enqueueWork',
+                'SablePacketDirection.SERVERBOUND'
+        ].each { canary ->
+            if (!(catalogText + tcpText + rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/network/ForgeSablePacketTransport.java').getText('UTF-8')).contains(canary)) {
+                throw new GradleException("M11 interaction packet registration/threading lost canary: ${canary}")
+            }
+        }
+
+        [
+                'handleUseItemOnSubLevel(final ServerboundUseItemOnSubLevelPacket packet',
+                'SubLevelInteractionHelper.handleUseItemOnSubLevel(level, player, packet)'
+        ].each { canary ->
+            if (!serverHandlersText.contains(canary)) {
+                throw new GradleException("M11 interaction server handler lost dispatch canary: ${canary}")
+            }
+        }
+
+        [
+                'final SubLevel resolved = container.getSubLevel(packet.subLevelId())',
+                'subLevel.getPlot().getCenterBlock().offset(packet.localBlockPos())',
+                'findServerSubLevel(level, plotBlockPos) != subLevel',
+                'center.getX() + packet.localHit().x()',
+                'visibleWorldHit = subLevel.logicalPose().transformPosition(plotHit)',
+                'reachDistance = player.getEyePosition().distanceTo(visibleWorldHit)',
+                'allowedReach = player.getBlockReach() + SERVER_REACH_SLOP',
+                'level.mayInteract(player, visibleWorldBlock)',
+                'new BlockHitResult(plotHit, packet.localFace(), plotBlockPos, false)',
+                'player.gameMode.useItemOn(player, level, stack, packet.hand(), plotHitResult)',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, plotBlockPos)',
+                'SABLE_M11_INTERACT_SERVER',
+                'visibleWorldHit=',
+                'reachDistance=',
+                'delegatedPath=',
+                'stateBefore=',
+                'stateAfter=',
+                'stateChanged='
+        ].each { canary ->
+            if (!helperText.contains(canary)) {
+                throw new GradleException("M11 interaction server helper lost authority/delegation canary: ${canary}")
+            }
+        }
+
+        [
+                'pose.transformPositionInverse(JOMLConversion.toJOML(clipContext.getFrom()))',
+                'pose.transformPositionInverse(JOMLConversion.toJOML(clipContext.getTo()))',
+                'BlockGetterClipHelper.originalClip(subLevel.getLevel(), subClipContext)',
+                'minResult = subResult',
+                'hitResult.getDirection()'
+        ].each { canary ->
+            if (!(clipText + clientHelperText + helperText).contains(canary)) {
+                throw new GradleException("M11 interaction lost world-ray-to-local-hit canary: ${canary}")
+            }
+        }
+
+        [
+                'sable$canReachBlockInSubLevel',
+                'subLevel.logicalPose().transformPositionInverse(player.getEyePosition())',
+                'new AABB(pos).distanceToSqr(eyePos)'
+        ].each { canary ->
+            if (!reachText.contains(canary)) {
+                throw new GradleException("M11 interaction lost sublevel reach-validation canary: ${canary}")
+            }
+        }
+
+        [
+                'physicsSystem.finalizeExistingSubLevelStorage(subLevel, false, "block_edit")',
+                'SubLevelPhysicsSystem.get(subLevel.getLevel())',
+                'getBlockStateOrAir(final SubLevel subLevel, final BlockPos plotBlockPos)',
+                'getPlotChunk(subLevel, plotBlockPos)'
+        ].each { canary ->
+            if (!(editText + lookupText).contains(canary)) {
+                throw new GradleException("M11 interaction lost canonical state/finalization path canary: ${canary}")
+            }
+        }
+
+        def combined = helperText + clientHelperText + minecraftMixinText + clientMixinText + packetText + serverHandlersText
+        [
+                'create:shaft',
+                'create:cogwheel',
+                'create:creative_motor',
+                'WrenchItem',
+                'IWrenchable',
+                'KineticBlockEntity.switchToBlockState'
+        ].each { forbidden ->
+            if (combined.contains(forbidden)) {
+                throw new GradleException("M11 sublevel interaction bridge must be generic, not Create-specific: ${forbidden}")
+            }
+        }
+        if (clientHelperText.contains('setBlock') || clientHelperText.contains('setValue')
+                || clientMixinText.contains('setBlock') || clientMixinText.contains('setValue')) {
+            throw new GradleException('M11 interaction client path must not authoritatively mutate block state')
+        }
+        if (helperText.contains('SubLevelBlockEditHelper.finalizeBlockChanges(subLevel, List.of(')) {
+            throw new GradleException('M11 interaction must not manually double-finalize normal item-use block changes')
+        }
+        if (!helperText.contains('stateChanged') || !helperText.contains('oldState') || !helperText.contains('newState')) {
+            throw new GradleException('M11 interaction diagnostics must expose resulting state change')
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing staged Create 6.0.8 jar for M11 wrench preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'com/simibubi/create/content/equipment/wrench/WrenchItem.class',
+                    'com/simibubi/create/content/equipment/wrench/IWrenchable.class',
+                    'com/simibubi/create/content/equipment/wrench/WrenchEventHandler.class'
+            ].each { entryName ->
+                def entry = jarFile.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 wrench target class missing: ${entryName}")
+                }
+                String classText = new String(jarFile.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                if (!classText.contains('UseOnContext') || !classText.contains('InteractionResult')) {
+                    throw new GradleException("Create 6.0.8 wrench class lost normal useOn/IWrenchable boundary canaries: ${entryName}")
+                }
+            }
+            String wrenchText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/equipment/wrench/WrenchItem.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            String iwrenchableText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/equipment/wrench/IWrenchable.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            if (!wrenchText.contains('useOn') || !wrenchText.contains('getClickedPos') || !wrenchText.contains('getBlockState')) {
+                throw new GradleException('Create WrenchItem no longer follows the expected normal UseOnContext path')
+            }
+            if (!iwrenchableText.contains('onWrenched') || !iwrenchableText.contains('getClickedFace')
+                    || !iwrenchableText.contains('switchToBlockState') || !iwrenchableText.contains('updateAfterWrenched')) {
+                throw new GradleException('Create IWrenchable no longer follows the expected normal block-state transform path')
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM11SubLevelInteractionBoundary PASS: client right-clicks on Sable hits send a '
+                + 'serverbound UUID/local-block/local-hit/local-face/hand intent packet, the server resolves the '
+                + 'current sublevel authoritatively, validates reach and permissions in visible world space, '
+                + 'runs the normal Forge client use path for feedback/value-setting hooks, delegates to '
+                + 'ServerPlayerGameMode.useItemOn with a reconstructed plot hit, and remains generic rather than '
+                + 'Create-wrench-specific')
+    }
+}
+
+tasks.register('verifyM11WrenchClientFeedbackBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Sable right-clicks preserve generic vanilla/Forge client feedback before server-authoritative delegation.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MultiPlayerGameModeMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundUseItemOnSubLevelPacket.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelInteractionHelper.java'))
+    inputs.file(createDevelopmentRuntime)
+
+    doLast {
+        String clientHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java').getText('UTF-8')
+        String minecraftMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java').getText('UTF-8')
+        String gameModeMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MultiPlayerGameModeMixin.java').getText('UTF-8')
+        String packetText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundUseItemOnSubLevelPacket.java').getText('UTF-8')
+        String serverHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelInteractionHelper.java').getText('UTF-8')
+
+        [
+                'private static InteractionResult runClientUsePath',
+                'ForgeHooks.onRightClickBlock(player, hand, blockPos, hitResult)',
+                'event.isCanceled()',
+                'event.getCancellationResult()',
+                'new UseOnContext(player, hand, hitResult)',
+                'stack.onItemUseFirst(context)',
+                'blockState.use(level, player, hand, hitResult)',
+                'stack.useOn(context)',
+                'minecraftGameModeCreative()',
+                'SABLE_M11_WRENCH_CLIENT',
+                'normalClientPathReached=true',
+                'swingTriggered=',
+                'result='
+        ].each { canary ->
+            if (!clientHelperText.contains(canary)) {
+                throw new GradleException("M11 wrench feedback lost Forge client-use canary: ${canary}")
+            }
+        }
+
+        [
+                'InteractionResult result',
+                'result.consumesAction()',
+                'result.shouldSwing()',
+                'this.player.swing(hand)',
+                'gameRenderer.itemInHandRenderer.itemUsed(hand)',
+                'ci.cancel()'
+        ].each { canary ->
+            if (!minecraftMixinText.contains(canary)) {
+                throw new GradleException("M11 wrench feedback lost Minecraft startUseItem result/swing canary: ${canary}")
+            }
+        }
+        if (!gameModeMixinText.contains('cir.setReturnValue(result)')
+                || gameModeMixinText.contains('InteractionResult.SUCCESS')) {
+            throw new GradleException('M11 wrench feedback must return the actual generic client result, not hardcoded SUCCESS')
+        }
+
+        def combined = clientHelperText + minecraftMixinText + gameModeMixinText
+        [
+                'WrenchItem',
+                'IWrenchable',
+                'playRotateSound',
+                'WRENCH_REMOVE',
+                'create:shaft',
+                'create:cogwheel',
+                'create:creative_motor'
+        ].each { forbidden ->
+            if (combined.contains(forbidden)) {
+                throw new GradleException("M11 client feedback must remain generic, not Create-specific: ${forbidden}")
+            }
+        }
+        if (packetText.contains('BlockState') || packetText.contains('desired') || packetText.contains('newState')) {
+            throw new GradleException('M11 interaction packet must remain intent-only; client feedback must not authorize state')
+        }
+        if (!serverHelperText.contains('player.gameMode.useItemOn(player, level, stack, packet.hand(), plotHitResult)')) {
+            throw new GradleException('M11 wrench server authority lost normal ServerPlayerGameMode.useItemOn delegation')
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing staged Create 6.0.8 jar for M11 wrench feedback preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            String wrenchText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/equipment/wrench/WrenchItem.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            String iwrenchableText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/equipment/wrench/IWrenchable.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            [
+                    'useOn',
+                    'UseOnContext',
+                    'getClickedPos',
+                    'getClickedFace',
+                    'InteractionResult'
+            ].each { canary ->
+                if (!(wrenchText + iwrenchableText).contains(canary)) {
+                    throw new GradleException("Create 6.0.8 wrench feedback target lost canary: ${canary}")
+                }
+            }
+            [
+                    'onWrenched',
+                    'switchToBlockState',
+                    'playRotateSound',
+                    'updateAfterWrenched'
+            ].each { canary ->
+                if (!iwrenchableText.contains(canary)) {
+                    throw new GradleException("Create 6.0.8 IWrenchable lost state-change/feedback canary: ${canary}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM11WrenchClientFeedbackBoundary PASS: Sable right-clicks run the generic Forge '
+                + 'client use path for item/block feedback, return the actual InteractionResult to vanilla swing '
+                + 'handling, and leave authoritative state mutation on the server intent packet path')
+    }
+}
+
+tasks.register('verifyM11CreateValueSettingsInteractionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Sable held right-clicks expose the actual client BlockEntity target to Create value settings.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundUseItemOnSubLevelPacket.java'))
+    inputs.file(createDevelopmentRuntime)
+
+    doLast {
+        String clientHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java').getText('UTF-8')
+        String minecraftMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java').getText('UTF-8')
+        String packetText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundUseItemOnSubLevelPacket.java').getText('UTF-8')
+
+        [
+                'ForgeHooks.onRightClickBlock(player, hand, blockPos, hitResult)',
+                'inspectCreateValueSettings(level, hitResult)',
+                'level.getBlockEntity(hitResult.getBlockPos())',
+                'getAllBehaviours',
+                'ValueSettingsBehaviour',
+                'CreateClient',
+                'VALUE_SETTINGS_HANDLER',
+                'interactHeldTicks',
+                'valuesettingsscreen',
+                'SABLE_M11_MOTOR_CLIENT',
+                'createBehaviorFound=',
+                'rmbHeld=',
+                'holdTicks=',
+                'uiPath=',
+                'uiOpened='
+        ].each { canary ->
+            if (!clientHelperText.contains(canary)) {
+                throw new GradleException("M11 Create value-settings helper lost canary: ${canary}")
+            }
+        }
+
+        [
+                'method = "tick"',
+                'target = "Lnet/minecraft/client/renderer/GameRenderer;pick(F)V"',
+                'shift = Shift.AFTER',
+                'ClientSubLevelInteractionHelper.refreshHeldUseTarget(this.player, this.level, this.hitResult)'
+        ].each { canary ->
+            if (!minecraftMixinText.contains(canary)) {
+                throw new GradleException("M11 Create value-settings hit refresh lost canary: ${canary}")
+            }
+        }
+        [
+                'minecraft.options.keyUse.isDown()',
+                'minecraft.hitResult = hitResult',
+                'minecraft.hitResult = povHitResult',
+                'ItemInvoker.sable$getPlayerPOVHitResult(level, player, ClipContext.Fluid.NONE)'
+        ].each { canary ->
+            if (!clientHelperText.contains(canary)) {
+                throw new GradleException("M11 held-RMB Sable target adapter lost canary: ${canary}")
+            }
+        }
+
+        def combined = clientHelperText + minecraftMixinText + packetText
+        [
+                'new ValueSettingsScreen',
+                'new ValueSettingsPacket',
+                'AllPackets.getChannel',
+                'creative_motor',
+                'CreativeMotor'
+        ].each { forbidden ->
+            if (combined.contains(forbidden)) {
+                throw new GradleException("M11 value-settings bridge must use Create client machinery, not a Sable motor UI: ${forbidden}")
+            }
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing staged Create 6.0.8 jar for M11 value-settings preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsInputHandler.class',
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsClient.class',
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsBehaviour.class',
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsScreen.class',
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsPacket.class'
+            ].each { entryName ->
+                if (jarFile.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 value-settings target class missing: ${entryName}")
+                }
+            }
+            String inputHandlerText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsInputHandler.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            String clientText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsClient.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            [
+                    'onBlockActivated',
+                    'RightClickBlock',
+                    'getBlockEntity',
+                    'SmartBlockEntity',
+                    'getAllBehaviours',
+                    'ValueSettingsBehaviour',
+                    'testHit',
+                    'setCancellationResult',
+                    'startInteractionWith'
+            ].each { canary ->
+                if (!inputHandlerText.contains(canary)) {
+                    throw new GradleException("Create ValueSettingsInputHandler lost client-start canary: ${canary}")
+                }
+            }
+            [
+                    'interactHeldTicks',
+                    'interactHeldPos',
+                    'Minecraft',
+                    'hitResult',
+                    'BlockEntityBehaviour',
+                    'ValueSettingsBehaviour',
+                    'testHit',
+                    'Options',
+                    'keyUse',
+                    'ValueSettingsPacket',
+                    'ValueSettingsScreen',
+                    'ScreenOpener'
+            ].each { canary ->
+                if (!clientText.contains(canary)) {
+                    throw new GradleException("Create ValueSettingsClient lost held-RMB lifecycle canary: ${canary}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM11CreateValueSettingsInteractionBoundary PASS: Sable client hits run Create\'s '
+                + 'RightClickBlock value-settings path against the actual client BlockEntity, keep Minecraft.hitResult '
+                + 'pointing at the Sable target while RMB is held, and do not implement a Sable-specific motor UI')
+    }
+}
+
+tasks.register('verifyM11CreateValueSettingsBridgeBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Create value-setting packets for Sable BlockEntities retain Create semantics with Sable target identity.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelCreateValueSettingsHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelCreateValueSettingsHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundCreateValueSettingsSubLevelPacket.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableTCPPacketCatalog.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableTCPPackets.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableServerPacketHandlers.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/BlockEntityConfigurationPacketAccessor.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/ValueSettingsPacketAccessor.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/ValueSettingsScreenMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/ValueSettingsClientMixin.java'))
+    inputs.file(rootProject.file('common/src/main/resources/sable.mixins.json'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.file(createDevelopmentRuntime)
+
+    doLast {
+        String clientBridgeText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelCreateValueSettingsHelper.java').getText('UTF-8')
+        String serverBridgeText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelCreateValueSettingsHelper.java').getText('UTF-8')
+        String packetText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundCreateValueSettingsSubLevelPacket.java').getText('UTF-8')
+        String catalogText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableTCPPacketCatalog.java').getText('UTF-8')
+        String tcpText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableTCPPackets.java').getText('UTF-8')
+        String handlersText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableServerPacketHandlers.java').getText('UTF-8')
+        String bePacketAccessorText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/BlockEntityConfigurationPacketAccessor.java').getText('UTF-8')
+        String valuePacketAccessorText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/ValueSettingsPacketAccessor.java').getText('UTF-8')
+        String screenMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/ValueSettingsScreenMixin.java').getText('UTF-8')
+        String clientMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/ValueSettingsClientMixin.java').getText('UTF-8')
+        String commonMixinText = rootProject.file('common/src/main/resources/sable.mixins.json').getText('UTF-8')
+        String forgeMixinText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'm11.create.ValueSettingsClientMixin',
+                'm11.create.ValueSettingsScreenMixin',
+                'm11.create.BlockEntityConfigurationPacketAccessor',
+                'm11.create.ValueSettingsPacketAccessor'
+        ].each { canary ->
+            if (!(commonMixinText + forgeMixinText).contains(canary)) {
+                throw new GradleException("M11 Create value-settings bridge mixin config lost canary: ${canary}")
+            }
+        }
+        [
+                'target = "Lnet/minecraftforge/network/simple/SimpleChannel;sendToServer(Ljava/lang/Object;)V"',
+                'ClientSubLevelCreateValueSettingsHelper.trySendValueSettingsPacket(packet)',
+                'original.call(channel, packet)'
+        ].each { canary ->
+            if (!(screenMixinText + clientMixinText).contains(canary)) {
+                throw new GradleException("M11 Create value-settings send wrapper lost canary: ${canary}")
+            }
+        }
+        [
+                'BlockEntityConfigurationPacketAccessor',
+                'sable$getPos()',
+                'ValueSettingsPacketAccessor',
+                'sable$getRow()',
+                'sable$getValue()',
+                'sable$getInteractHand()',
+                'sable$getHitResult()',
+                'sable$getSide()',
+                'sable$getCtrlDown()',
+                'sable$getBehaviourIndex()',
+                'Sable.HELPER.getContaining(minecraft.level, plotBlockPos)',
+                'plotBlockPos.subtract(subLevel.getPlot().getCenterBlock())',
+                'SableTCPPackets.sendToServer(new ServerboundCreateValueSettingsSubLevelPacket',
+                'SABLE_M11_VALUE_CLIENT'
+        ].each { canary ->
+            if (!clientBridgeText.contains(canary)) {
+                throw new GradleException("M11 Create value-settings client bridge lost canary: ${canary}")
+            }
+        }
+        [
+                'public record ServerboundCreateValueSettingsSubLevelPacket(UUID subLevelId, BlockPos localBlockPos',
+                'int row, int value',
+                '@Nullable InteractionHand interactHand',
+                '@Nullable BlockHitResult hitResult',
+                'Direction side, boolean ctrlDown',
+                'int behaviourIndex',
+                'buf.readUUID()',
+                'buf.readBlockPos()',
+                'buf.readVarInt()',
+                'buf.readBlockHitResult()',
+                'buf.writeBlockHitResult(hitResult)'
+        ].each { canary ->
+            if (!packetText.contains(canary)) {
+                throw new GradleException("M11 Create value-settings packet lost original-payload canary: ${canary}")
+            }
+        }
+        [
+                'serverbound(15, ServerboundCreateValueSettingsSubLevelPacket.class',
+                'case 15 -> (BiConsumer<ServerboundCreateValueSettingsSubLevelPacket, SablePacketContext>) SableServerPacketHandlers::handleCreateValueSettingsOnSubLevel',
+                'SubLevelCreateValueSettingsHelper.handleValueSettingsOnSubLevel(level, player, packet)'
+        ].each { canary ->
+            if (!(catalogText + tcpText + handlersText).contains(canary)) {
+                throw new GradleException("M11 Create value-settings packet registration lost canary: ${canary}")
+            }
+        }
+        [
+                'container.getSubLevel(packet.subLevelId())',
+                'subLevel.getPlot().getCenterBlock().offset(packet.localBlockPos())',
+                'SubLevelInteractionHelper.findServerSubLevel(level, plotBlockPos) != subLevel',
+                'player.getEyePosition().distanceTo(visibleWorldHit)',
+                'level.mayInteract(player, visibleWorldBlock)',
+                'SubLevelBlockStateLookup.getBlockEntity(subLevel, plotBlockPos)',
+                'SmartBlockEntity',
+                'ValueSettingsBehaviour',
+                'new ValueSettingsPacket(',
+                'plotBlockPos',
+                'packet.row()',
+                'packet.value()',
+                'packet.interactHand()',
+                'plotHitResult(packet, plotBlockPos)',
+                'packet.side()',
+                'packet.ctrlDown()',
+                'packet.behaviourIndex()',
+                'sable$applySettings(player, smartBlockEntity)',
+                'sable$causeUpdate()',
+                'sendData()',
+                'smartBlockEntity.setChanged()',
+                'SABLE_M11_VALUE_SERVER'
+        ].each { canary ->
+            if (!serverBridgeText.contains(canary)) {
+                throw new GradleException("M11 Create value-settings server bridge lost Create delegation canary: ${canary}")
+            }
+        }
+        [
+                '@Accessor("pos")',
+                '@Invoker("causeUpdate")'
+        ].each { canary ->
+            if (!bePacketAccessorText.contains(canary)) {
+                throw new GradleException("M11 Create BlockEntityConfigurationPacket accessor lost canary: ${canary}")
+            }
+        }
+        [
+                '@Accessor("row")',
+                '@Accessor("value")',
+                '@Accessor("interactHand")',
+                '@Accessor("hitResult")',
+                '@Accessor("side")',
+                '@Accessor("ctrlDown")',
+                '@Accessor("behaviourIndex")',
+                '@Invoker("applySettings")'
+        ].each { canary ->
+            if (!valuePacketAccessorText.contains(canary)) {
+                throw new GradleException("M11 Create ValueSettingsPacket accessor lost canary: ${canary}")
+            }
+        }
+        def combined = clientBridgeText + serverBridgeText + packetText
+        [
+                'CreativeMotorBlockEntity',
+                'generatedSpeed',
+                'setSpeed(',
+                'create:creative_motor',
+                'create:shaft'
+        ].each { forbidden ->
+            if (combined.contains(forbidden)) {
+                throw new GradleException("M11 Create value-settings bridge must remain generic and must not write motor internals: ${forbidden}")
+            }
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing staged Create 6.0.8 jar for M11 value-settings bridge preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsScreen.class',
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsClient.class',
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsPacket.class',
+                    'com/simibubi/create/foundation/networking/BlockEntityConfigurationPacket.class'
+            ].each { entryName ->
+                if (jarFile.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 value-settings bridge target class missing: ${entryName}")
+                }
+            }
+            String screenText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsScreen.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            String clientText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsClient.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            String packetClassText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/foundation/blockEntity/behaviour/ValueSettingsPacket.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            String configPacketText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/foundation/networking/BlockEntityConfigurationPacket.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            [
+                    'sendToServer',
+                    'ValueSettingsPacket'
+            ].each { canary ->
+                if (!(screenText + clientText).contains(canary)) {
+                    throw new GradleException("Create value-settings client packet target lost canary: ${canary}")
+                }
+            }
+            [
+                    'row',
+                    'value',
+                    'interactHand',
+                    'hitResult',
+                    'side',
+                    'ctrlDown',
+                    'behaviourIndex',
+                    'setValueSettings',
+                    'onShortInteract'
+            ].each { canary ->
+                if (!packetClassText.contains(canary)) {
+                    throw new GradleException("Create ValueSettingsPacket lost payload/apply canary: ${canary}")
+                }
+            }
+            [
+                    'isLoaded',
+                    'closerThan',
+                    'getBlockEntity',
+                    'applySettings',
+                    'sendData',
+                    'setChanged'
+            ].each { canary ->
+                if (!configPacketText.contains(canary)) {
+                    throw new GradleException("Create BlockEntityConfigurationPacket lost server-validation canary: ${canary}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM11CreateValueSettingsBridgeBoundary PASS: Create ValueSettingsPacket sends for '
+                + 'Sable client BlockEntities are replaced with a UUID/local-position Sable wrapper, the server '
+                + 'resolves the current SmartBlockEntity authoritatively, validates reach in visible world space, '
+                + 'and delegates the original row/value/hand/hit/side/ctrl/netId payload to Create applySettings')
+    }
+}
+
+tasks.register('verifySableCommandArgumentSerializationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies every custom Sable Brigadier argument reachable from /sable has Forge command-tree network serialization.'
+
+    inputs.dir(rootProject.file('common/src/main/java/dev/ryanhcode/sable'))
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+
+    doLast {
+        File commonSourceRoot = rootProject.file('common/src/main/java/dev/ryanhcode/sable')
+        File registrarSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommandArgumentTypes.java')
+        File subLevelSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/command/SubLevelArgumentType.java')
+        File vec3Source = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/Vec3ArgumentAbsolute.java')
+        File forgeSource = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+        File forgeMixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+
+        def customArgumentFiles = fileTree(commonSourceRoot) {
+            include '**/*.java'
+            exclude '**/mixin/**'
+        }.matching {
+            include '**/*.java'
+        }.files.findAll {
+            it.getText('UTF-8').contains('implements ArgumentType')
+        }.collect {
+            commonSourceRoot.toPath().relativize(it.toPath()).toString().replace('\\', '/')
+        }.sort()
+
+        def expectedCustomArgumentFiles = [
+                'api/command/SubLevelArgumentType.java',
+                'command/Vec3ArgumentAbsolute.java'
+        ]
+        if (customArgumentFiles != expectedCustomArgumentFiles) {
+            throw new GradleException("Unexpected custom Sable ArgumentType implementations: "
+                    + "${customArgumentFiles}; expected ${expectedCustomArgumentFiles}")
+        }
+
+        String registrarText = registrarSource.getText('UTF-8')
+        String subLevelText = subLevelSource.getText('UTF-8')
+        String vec3Text = vec3Source.getText('UTF-8')
+        String forgeText = forgeSource.getText('UTF-8')
+        String forgeMixinText = forgeMixinConfig.getText('UTF-8')
+
+        [
+                'public static final ResourceLocation SUB_LEVEL_ID = new ResourceLocation(Sable.MOD_ID, "sub_level")',
+                'public static final ResourceLocation VEC3_ABSOLUTE_ID = new ResourceLocation(Sable.MOD_ID, "vec3_absolute")',
+                'ArgumentTypeInfos.registerByClass(SubLevelArgumentType.class, new SubLevelArgumentType.Info())',
+                'ArgumentTypeInfos.registerByClass(',
+                'SingletonArgumentInfo.contextFree(Vec3ArgumentAbsolute::vec3)',
+                'public static class Info implements ArgumentTypeInfo<SubLevelArgumentType, SubLevelArgumentType.Info.Template>',
+                'public Vec3 parse(StringReader stringReader) throws CommandSyntaxException'
+        ].each { canary ->
+            if (!(registrarText + subLevelText + vec3Text).contains(canary)) {
+                throw new GradleException("Sable command ArgumentType serialization lost canary: ${canary}")
+            }
+        }
+
+        [
+                'modBus.addListener(this::registerCommandArgumentTypes)',
+                'private void registerCommandArgumentTypes(final RegisterEvent event)',
+                'event.register(Registries.COMMAND_ARGUMENT_TYPE, helper ->',
+                'helper.register(SableCommandArgumentTypes.SUB_LEVEL_ID, subLevelInfo)',
+                'helper.register(SableCommandArgumentTypes.VEC3_ABSOLUTE_ID, vec3AbsoluteInfo)'
+        ].each { canary ->
+            if (!forgeText.contains(canary)) {
+                throw new GradleException("Forge command ArgumentType registration lost canary: ${canary}")
+            }
+        }
+
+        if (forgeMixinText.contains('command.ArgumentTypeInfosMixin')) {
+            throw new GradleException('Forge production mixin config still depends on ArgumentTypeInfos bootstrap injection')
+        }
+        if (forgeText.contains('server-console-only') || forgeText.contains('ClientboundCommandsPacket')) {
+            throw new GradleException('Command argument serialization fix must not hide the /sable tree from clients')
+        }
+
+        logger.lifecycle('verifySableCommandArgumentSerializationBoundary PASS: custom /sable arguments are exactly '
+                + 'SubLevelArgumentType and Vec3ArgumentAbsolute; both register ArgumentTypeInfos by class through '
+                + 'the Forge COMMAND_ARGUMENT_TYPE registry before ClientboundCommandsPacket serialization')
+    }
+}
+
+tasks.register('verifyEarlyMixinOptionalModDetectionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Forge optional-mixin gating uses loading-layer mod discovery instead of late ModList.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/AbstractSableMixinPlugin.java'))
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/plugin/SableMixinPlugin.java')
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+
+    doLast {
+        String commonPluginText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/AbstractSableMixinPlugin.java')
+                .getText('UTF-8')
+        String forgePluginText = file('src/main/java/dev/ryanhcode/sable/forge/plugin/SableMixinPlugin.java').getText('UTF-8')
+        String forgeMixinText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        int onLoadStart = commonPluginText.indexOf('public void onLoad')
+        int getRefMapperStart = commonPluginText.indexOf('public String getRefMapperConfig', onLoadStart)
+        if (onLoadStart < 0 || getRefMapperStart < 0) {
+            throw new GradleException('Unable to isolate AbstractSableMixinPlugin.onLoad')
+        }
+        String onLoadText = commonPluginText.substring(onLoadStart, getRefMapperStart)
+        if (onLoadText.contains('SableLoaderPlatform.INSTANCE') || onLoadText.contains('ModList.get()')) {
+            throw new GradleException('Mixin plugin onLoad still calls late runtime mod-detection APIs')
+        }
+
+        [
+                'this.isModLoadedAtMixinSelection("sodium")',
+                'this.isModLoadedAtMixinSelection("embeddium")',
+                'computeIfAbsent("create", this::isModLoadedAtMixinSelection)',
+                'protected boolean isModLoadedAtMixinSelection(final String modId)',
+                'protected String getModVersionAtMixinSelection(final String modId)'
+        ].each { canary ->
+            if (!commonPluginText.contains(canary)) {
+                throw new GradleException("Shared mixin plugin lost early-detection abstraction canary: ${canary}")
+            }
+        }
+
+        [
+                'import net.minecraftforge.fml.loading.FMLLoader',
+                'import net.minecraftforge.fml.loading.LoadingModList',
+                'protected boolean isModLoadedAtMixinSelection(final String modId)',
+                'protected String getModVersionAtMixinSelection(final String modId)',
+                'FMLLoader.getLoadingModList()',
+                'loadingModList.getModFileById(modId)',
+                'modInfo.getModId()',
+                'modInfo.getVersion().toString()'
+        ].each { canary ->
+            if (!forgePluginText.contains(canary)) {
+                throw new GradleException("Forge mixin plugin lost early loading-layer canary: ${canary}")
+            }
+        }
+
+        if (forgePluginText.contains('ModList.get()') || forgePluginText.contains('SableLoaderPlatform.INSTANCE')) {
+            throw new GradleException('Forge mixin plugin must not call late ModList/SableLoaderPlatform during mixin selection')
+        }
+        [
+                '"plugin": "dev.ryanhcode.sable.forge.plugin.SableMixinPlugin"',
+                '"m11.create.BracketedKineticBlockEntityRendererMixin"',
+                '"m11.create.KineticBlockEntityRendererMixin"'
+        ].each { canary ->
+            if (!forgeMixinText.contains(canary)) {
+                throw new GradleException("Forge mixin config lost optional Create mixin/plugin canary: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifyEarlyMixinOptionalModDetectionBoundary PASS: Forge mixin selection gates optional '
+                + 'Create/Sodium/Embeddium mixins from FMLLoader.getLoadingModList(), while later runtime '
+                + 'SableLoaderPlatform ModList semantics remain isolated from onLoad')
+    }
+}
+
+tasks.register('verifyM11ClientBlockEntitySyncBoundary') {
+    group = 'forge backport'
+    description = 'Verifies runtime sublevel BlockEntity edits use normal block and BlockEntity client synchronization.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ClientSubLevel.java'))
+
+    doLast {
+        String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+        String clientPlotText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java').getText('UTF-8')
+        String clientSubLevelText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ClientSubLevel.java').getText('UTF-8')
+
+        [
+                'subLevel.getLevel().sendBlockUpdated(plotBlockPos, oldState, newState, updateFlags)',
+                'final Packet<ClientGamePacketListener> updatePacket = blockEntity.getUpdatePacket()',
+                'serverPlayer.connection.send(updatePacket)',
+                'subLevel.updateRenderData()',
+                'super.onBlockChange(pos, state)',
+                'SABLE_M11_BE phase=runtime_edit_sync'
+        ].each { canary ->
+            if (!(editText + clientPlotText + clientSubLevelText).contains(canary)) {
+                throw new GradleException("M11 client BlockEntity synchronization lost canary: ${canary}")
+            }
+        }
+        if (editText.contains('ClientboundM11') || editText.contains('renderOneCreate')
+                || editText.contains('create:shaft') || editText.contains('create:cogwheel')) {
+            throw new GradleException('M11 client BE synchronization must use standard packets and generic invalidation')
+        }
+
+        logger.lifecycle('verifyM11ClientBlockEntitySyncBoundary PASS: runtime edits send the normal block update plus '
+                + 'the BlockEntity update packet, and client storage invalidates normal Sable render data')
+    }
+}
+
+tasks.register('verifyM11BlockEntityRenderDispatchBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the Forge M10/M11 retained renderer dispatches generic sublevel BlockEntity renderers.'
+
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java')
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/SubLevelRenderDispatcher.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSubLevelBlockEntityRenderer.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSubLevelRenderTransforms.java'))
+
+    doLast {
+        String forgeEventText = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java').getText('UTF-8')
+        String forgeMixinConfig = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String dispatcherInterfaceText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/SubLevelRenderDispatcher.java').getText('UTF-8')
+        String dispatcherText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java').getText('UTF-8')
+        String renderDataText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java').getText('UTF-8')
+        String beRendererText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSubLevelBlockEntityRenderer.java').getText('UTF-8')
+        String transformText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSubLevelRenderTransforms.java').getText('UTF-8')
+
+        [
+                'RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS',
+                'RenderLevelStageEvent.Stage.AFTER_ENTITIES',
+                'VanillaSubLevelBlockEntityRenderer',
+                'minecraft.getBlockEntityRenderDispatcher()',
+                'minecraft.renderBuffers()',
+                'NO_DESTRUCTION_PROGRESS',
+                'SubLevelRenderDispatcher.get().renderBasicSingleBlockLayer',
+                'SubLevelRenderDispatcher.get().renderBlockEntities',
+                'event.getPoseStack().last().pose()'
+        ].each { canary ->
+            if (!forgeEventText.contains(canary)) {
+                throw new GradleException("Forge sublevel render event bridge lost BE dispatch canary: ${canary}")
+            }
+        }
+
+        [
+                'void renderBlockEntities(final Iterable<ClientSubLevel> sublevels, final BlockEntityRenderer blockEntityRenderer',
+                'final Matrix4f modelView',
+                'default void renderBlockEntities(final Collection<BlockEntity> blockEntities',
+                'void renderSingleBE(final BlockEntity blockEntity'
+        ].each { canary ->
+            if (!dispatcherInterfaceText.contains(canary)) {
+                throw new GradleException("SubLevelRenderDispatcher lost generic BE render API canary: ${canary}")
+            }
+        }
+
+        [
+                'public void renderBlockEntities(final Iterable<ClientSubLevel> sublevels',
+                'VanillaSubLevelRenderTransforms.cameraInSubLevelCoordinates',
+                'dispatcher.sable$setCameraPosition',
+                'VanillaSubLevelRenderTransforms.applyBlockTransform(',
+                'blockEntityRenderer.renderSingleBE(blockEntity, matrices',
+                'singleRenderData.getRenderBlockEntities()',
+                'SABLE_M11_BE_TRANSFORM',
+                'expectedBlockWorldPos=',
+                'cameraRelativePos=',
+                'renderStage=AFTER_ENTITIES'
+        ].each { canary ->
+            if (!dispatcherText.contains(canary)) {
+                throw new GradleException("Vanilla sublevel dispatcher lost transformed BE pass canary: ${canary}")
+            }
+        }
+
+        [
+                'private final List<BlockEntity> renderBlockEntities = new ArrayList<>()',
+                'rebuildBlockEntities()',
+                'block.state().hasBlockEntity()',
+                'SubLevelBlockStateLookup.getBlockEntity(this.subLevel, block.pos())',
+                'getBlockEntityRenderDispatcher()',
+                'getRenderer(blockEntity)',
+                'this.renderBlockEntities.add(blockEntity)',
+                'SABLE_M11_RENDER_BE',
+                'rendererPresent=',
+                'dispatched=false',
+                'VanillaSubLevelRenderTransforms.applyBlockTransform('
+        ].each { canary ->
+            if (!renderDataText.contains(canary)) {
+                throw new GradleException("Vanilla retained render data lost BE enumeration canary: ${canary}")
+            }
+        }
+
+        [
+                'Sable.HELPER.getContainingClient(blockEntity)',
+                'final BlockEntityRenderer<?> renderer = this.blockEntityRenderDispatcher.getRenderer(blockEntity)',
+                'if (renderer == null)',
+                'this.renderBuffers.bufferSource()',
+                'this.blockEntityRenderDispatcher.render(blockEntity, partialTick, poseStack, source)',
+                'SABLE_M11_RENDER_BE',
+                'rendererPresent=true dispatched=true'
+        ].each { canary ->
+            if (!beRendererText.contains(canary)) {
+                throw new GradleException("Vanilla sublevel BE renderer lost dispatch/logging canary: ${canary}")
+            }
+        }
+
+        [
+                'public static void applyBlockTransform(final PoseStack stack, final Matrix4f modelView',
+                'blockWorldPosition(renderPose, blockPos',
+                'worldPosition.x() - camX',
+                'worldPosition.y() - camY',
+                'worldPosition.z() - camZ',
+                'renderPose.transformPositionInverse(dest)'
+        ].each { canary ->
+            if (!transformText.contains(canary)) {
+                throw new GradleException("Shared vanilla sublevel transform helper lost camera-relative canary: ${canary}")
+            }
+        }
+
+        if (beRendererText.contains('poseStack.translate((double) pos.getX() - cameraX')
+                || beRendererText.contains('poseStack.translate((double) pos.getX()')) {
+            throw new GradleException('Sublevel BE renderer must not treat raw plot BlockPos as camera-relative world position')
+        }
+        if (!dispatcherText.contains('final PoseStack matrices = new PoseStack()')
+                || !dispatcherText.contains('VanillaSubLevelRenderTransforms.applyBlockTransform(')
+                || !dispatcherText.contains('modelView')) {
+            throw new GradleException('Fresh BE PoseStack must be populated through the shared event model-view sublevel transform')
+        }
+
+        def genericRendererText = forgeEventText + dispatcherInterfaceText + dispatcherText + renderDataText + beRendererText + transformText
+        if (genericRendererText.contains('create:shaft') || genericRendererText.contains('create:cogwheel')
+                || genericRendererText.contains('create:creative_motor')) {
+            throw new GradleException('Generic sublevel BE render pass must not hardcode Create block IDs')
+        }
+        if (forgeMixinConfig.contains('sublevel_render.block_entity_render.LevelRendererMixin')) {
+            throw new GradleException('Forge retained renderer must use the Forge RenderLevelStageEvent BE pass, not the old LevelRenderer BE mixin')
+        }
+        if (!forgeEventText.contains('RenderLevelStageEvent') || !forgeEventText.contains('MinecraftForge.EVENT_BUS')) {
+            throw new GradleException('Forge retained renderer must remain on the Forge RenderLevelStageEvent entry point')
+        }
+
+        logger.lifecycle('verifyM11BlockEntityRenderDispatchBoundary PASS: Forge RenderLevelStageEvent renders ordinary '
+                + 'M10 blocks after solid chunks and dispatches generic sublevel BlockEntities before the vanilla '
+                + 'block-entity phase through the transformed vanilla '
+                + 'BlockEntityRenderDispatcher path without Create block-specific render forks')
+    }
+}
+
+tasks.register('verifyM11CreateRendererBoundary') {
+    group = 'forge backport'
+    description = 'Verifies stationary Create BlockEntities use Create BERs inside the retained Sable transform path.'
+
+    inputs.file(rootProject.file('common/src/main/resources/sable.mixins.json'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.file(createDevelopmentRuntime)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/BracketedKineticBlockEntityRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+
+    doLast {
+        String commonConfig = rootProject.file('common/src/main/resources/sable.mixins.json').getText('UTF-8')
+        String forgeConfig = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String kineticText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java').getText('UTF-8')
+        String bracketedText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/BracketedKineticBlockEntityRendererMixin.java').getText('UTF-8')
+        String renderText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java').getText('UTF-8')
+        String mixinText = kineticText + bracketedText
+
+        [
+                'm11.create.KineticBlockEntityRendererMixin',
+                'm11.create.BracketedKineticBlockEntityRendererMixin',
+                'com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer',
+                'com.simibubi.create.content.kinetics.simpleRelays.BracketedKineticBlockEntityRenderer',
+                'VisualizationManager;supportsVisualization',
+                'Sable.HELPER.getContainingClient(blockEntity)',
+                'final KineticBlockEntity blockEntity, final float partialTick',
+                'final BracketedKineticBlockEntity blockEntity, final float partialTick',
+                'originalVisualizationSupported',
+                'returnedVisualizationSupported',
+                'SABLE_M11_CREATE_BER',
+                'sableSubLevel ? false : originalVisualizationSupported',
+                'final boolean originalVisualizationSupported = original.call(level)',
+                'return returnedVisualizationSupported',
+                'BlockEntityRenderDispatcher'
+        ].each { canary ->
+            if (!(commonConfig + forgeConfig + mixinText + renderText).contains(canary)) {
+                throw new GradleException("M11 Create renderer boundary lost canary: ${canary}")
+            }
+        }
+        if (mixinText.contains('@Local') || mixinText.contains('LocalRef')
+                || mixinText.contains('com.llamalad7.mixinextras.sugar.Local')
+                || mixinText.contains('com.llamalad7.mixinextras.sugar.ref')) {
+            throw new GradleException('M11 Create renderer wrappers must not use implicit @Local/LocalRef capture')
+        }
+        if (mixinText.contains('create:shaft')
+                || mixinText.contains('create:cogwheel')
+                || mixinText.contains('create:creative_motor')) {
+            throw new GradleException('M11 Create renderer integration must not hardcode block-specific meshes')
+        }
+        if (!renderText.contains('SableSubLevelRenderPlatform.INSTANCE.tesselateBlock')
+                || !renderText.contains('rebuildBlockEntities')) {
+            throw new GradleException('M10 vanilla block rendering must remain present beside the Create BER fallback')
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing staged Create 6.0.8 jar for M11 renderer preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'com/simibubi/create/content/kinetics/base/KineticBlockEntityRenderer.class',
+                    'com/simibubi/create/content/kinetics/simpleRelays/BracketedKineticBlockEntityRenderer.class'
+            ].each { entryName ->
+                def entry = jarFile.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 target class missing: ${entryName}")
+                }
+                String classText = new String(jarFile.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                [
+                        'renderSafe',
+                        'getLevel',
+                        'dev/engine_room/flywheel/api/visualization/VisualizationManager',
+                        'supportsVisualization',
+                        'net/minecraft/world/level/LevelAccessor'
+                ].each { canary ->
+                    if (!classText.contains(canary)) {
+                        throw new GradleException("Create 6.0.8 target ${entryName} lost renderSafe Flywheel canary: ${canary}")
+                    }
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM11CreateRendererBoundary PASS: Create-owned BERs are re-enabled only for Sable client '
+                + 'sublevels through explicit WrapOperation method arguments, no @Local/LocalRef capture is used, '
+                + 'Create 6.0.8 renderSafe bytecode contains the expected supportsVisualization(LevelAccessor) calls, '
+                + 'and the existing transformed generic BE dispatcher and M10 block renderer remain active')
     }
 }
 

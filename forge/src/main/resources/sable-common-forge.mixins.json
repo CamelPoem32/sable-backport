@@ -3,6 +3,7 @@
     "package": "dev.ryanhcode.sable.mixin",
     "compatibilityLevel": "JAVA_17",
     "minVersion": "0.8",
+    "plugin": "dev.ryanhcode.sable.forge.plugin.SableMixinPlugin",
     "refmap": "sable.refmap.json",
     "mixinextras": {
         "minVersion": "0.5.0"
@@ -40,6 +41,10 @@
         "plot.lighting.RenderChunkRegionMixin",
         "punching.MinecraftMixin",
         "punching.MultiPlayerGameModeMixin",
+        "m11.interaction.MinecraftMixin",
+        "m11.interaction.MultiPlayerGameModeMixin",
+        "m11.create.ValueSettingsClientMixin",
+        "m11.create.ValueSettingsScreenMixin",
         "respawn_point.sleeping.LivingEntityRendererMixin",
         "stop_rain.LevelRenderMixin",
         "sublevel_render.BlockEntityRenderDispatcherMixin",
@@ -47,7 +52,9 @@
         "sublevel_sounds.AbstractSoundInstanceMixin",
         "sublevel_sounds.ChannelAccessor",
         "sublevel_sounds.ClientLevelMixin",
-        "sublevel_sounds.SoundEngineMixin"
+        "sublevel_sounds.SoundEngineMixin",
+        "m11.create.BracketedKineticBlockEntityRendererMixin",
+        "m11.create.KineticBlockEntityRendererMixin"
     ],
     "mixins": [
         "assembly.AbstractFurnaceBlockEntityMixin",
@@ -63,9 +70,10 @@
         "clip_overwrite.ClipContextMixin",
         "clip_overwrite.EntityMixin",
         "clip_overwrite.HitResultMixin",
-        "command.ArgumentTypeInfosMixin",
         "command.DataCommandsMixin",
         "command.ExecuteCommandMixin",
+        "m11.create.BlockEntityConfigurationPacketAccessor",
+        "m11.create.ValueSettingsPacketAccessor",
         "death_message.CombatTrackerMixin",
         "death_message.EntityMixin",
         "enchanting_table.EnchantingTableBlockEntityMixin",

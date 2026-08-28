@@ -115,7 +115,9 @@ public interface SubLevelRenderDispatcher extends NativeResource, ResourceManage
                                              final Matrix4f modelView, final Matrix4f projection, final float partialTicks) {
     }
 
-    void renderBlockEntities(final Iterable<ClientSubLevel> sublevels, final BlockEntityRenderer blockEntityRenderer, final double cameraX, double cameraY, double cameraZ, final float partialTick);
+    void renderBlockEntities(final Iterable<ClientSubLevel> sublevels, final BlockEntityRenderer blockEntityRenderer,
+                             final double cameraX, double cameraY, double cameraZ, final Matrix4f modelView,
+                             final float partialTick);
 
     void addDebugInfo(final Consumer<String> consumer);
 

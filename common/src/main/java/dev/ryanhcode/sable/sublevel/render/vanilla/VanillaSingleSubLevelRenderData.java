@@ -29,16 +29,15 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
-import org.joml.Quaterniondc;
-import org.joml.Quaternionf;
-import org.joml.Vector3d;
 import org.joml.Vector3dc;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Immediate-mode vanilla renderer for small basic sub-levels.
@@ -47,8 +46,7 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
 
     private static final RandomSource RANDOM = RandomSource.create();
     private static final SingleBlockSubLevelWrapper LEVEL_WRAPPER = new SingleBlockSubLevelWrapper();
-    private static final Matrix4f TRANSFORM = new Matrix4f();
-    private static final Vector3d CENTER_OF_ROT = new Vector3d();
+    private static final Set<String> LOGGED_BLOCK_ENTITY_SCAN = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     /**
      * The sub-level this renderer is for
@@ -91,9 +89,22 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
             final BlockEntityRenderer<?> blockEntityRenderer = Minecraft.getInstance()
                     .getBlockEntityRenderDispatcher()
                     .getRenderer(blockEntity);
+            this.logBlockEntityScan(blockEntity, blockEntityRenderer);
             if (blockEntityRenderer != null) {
                 this.renderBlockEntities.add(blockEntity);
             }
+        }
+    }
+
+    private void logBlockEntityScan(final BlockEntity blockEntity, @Nullable final BlockEntityRenderer<?> blockEntityRenderer) {
+        final BlockPos plotPos = blockEntity.getBlockPos();
+        final BlockPos localPos = plotPos.subtract(this.subLevel.getPlot().getCenterBlock());
+        final String key = this.subLevel.getUniqueId() + ":" + plotPos.asLong() + ":" + blockEntity.getClass().getName();
+        if (LOGGED_BLOCK_ENTITY_SCAN.add(key)) {
+            Sable.LOGGER.info("SABLE_M11_RENDER_BE id={} posLocal={} posPlot={} class={} rendererClass={} rendererPresent={} dispatched=false",
+                    this.subLevel.getUniqueId(), localPos, plotPos, blockEntity.getClass().getName(),
+                    blockEntityRenderer == null ? "null" : blockEntityRenderer.getClass().getName(),
+                    blockEntityRenderer != null);
         }
     }
 
@@ -133,7 +144,7 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
             }
 
             final PoseStack stack = new PoseStack();
-            this.applyBlockTransform(stack, modelView, renderPose, block.pos(), camX, camY, camZ);
+            VanillaSubLevelRenderTransforms.applyBlockTransform(stack, modelView, renderPose, block.pos(), camX, camY, camZ);
             SableSubLevelRenderPlatform.INSTANCE.tesselateBlock(
                     LEVEL_WRAPPER, bakedModel, blockState, block.pos(), stack, consumer, RANDOM, block.seed(),
                     OverlayTexture.NO_OVERLAY, layer);
@@ -148,27 +159,6 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
         }
 
         return renderedBlocks;
-    }
-
-    private void applyBlockTransform(final PoseStack stack, final Matrix4f modelView, final Pose3dc renderPose,
-                                     final BlockPos blockPos, final double camX, final double camY,
-                                     final double camZ) {
-        final Vector3dc renderPos = renderPose.position();
-        final double renderX = renderPos.x();
-        final double renderY = renderPos.y();
-        final double renderZ = renderPos.z();
-        final Quaterniondc renderRot = renderPose.orientation();
-        final Vector3d renderCOR = renderRot.transform(CENTER_OF_ROT.set(renderPose.rotationPoint())
-                .sub(blockPos.getX(), blockPos.getY(), blockPos.getZ()));
-
-        renderCOR.negate().add(renderX, renderY, renderZ);
-
-        final Matrix4f transform = TRANSFORM.identity();
-        transform.translate((float) (renderCOR.x() - camX), (float) (renderCOR.y() - camY), (float) (renderCOR.z() - camZ));
-        transform.rotate(new Quaternionf(renderRot));
-
-        stack.last().pose().mul(modelView).mul(transform);
-        transform.normal(stack.last().normal());
     }
 
     public @Nullable BlockEntity getRenderBlockEntity() {

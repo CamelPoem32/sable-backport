@@ -1844,3 +1844,98 @@ with small linear/angular motion, then stop with:
 ```text
 /sable m10 stop @l
 ```
+
+## M11.1 Create BlockEntity Baseline
+
+Run these on a stationary M10 L sublevel. M11.1 checks ordinary Create
+BlockEntity creation, server ticking, client synchronization, and stationary
+Create-owned rendering. It does not test kinetic-network propagation.
+
+```text
+/sable m10 spawn_l m11_be_l
+/sable m10 stop @l
+/sable m10 add_block @l 3 0 0 create:shaft
+/sable m10 add_block @l 4 0 0 create:cogwheel
+/sable m10 add_block @l 5 0 0 create:creative_motor
+/sable m10 inspect @l
+/sable m11 inspect @l
+```
+
+Expected `SABLE_M11_INSPECT` invariants: the three Create blocks have real
+BlockEntities in the sublevel plot, each reports its concrete class and level,
+removed=false, and the normal ticker is present when the block supplies one.
+The client should show the shaft, cogwheel, and creative motor using Create's
+own renderer semantics. The Sable rigid body must remain stationary and usable
+for collision and player interaction.
+
+Removal/replacement smoke checks:
+
+```text
+/sable m10 remove_block @l 4 0 0
+/sable m11 inspect @l
+/sable m10 add_block @l 4 0 0 create:cogwheel
+/sable m11 inspect @l
+```
+
+Save/reload, M11.2 kinetic-network construction, contraptions, and moving-frame
+visual integration are deferred to later milestones.
+
+## M11.2 Create Kinetics And Interaction
+
+No Minecraft client/server was launched for this implementation pass. M11.2A
+uses a deterministic Create topology instead of default-state manual placement.
+M11.2B uses the normal right-click/item-use path so the Create wrench can act on
+Sable sublevel blocks without a Create-specific rotation command.
+
+### M11.2A
+
+```text
+/sable m11 spawn_kinetic m11_kinetic
+/sable m11 inspect @l
+/sable m11 validate_kinetic @l
+```
+
+The topology is one Sable sublevel with:
+
+```text
+(0,0,0) create:creative_motor[facing=east]
+(1,0,0) create:shaft[axis=x]
+(2,0,0) create:shaft[axis=x]
+```
+
+Expected invariants after Create has ticked/attached kinetics: all three
+BlockEntities exist, are initialized, have nonzero finite speed, share the same
+kinetic network when Create exposes it, and the two shafts have the same RPM as
+the motor for this same-axis shaft chain. The command does not write Create
+speed, source, or network state manually.
+
+### M11.2B
+
+Give yourself a Create wrench, then right-click the visible Sable sublevel
+motor/shaft blocks:
+
+```text
+/give @s create:wrench
+/sable m11 inspect @l
+/sable m11 validate_kinetic @l
+```
+
+Manual checklist: right-click the shaft, the second shaft, and the creative
+motor while the sublevel is stationary. Then optionally set a nontrivial Sable
+pose and repeat one interaction:
+
+```text
+/sable m10 set_pose @l 30 10 15
+/sable m10 stop @l
+/sable m11 inspect @l
+```
+
+Expected behavior: the hit targets the visible rigid-body block, the action uses
+the player's held wrench and hand, Create receives the local clicked face/hit,
+any BlockState change synchronizes back to the client, Sable collision/render
+data update through the normal block-edit lifecycle, and Create's kinetic
+network is allowed to rebuild normally. The bridge logs one concise
+`SABLE_M11_INTERACT ...` line per server-side sublevel interaction.
+
+M11.2 still does not accept contraptions, bearings, trains, or Flywheel
+moving-frame visual integration.

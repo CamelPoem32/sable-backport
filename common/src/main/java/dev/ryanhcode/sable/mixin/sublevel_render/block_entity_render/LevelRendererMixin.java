@@ -97,6 +97,8 @@ public class LevelRendererMixin {
     public void sable$preRenderBEs(final DeltaTracker deltaTracker, final boolean bl, final Camera camera, final GameRenderer gameRenderer, final LightTexture lightTexture, final Matrix4f matrix4f, final Matrix4f matrix4f2, final CallbackInfo ci) {
         final List<ClientSubLevel> subLevels = SubLevelContainer.getContainer(this.level).getAllSubLevels();
         final Vec3 cameraPosition = camera.getPosition();
-        SubLevelRenderDispatcher.get().renderBlockEntities(subLevels, this.sable$subLevelBlockEntityRenderer, cameraPosition.x, cameraPosition.y, cameraPosition.z, deltaTracker.getGameTimeDeltaPartialTick(false));
+        SubLevelRenderDispatcher.get().renderBlockEntities(subLevels, this.sable$subLevelBlockEntityRenderer,
+                cameraPosition.x, cameraPosition.y, cameraPosition.z, new Matrix4f(),
+                deltaTracker.getGameTimeDeltaPartialTick(false));
     }
 }

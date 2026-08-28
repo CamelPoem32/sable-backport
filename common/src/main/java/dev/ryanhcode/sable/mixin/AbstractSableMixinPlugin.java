@@ -26,12 +26,13 @@ import java.util.Set;
 public abstract class AbstractSableMixinPlugin implements IMixinConfigPlugin {
     public static final Logger LOGGER = LogUtils.getLogger();
     private final Object2BooleanMap<String> modLoadedCache = new Object2BooleanOpenHashMap<>();
+    private final MixinConstraints mixinConstraints = new MixinConstraints();
     private boolean sodiumPresent;
 
     @Override
     public void onLoad(final String mixinPackage) {
-        this.sodiumPresent = SableLoaderPlatform.INSTANCE.isModLoaded("sodium")
-                || SableLoaderPlatform.INSTANCE.isModLoaded("embeddium");
+        this.sodiumPresent = this.isModLoadedAtMixinSelection("sodium")
+                || this.isModLoadedAtMixinSelection("embeddium");
 
         LOGGER.info("Using {} renderer mixins", this.sodiumPresent ? "Sodium" : "Vanilla");
     }
@@ -44,6 +45,10 @@ public abstract class AbstractSableMixinPlugin implements IMixinConfigPlugin {
     @Override
     public boolean shouldApplyMixin(final String targetClassName, final String mixinClassName) {
         // TODO: Housekeeping
+        if (mixinClassName.startsWith("dev.ryanhcode.sable.mixin.m11.create.")) {
+            return this.modLoadedCache.computeIfAbsent("create", this::isModLoadedAtMixinSelection);
+        }
+
         if (mixinClassName.startsWith("dev.ryanhcode.sable.mixin.sublevel_render.impl")) {
             return this.sodiumPresent ? mixinClassName.startsWith("dev.ryanhcode.sable.mixin.sublevel_render.impl.sodium") : mixinClassName.startsWith("dev.ryanhcode.sable.mixin.sublevel_render.impl.vanilla");
         }
@@ -60,8 +65,8 @@ public abstract class AbstractSableMixinPlugin implements IMixinConfigPlugin {
             final String modId = parts[3].equals("mixin") ? parts[5] : parts[6];
             
             final boolean isModLoaded = this.modLoadedCache.computeIfAbsent(
-                    modId, SableLoaderPlatform.INSTANCE::isModLoaded);
-            return isModLoaded && MixinConstraints.handleClassAnnotation(mixinClassName, modId);
+                    modId, this::isModLoadedAtMixinSelection);
+            return isModLoaded && this.mixinConstraints.handleClassAnnotation(mixinClassName, modId);
         }
 
         return true;
@@ -83,13 +88,21 @@ public abstract class AbstractSableMixinPlugin implements IMixinConfigPlugin {
     @Override
     public void postApply(final String targetClassName, final ClassNode targetClass, final String mixinClassName, final IMixinInfo mixinInfo) {
     }
+
+    protected boolean isModLoadedAtMixinSelection(final String modId) {
+        return SableLoaderPlatform.INSTANCE.isModLoaded(modId);
+    }
+
+    protected String getModVersionAtMixinSelection(final String modId) {
+        return SableLoaderPlatform.INSTANCE.getModVersion(modId);
+    }
     
     // Constraint handling
-	static class MixinConstraints {
-        private static final Object2ObjectMap<String, String> MOD_VERSION_CACHE = new Object2ObjectOpenHashMap<>();
+    class MixinConstraints {
+        private final Object2ObjectMap<String, String> modVersionCache = new Object2ObjectOpenHashMap<>();
         
         // Looks for if there's a @MixinModVersionConstraint annotation which declares a range for when a mixin should be loaded
-        static boolean handleClassAnnotation(final String mixinClassName, final String modId) {
+        boolean handleClassAnnotation(final String mixinClassName, final String modId) {
             try {
                 final List<AnnotationNode> nodes = MixinService.getService().getBytecodeProvider().getClassNode(mixinClassName).visibleAnnotations;
                 if (nodes == null)
@@ -101,13 +114,13 @@ public abstract class AbstractSableMixinPlugin implements IMixinConfigPlugin {
             }
         }
 
-        static boolean shouldApply(final List<AnnotationNode> nodes, final String modId) throws InvalidVersionSpecificationException {
+        boolean shouldApply(final List<AnnotationNode> nodes, final String modId) throws InvalidVersionSpecificationException {
             for (final AnnotationNode node : nodes) {
                 if (node.desc.equals(Type.getDescriptor(MixinModVersionConstraint.class))) {
                     final String range = Annotations.getValue(node, "value");
                     final VersionRange versionRange = VersionRange.createFromVersionSpec(range);
 
-                    final String modVersion = MOD_VERSION_CACHE.computeIfAbsent(modId, x -> SableLoaderPlatform.INSTANCE.getModVersion(modId));
+                    final String modVersion = this.modVersionCache.computeIfAbsent(modId, AbstractSableMixinPlugin.this::getModVersionAtMixinSelection);
                     final ArtifactVersion artifactVersion = new DefaultArtifactVersion(modVersion);
 
                     return versionRange.containsVersion(artifactVersion);
