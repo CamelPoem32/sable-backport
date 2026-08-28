@@ -1939,3 +1939,173 @@ network is allowed to rebuild normally. The bridge logs one concise
 
 M11.2 still does not accept contraptions, bearings, trains, or Flywheel
 moving-frame visual integration.
+
+## M12 Scale And Ordinary Create Compatibility
+
+No Minecraft client/server was launched while preparing this harness. M12 is
+intended to be tested in one runtime session, stopping at the first meaningful
+failure. Use `@l` immediately after a spawn if convenient, but after Save & Quit
+prefer `/sable m12 list` and the persisted-name selector form:
+
+```text
+@e[name=m12_grid,limit=1]
+```
+
+### Phase 1: M12.1 Large Multi-Chunk Sublevel
+
+```text
+/sable m12 spawn_chunk_grid m12_grid
+/sable m12 inspect @l
+/sable m12 validate @l
+/sable m12 acceptance @l
+```
+
+Expected server invariants: one Sable sublevel, roughly 140 stone blocks,
+at least four actual hidden plot ChunkPos values, finite positive mass,
+valid local/plot bounds, registered rigid body, and nonempty collision
+geometry. Manually walk/jump across the platform and inspect that all chunks
+render without seams. Then exercise pose/motion:
+
+```text
+/sable m10 set_pose @l 20 0 10
+/sable m10 set_velocity @l 0 2 0 0 20 0
+/sable m10 stop @l
+```
+
+### Phase 2: M12.2 Real Chunk Boundary Edits
+
+```text
+/sable m12 boundary_info @e[name=m12_grid,limit=1]
+/sable m12 add_boundary_block @e[name=m12_grid,limit=1] A minecraft:stone
+/sable m12 add_boundary_block @e[name=m12_grid,limit=1] B minecraft:stone
+/sable m12 add_boundary_block @e[name=m12_grid,limit=1] C minecraft:stone
+/sable m12 add_boundary_block @e[name=m12_grid,limit=1] D minecraft:stone
+/sable m12 validate_boundaries @e[name=m12_grid,limit=1]
+/sable m12 remove_boundary_block @e[name=m12_grid,limit=1] A
+/sable m12 remove_boundary_block @e[name=m12_grid,limit=1] B
+/sable m12 remove_boundary_block @e[name=m12_grid,limit=1] C
+/sable m12 remove_boundary_block @e[name=m12_grid,limit=1] D
+/sable m12 validate_boundaries @e[name=m12_grid,limit=1]
+```
+
+Expected: slots A/B sit on opposite sides of a real X chunk seam, C/D on
+opposite sides of a real Z chunk seam. Edits update server storage, mass,
+collision, client rendering, and persistence through the normal Sable edit
+lifecycle. Visual seam correctness remains manual.
+
+### Phase 3: M12.3 Cross-Chunk Kinetic Span
+
+```text
+/sable m12 spawn_kinetic_span m12_span
+/sable m12 inspect @l
+/sable m12 validate_kinetic_span @l
+/sable m12 acceptance @l
+```
+
+Expected topology: one `create:creative_motor[facing=east]` driving sixteen
+`create:shaft[axis=x]` blocks across at least one actual hidden plot chunk
+boundary. Create must provide all speed/source/network state; Sable does not
+write it directly. Expected RPM relationship is 1:1 magnitude along the
+same-axis shaft chain.
+
+Manual interaction checks:
+
+```text
+/give @s create:wrench
+```
+
+Right-click one span shaft with the wrench to break the compatible axis, then:
+
+```text
+/sable m12 validate_kinetic_span @e[name=m12_span,limit=1]
+```
+
+Expected: FAIL for a real connectivity/speed/topology reason. Wrench it back
+to `axis=x`, wait for Create to rebuild, then rerun validation and expect PASS.
+Hold RMB on the motor, change speed through Create's normal UI, then inspect:
+
+```text
+/sable m12 inspect @e[name=m12_span,limit=1]
+/sable m12 validate_kinetic_span @e[name=m12_span,limit=1]
+```
+
+Expected: motor and shaft speeds change together and remain in one network.
+
+### Phase 4: M12.4 Representative Create Suite
+
+```text
+/sable m12 spawn_create_suite m12_suite
+/sable m12 inspect_create_suite @l
+/sable m12 validate_create_suite @l
+/sable m12 acceptance @l
+```
+
+The suite contains ordinary stationary Create representatives only:
+
+```text
+create:shaft[axis=x]
+create:cogwheel[axis=x]
+create:large_cogwheel[axis=y]
+create:gearbox[axis=x]
+create:creative_motor[facing=east]
+create:depot
+create:rotation_speed_controller[axis=x]
+create:speedometer[facing=east,axis_along_first=false]
+```
+
+Expected server invariants: expected blocks exist, BlockEntities exist where
+the BlockState requires them, Sable physics remains registered, and validation
+does not claim visual/UI success. Manually verify rendering and normal
+interactions that apply to each block.
+
+### Phase 5: M12.5 Persistence/Reload
+
+Before saving:
+
+```text
+/sable m12 persistence_snapshot @e[name=m12_grid,limit=1]
+/sable m12 persistence_snapshot @e[name=m12_span,limit=1]
+/sable m12 persistence_snapshot @e[name=m12_suite,limit=1]
+```
+
+Save & Quit, reopen the same world, then recover live targets:
+
+```text
+/sable m12 list
+/sable m12 persistence_snapshot @e[name=m12_grid,limit=1]
+/sable m12 validate @e[name=m12_grid,limit=1]
+/sable m12 persistence_snapshot @e[name=m12_span,limit=1]
+/sable m12 validate_kinetic_span @e[name=m12_span,limit=1]
+/sable m12 persistence_snapshot @e[name=m12_suite,limit=1]
+/sable m12 validate_create_suite @e[name=m12_suite,limit=1]
+```
+
+Expected: snapshots remain consistent with live state, Create kinetics resume,
+wrench and value-settings interactions still work, and Sable rigid-body motion
+still works. UUIDs/names printed by `m12 list` identify the live reloaded
+sublevels.
+
+### Phase 6: M12.6 Scale/Render/Performance Fixture
+
+Run medium only after earlier phases pass:
+
+```text
+/sable m12 spawn_scale_grid m12_scale_medium medium
+/sable m12 scale_info @l
+/sable m12 validate @l
+/sable m12 acceptance @l
+```
+
+Expected: about 400 blocks, bounded chunk count, sane mass/collision, no log
+spam, and acceptable manual render/collision behavior. Only if medium works:
+
+```text
+/sable m12 spawn_scale_grid m12_scale_large large
+/sable m12 scale_info @l
+/sable m12 validate @l
+/sable m12 acceptance @l
+```
+
+Expected: about 900 blocks with the same server invariants. M12 does not
+measure FPS automatically; stutter, missing rendered chunks, duplicate
+rendering, or Embeddium/Oculus regressions are manual observations.

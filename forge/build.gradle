@@ -7559,6 +7559,328 @@ tasks.register('verifyM11CreateRendererBoundary') {
     }
 }
 
+tasks.register('verifyM12ChunkSpanningHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M12 chunk-spanning harness computes real hidden plot ChunkPos coverage.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java'))
+
+    doLast {
+        String commandText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String m12Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java').getText('UTF-8')
+        String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+        String renderText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java').getText('UTF-8')
+        String physicsText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/system/SubLevelPhysicsSystem.java').getText('UTF-8')
+        String plotText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java').getText('UTF-8')
+
+        [
+                'M12TestCommands.register(sableBuilder, buildContext)',
+                'Commands.literal("m12")',
+                'Commands.literal("spawn_chunk_grid")',
+                'Commands.literal("inspect")',
+                'Commands.literal("validate")',
+                'boundaryCenteredPlatform(subLevel, 20, 7, 0)',
+                'boundaryBeforePositiveX(subLevel)',
+                'boundaryBeforePositiveZ(subLevel)',
+                'Math.floorMod(subLevel.getPlot().getCenterBlock().getX(), 16)',
+                'new ChunkPos(plotPos)',
+                'occupiedChunks=',
+                'localBounds=',
+                'plotBounds=',
+                'SubLevelBlockEditHelper.setLocalBlock(subLevel, entry.getKey(), entry.getValue(), 3, false)',
+                'SubLevelBlockEditHelper.finalizeBlockChanges(subLevel, changes)'
+        ].each { canary ->
+            if (!(commandText + m12Text + editText).contains(canary)) {
+                throw new GradleException("M12 chunk-spanning harness lost canary: ${canary}")
+            }
+        }
+        [
+                'for (final PlotChunkHolder holder : this.subLevel.getPlot().getLoadedChunks())',
+                'for (final PlotChunkHolder holder : plot.getLoadedChunks())',
+                'for (final PlotChunkHolder chunkHolder : this.getLoadedChunks())'
+        ].each { canary ->
+            if (!(renderText + physicsText + plotText).contains(canary)) {
+                throw new GradleException("M12 static audit found a lost multi-chunk production iteration canary: ${canary}")
+            }
+        }
+        if (m12Text.contains('new BlockPos(16') || m12Text.contains('localX=16') || m12Text.contains('== 16')) {
+            throw new GradleException('M12 harness must not assume local coordinate 16 is a hidden plot chunk boundary')
+        }
+        if (m12Text.contains('ClientboundM12') || m12Text.contains('M12Renderer') || m12Text.contains('M12Collider')) {
+            throw new GradleException('M12 harness must not introduce fixture-specific renderer/collider/network paths')
+        }
+
+        logger.lifecycle('verifyM12ChunkSpanningHarnessBoundary PASS: /sable m12 spawn_chunk_grid computes '
+                + 'chunk-spanning local ranges from the allocated plot center, reports actual occupied ChunkPos, '
+                + 'and production render/collision/persistence code still iterates loaded plot chunks')
+    }
+}
+
+tasks.register('verifyM12BoundaryEditHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M12 boundary edit slots are computed from real plot ChunkPos seams and use canonical edits.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+
+    doLast {
+        String m12Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java').getText('UTF-8')
+        String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+
+        [
+                'Commands.literal("boundary_info")',
+                'Commands.literal("add_boundary_block")',
+                'Commands.literal("remove_boundary_block")',
+                'Commands.literal("validate_boundaries")',
+                'new BoundarySlot(name, localPos, plotPos, new ChunkPos(plotPos))',
+                'boundaryBeforePositiveX',
+                'boundaryBeforePositiveZ',
+                'slot=',
+                'SABLE_M12_BOUNDARY_EDIT',
+                'SubLevelBlockEditHelper.setLocalBlock(subLevel, slot.localPos(), state, 3, true)',
+                'SubLevelBlockEditHelper.setLocalBlock(subLevel, slot.localPos(), Blocks.AIR.defaultBlockState(), 3, true)',
+                'SubLevelBlockEditHelper.finalizeBlockChanges(subLevel, List.of(change))',
+                'x_boundary_slots_same_chunk',
+                'z_boundary_slots_same_chunk'
+        ].each { canary ->
+            if (!(m12Text + editText).contains(canary)) {
+                throw new GradleException("M12 boundary edit harness lost canary: ${canary}")
+            }
+        }
+        if (m12Text.contains('level.setBlock') || m12Text.contains('ServerLevel.setBlock')) {
+            throw new GradleException('M12 boundary edits must not write parent-world hidden plot coordinates directly')
+        }
+
+        logger.lifecycle('verifyM12BoundaryEditHarnessBoundary PASS: boundary slots A-D are derived from real hidden '
+                + 'plot ChunkPos seams and add/remove uses the canonical SubLevelBlockEditHelper lifecycle')
+    }
+}
+
+tasks.register('verifyM12KineticSpanHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M12 kinetic span fixture crosses real chunks and does not write Create internals.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java'))
+    inputs.file(createDevelopmentRuntime)
+
+    doLast {
+        String m12Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java').getText('UTF-8')
+
+        [
+                'Commands.literal("spawn_kinetic_span")',
+                'Commands.literal("validate_kinetic_span")',
+                'KINETIC_SPAN_SHAFTS = 16',
+                'final int beforeX = boundaryBeforePositiveX(subLevel)',
+                'setProperty(requireBlockState(CREATIVE_MOTOR_ID), "facing", "east")',
+                'setProperty(requireBlockState(SHAFT_ID), "axis", "x")',
+                'expectedRatio=1:1_same_axis_shafts',
+                'findBestKineticSpan(subLevel)',
+                'propertyMatches(candidateMotor.state(), "facing", "east")',
+                'propertyMatches(shaft.state(), "axis", "x")',
+                'span.occupiedChunks().size() >= 2',
+                'approximatelyEqual(Math.abs(span.motor().speed()), Math.abs(element.speed()))',
+                'element.hasNetwork()',
+                'network_mismatch'
+        ].each { canary ->
+            if (!m12Text.contains(canary)) {
+                throw new GradleException("M12 kinetic span harness lost canary: ${canary}")
+            }
+        }
+        [
+                'setSpeed(',
+                'setSource(',
+                'setNetwork(',
+                'generatedSpeed.value',
+                'RotationPropagator.handleAdded',
+                '_not_initialized',
+                'create:mechanical_bearing',
+                'create:train'
+        ].each { forbidden ->
+            if (m12Text.contains(forbidden)) {
+                throw new GradleException("M12 kinetic span must not write Create internals or enter deferred milestones: ${forbidden}")
+            }
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing staged Create 6.0.8 jar for M12 kinetic preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'com/simibubi/create/content/kinetics/motor/CreativeMotorBlock.class',
+                    'com/simibubi/create/content/kinetics/simpleRelays/AbstractShaftBlock.class',
+                    'com/simibubi/create/content/kinetics/RotationPropagator.class'
+            ].each { entryName ->
+                if (jarFile.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 kinetic class missing for M12: ${entryName}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM12KineticSpanHarnessBoundary PASS: /sable m12 spawn_kinetic_span creates a '
+                + 'creative_motor[facing=east] plus same-axis shaft span across actual plot chunks, and validation '
+                + 'reads Create speed/network state without requiring initialized or mutating internals')
+    }
+}
+
+tasks.register('verifyM12CreateSuiteBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M12 Create suite uses ordinary stationary Create BlockEntities only.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java'))
+    inputs.file(createDevelopmentRuntime)
+
+    doLast {
+        String m12Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java').getText('UTF-8')
+        [
+                'Commands.literal("spawn_create_suite")',
+                'Commands.literal("inspect_create_suite")',
+                'Commands.literal("validate_create_suite")',
+                'createSuiteEntries()',
+                'rotation_speed_controller',
+                'speedometer',
+                'large_cogwheel',
+                'gearbox',
+                'depot',
+                'blockEntityPresent=',
+                'blockEntityClass=',
+                'expectedPropertiesMatch',
+                'missing_suite_block_',
+                'missing_suite_be_'
+        ].each { canary ->
+            if (!m12Text.contains(canary)) {
+                throw new GradleException("M12 Create suite lost canary: ${canary}")
+            }
+        }
+        [
+                'mechanical_bearing',
+                'contraption',
+                'train',
+                'gantry',
+                'mechanical_piston',
+                'elevator',
+                'schematicannon'
+        ].each { forbidden ->
+            if (m12Text.toLowerCase(Locale.ROOT).contains(forbidden)) {
+                throw new GradleException("M12 Create suite must not include deferred contraption/train/bearing content: ${forbidden}")
+            }
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing staged Create 6.0.8 jar for M12 Create suite preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'assets/create/blockstates/shaft.json',
+                    'assets/create/blockstates/cogwheel.json',
+                    'assets/create/blockstates/large_cogwheel.json',
+                    'assets/create/blockstates/gearbox.json',
+                    'assets/create/blockstates/creative_motor.json',
+                    'assets/create/blockstates/depot.json',
+                    'assets/create/blockstates/rotation_speed_controller.json',
+                    'assets/create/blockstates/speedometer.json'
+            ].each { entryName ->
+                if (jarFile.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create suite blockstate missing from Create 6.0.8 jar: ${entryName}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM12CreateSuiteBoundary PASS: Create suite covers shaft/cogs/gearbox/motor/depot/'
+                + 'speed-controller/speedometer ordinary BlockEntity categories without contraption-era blocks')
+    }
+}
+
+tasks.register('verifyM12PersistenceInspectionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M12 list/snapshot/inspection read live loaded state and do not persist transient harness metadata.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java'))
+
+    doLast {
+        String m12Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java').getText('UTF-8')
+        String serializerText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/storage/serialization/SubLevelSerializer.java').getText('UTF-8')
+        [
+                'Commands.literal("list")',
+                'Commands.literal("persistence_snapshot")',
+                'inspectStats(subLevel)',
+                'scanBlocks(subLevel)',
+                'collectBlockEntities(subLevel)',
+                'getBlockEntities().values()',
+                'blockEntityTypes=',
+                'kineticSummary=',
+                'targetByNameSelector=',
+                'tag.putString("display_name", subLevel.getName())',
+                'subLevel.setName(tag.getString("display_name"))'
+        ].each { canary ->
+            if (!(m12Text + serializerText).contains(canary)) {
+                throw new GradleException("M12 persistence inspection lost live-state/name-targeting canary: ${canary}")
+            }
+        }
+        [
+                'm12_user_data',
+                'M12FixtureDescriptor',
+                'lastSpawn',
+                'Map<UUID',
+                'Object2ObjectOpenHashMap<UUID',
+                'putString("m12',
+                'putInt("m12'
+        ].each { forbidden ->
+            if (m12Text.contains(forbidden) || serializerText.contains(forbidden)) {
+                throw new GradleException("M12 diagnostics must not persist transient fixture metadata: ${forbidden}")
+            }
+        }
+
+        logger.lifecycle('verifyM12PersistenceInspectionBoundary PASS: /sable m12 list and persistence_snapshot '
+                + 'derive fingerprints from live storage/BEs and rely on persisted names for unambiguous targeting')
+    }
+}
+
+tasks.register('verifyM12ScaleHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M12 scale fixtures are bounded and remain diagnostic-only.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java'))
+
+    doLast {
+        String m12Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M12TestCommands.java').getText('UTF-8')
+        [
+                'Commands.literal("spawn_scale_grid")',
+                'Commands.literal("scale_info")',
+                'SMALL("small", 20, 6)',
+                'MEDIUM("medium", 20, 20)',
+                'LARGE("large", 30, 30)',
+                'Unknown scale size',
+                'boundaryCenteredPlatform(subLevel, scaleSize.width(), scaleSize.depth(), 0)',
+                'visualManual=N/A',
+                'fpsManual=N/A'
+        ].each { canary ->
+            if (!m12Text.contains(canary)) {
+                throw new GradleException("M12 scale harness lost bounded diagnostic canary: ${canary}")
+            }
+        }
+        if (m12Text.contains('IntegerArgumentType') || m12Text.contains('DoubleArgumentType')) {
+            throw new GradleException('M12 scale harness must use bounded named sizes, not arbitrary numeric dimensions')
+        }
+
+        logger.lifecycle('verifyM12ScaleHarnessBoundary PASS: scale fixtures are limited to small/medium/large '
+                + 'diagnostic platforms and acceptance reports visual/FPS criteria as manual observations')
+    }
+}
+
 tasks.register('verifyBasicSubLevelRenderLifecycle') {
     group = 'forge backport'
     description = 'Verifies retained basic rendering reads client plot storage and remains wired without deferred render features.'
