@@ -20,7 +20,9 @@ import net.minecraft.client.renderer.chunk.RenderRegionCache;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -47,6 +49,9 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
     private static final RandomSource RANDOM = RandomSource.create();
     private static final SingleBlockSubLevelWrapper LEVEL_WRAPPER = new SingleBlockSubLevelWrapper();
     private static final Set<String> LOGGED_BLOCK_ENTITY_SCAN = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private static final Set<String> LOGGED_CREATE_PISTON_MODEL = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private static final Set<String> LOGGED_CREATE_PISTON_DRAW = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private static final Set<String> LOGGED_SKIPPED_BLOCKS = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     /**
      * The sub-level this renderer is for
@@ -118,11 +123,14 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
         int renderedBlocks = 0;
         for (final RenderBlock block : this.renderBlocks) {
             final BlockState blockState = block.state();
-            if (blockState.getRenderShape() != RenderShape.MODEL) {
+            final boolean createPistonModelFallback = isCreatePistonModelFallback(blockState);
+            if (blockState.getRenderShape() != RenderShape.MODEL && !createPistonModelFallback) {
+                this.logStaticModelDecision(block, blockState, layer, "SKIPPED_RENDER_SHAPE", false, 0);
                 continue;
             }
 
             final BakedModel bakedModel = client.getBlockRenderer().getBlockModel(blockState);
+            final int visibleQuadCount = countVisibleQuads(bakedModel, blockState, block.seed());
             final Pose3dc renderPose = this.subLevel.renderPose();
             final Vector3dc renderPos = renderPose.position();
             LEVEL_WRAPPER.setup(this.subLevel, this.subLevel.getLevel(),
@@ -131,7 +139,23 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
             RANDOM.setSeed(block.seed());
             final List<RenderType> renderLayers = SableSubLevelRenderPlatform.INSTANCE.getRenderLayers(
                     LEVEL_WRAPPER, bakedModel, blockState, block.pos(), RANDOM);
-            if (!renderLayers.contains(layer)) {
+            final boolean pistonSolidFallback = createPistonModelFallback
+                    && RenderType.solid().equals(layer)
+                    && visibleQuadCount > 0;
+            if (createPistonModelFallback) {
+                final String key = this.subLevel.getUniqueId() + ":" + block.pos().asLong() + ":" + blockState;
+                if (LOGGED_CREATE_PISTON_MODEL.add(key)) {
+                    Sable.LOGGER.info("SABLE_M14_PISTON_STATIC_MODEL stage=MODEL_FALLBACK_ENTERED id={} localPos={} "
+                                    + "blockId={} state={} renderShape={} modelClass={} visibleQuadCount={} "
+                                    + "renderLayers={} renderer=BlockRenderDispatcher",
+                            this.subLevel.getUniqueId(), block.pos().subtract(this.subLevel.getPlot().getCenterBlock()),
+                            BuiltInRegistries.BLOCK.getKey(blockState.getBlock()), blockState,
+                            blockState.getRenderShape(), bakedModel.getClass().getName(), visibleQuadCount, renderLayers);
+                }
+            }
+            if (!renderLayers.contains(layer) && !pistonSolidFallback) {
+                this.logStaticModelDecision(block, blockState, layer, "SKIPPED_RENDER_LAYER", createPistonModelFallback,
+                        visibleQuadCount);
                 LEVEL_WRAPPER.clear();
                 continue;
             }
@@ -148,6 +172,17 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
             SableSubLevelRenderPlatform.INSTANCE.tesselateBlock(
                     LEVEL_WRAPPER, bakedModel, blockState, block.pos(), stack, consumer, RANDOM, block.seed(),
                     OverlayTexture.NO_OVERLAY, layer);
+            if (createPistonModelFallback) {
+                final String key = this.subLevel.getUniqueId() + ":" + block.pos().asLong() + ":" + layer;
+                if (LOGGED_CREATE_PISTON_DRAW.add(key)) {
+                    Sable.LOGGER.info("SABLE_M14_PISTON_STATIC_MODEL stage=MODEL_DRAW_CALLED id={} localPos={} "
+                                    + "blockId={} layer={} forcedSolidLayer={} visibleQuadCount={} "
+                                    + "geometryEmitted={}",
+                            this.subLevel.getUniqueId(), block.pos().subtract(this.subLevel.getPlot().getCenterBlock()),
+                            BuiltInRegistries.BLOCK.getKey(blockState.getBlock()), layer, pistonSolidFallback,
+                            visibleQuadCount, visibleQuadCount > 0);
+                }
+            }
             LEVEL_WRAPPER.clear();
             renderedBlocks++;
         }
@@ -159,6 +194,45 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
         }
 
         return renderedBlocks;
+    }
+
+    private void logStaticModelDecision(final RenderBlock block, final BlockState blockState, final RenderType layer,
+                                        final String decision, final boolean fallbackAttempted,
+                                        final int visibleQuadCount) {
+        final String key = this.subLevel.getUniqueId() + ":" + block.pos().asLong() + ":" + layer + ":" + decision;
+        if (!LOGGED_SKIPPED_BLOCKS.add(key)) {
+            return;
+        }
+        Sable.LOGGER.info("SABLE_M14_STATIC_BLOCK_DECISION id={} localPos={} blockId={} state={} "
+                        + "renderShape={} layer={} decision={} fallbackAttempted={} visibleQuadCount={}",
+                this.subLevel.getUniqueId(),
+                block.pos().subtract(this.subLevel.getPlot().getCenterBlock()),
+                BuiltInRegistries.BLOCK.getKey(blockState.getBlock()),
+                blockState,
+                blockState.getRenderShape(),
+                layer,
+                decision,
+                fallbackAttempted,
+                visibleQuadCount);
+    }
+
+    private static int countVisibleQuads(final BakedModel model, final BlockState blockState, final long seed) {
+        int quads = 0;
+        RANDOM.setSeed(seed);
+        quads += model.getQuads(blockState, null, RANDOM).size();
+        for (final Direction direction : Direction.values()) {
+            RANDOM.setSeed(seed);
+            quads += model.getQuads(blockState, direction, RANDOM).size();
+        }
+        return quads;
+    }
+
+    /** Create's piston BER draws the kinetic shaft; retain its baked casing model for every piston state. */
+    private static boolean isCreatePistonModelFallback(final BlockState blockState) {
+        final String namespace = BuiltInRegistries.BLOCK.getKey(blockState.getBlock()).getNamespace();
+        final String path = BuiltInRegistries.BLOCK.getKey(blockState.getBlock()).getPath();
+        return "create".equals(namespace)
+                && ("mechanical_piston".equals(path) || "sticky_mechanical_piston".equals(path));
     }
 
     public @Nullable BlockEntity getRenderBlockEntity() {

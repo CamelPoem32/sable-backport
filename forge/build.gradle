@@ -4953,6 +4953,18 @@ tasks.named('build') {
     dependsOn tasks.named('verifyInteractionDistanceMixinBoundary')
     dependsOn tasks.named('verifyPackagedMixinImplementationClasses')
     dependsOn tasks.named('verifyM13PackagedContraptionMixinBoundary')
+    dependsOn tasks.named('verifyM14PistonHarnessBoundary')
+    dependsOn tasks.named('verifyM14PistonArchitectureBoundary')
+    dependsOn tasks.named('verifyM14PistonFixtureBoundary')
+    dependsOn tasks.named('verifyM14PistonCommandBoundary')
+    dependsOn tasks.named('verifyM14PistonLifecycleBoundary')
+    dependsOn tasks.named('verifyM14PistonAttachmentBoundary')
+    dependsOn tasks.named('verifyM14PistonRenderingBoundary')
+    dependsOn tasks.named('verifyM14PistonStaticRenderingBoundary')
+    dependsOn tasks.named('verifyM14ParentMotionHarnessBoundary')
+    dependsOn tasks.named('verifyM14DiagnosticCoordinateBoundary')
+    dependsOn tasks.named('verifyM14FinalAcceptanceBoundary')
+    dependsOn tasks.named('verifyM14ValidationTruthfulnessBoundary')
 }
 
 tasks.named('checkstyleMain') {
@@ -9622,6 +9634,893 @@ tasks.register('verifyM13ValidationTruthfulnessBoundary') {
 
         logger.lifecycle('verifyM13ValidationTruthfulnessBoundary PASS: /sable m13 validate reports server '
                 + 'assembly/controller/rotation separately and leaves client render/target/edit domains explicitly UNVERIFIED')
+    }
+}
+
+tasks.register('verifyM14PistonHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M14 Mechanical Piston harness uses real Create mechanics and canonical Sable edits.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        String commandText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String m14Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
+        String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+
+        [
+                'M14TestCommands.register(sableBuilder, buildContext)',
+                'Commands.literal("m14")',
+                'Commands.literal("list")',
+                'Commands.literal("spawn_piston")',
+                'Commands.literal("remove")',
+                'Commands.literal("inspect")',
+                'Commands.literal("validate")',
+                'Commands.literal("dump_layout")',
+                'Commands.literal("diagnose")',
+                'Commands.literal("pole_check")',
+                'Commands.literal("attachment_check")',
+                'Commands.literal("reset_fixture")',
+                'Commands.literal("snapshot")',
+                'Commands.literal("captured")',
+                'Commands.literal("lifecycle")',
+                'Commands.literal("cycle_check")',
+                'Commands.literal("endpoints")',
+                'Commands.literal("persistence")',
+                'Commands.literal("extend")',
+                'Commands.literal("retract")',
+                'Commands.literal("toggle")',
+                'Commands.literal("stop_piston")',
+                'Commands.literal("set_motor_speed")',
+                'Commands.literal("reverse_motor")',
+                'Commands.literal("test_stationary")',
+                'Commands.literal("prepare_airborne")',
+                'Commands.literal("test_translate_parent")',
+                'Commands.literal("test_rotate_parent")',
+                'Commands.literal("test_combined_parent")',
+                'MECHANICAL_PISTON_ID = new ResourceLocation("create", "mechanical_piston")',
+                'STICKY_MECHANICAL_PISTON_ID = new ResourceLocation("create", "sticky_mechanical_piston")',
+                'PISTON_EXTENSION_POLE_ID = new ResourceLocation("create", "piston_extension_pole")',
+                'CREATIVE_MOTOR_ID = new ResourceLocation("create", "creative_motor")',
+                'SHAFT_ID = new ResourceLocation("create", "shaft")',
+                'RADIAL_CHASSIS_ID = new ResourceLocation("create", "radial_chassis")',
+                'MOTOR_LOCAL = new BlockPos(0, -2, 0)',
+                'SHAFT_LOCAL = new BlockPos(0, -1, 0)',
+                'EXPECTED_POLE_DIRECTION = PISTON_FACING.getOpposite()',
+                'PISTON_EXTENSION_POLES = 4',
+                'SPAWN_MOTOR_RPM = 0',
+                'DEFAULT_EXTEND_RPM = -32',
+                'DEFAULT_RETRACT_RPM = 32',
+                'setProperty(requireBlockState(STICKY_MECHANICAL_PISTON_ID), "facing", PISTON_FACING.getName())',
+                '"axis_along_first", "true"',
+                '"state", "retracted"',
+                'pistonBlock=create:sticky_mechanical_piston',
+                'setProperty(requireBlockState(CREATIVE_MOTOR_ID), "facing", "up")',
+                'setProperty(requireBlockState(SHAFT_ID), "axis", "y")',
+                'requiredPoleLocals()',
+                'expectedPoleSide=behind_opposite_facing',
+                'staticHeadLocal=none_retracted_create_generates_head',
+                '"sticky_north", "true"',
+                'sticky_mechanical_piston_required_for_reverse_cycle',
+                'livePiston.capturedBlocks() >= MOVED_STRUCTURE_BLOCKS.size()',
+                'MOVED_STRUCTURE_BLOCKS',
+                'setFixtureMotorSpeed(subLevel, SPAWN_MOTOR_RPM)',
+                'constructionOrdering=blocks_then_motor_stopped_then_finalize',
+                'Create_ScrollValueBehaviour_setValue',
+                'SubLevelBlockEditHelper.setLocalBlock(subLevel, entry.getKey(), entry.getValue(), 3, false)',
+                'SubLevelBlockEditHelper.finalizeBlockChanges(subLevel, changes)',
+                'assemblyPath=normal_create_mechanical_piston',
+                'SABLE_M14_VALIDATE state=',
+                'FIXTURE_INVALID',
+                'UNASSEMBLED_READY',
+                'ASSEMBLED_MOVING_VALID',
+                'ASSEMBLED_EXTENDED_VALID',
+                'ASSEMBLED_RETRACTED_VALID',
+                'FIXTURE_LAYOUT=',
+                'KINETIC_DRIVE=',
+                'EXTENSION_CHAIN=',
+                'SERVER_LINEAR_MOTION=',
+                'CLIENT_RENDER=UNVERIFIED',
+                'CLIENT_COLLISION=UNVERIFIED',
+                'CLIENT_TARGETING=UNVERIFIED',
+                'PERSISTENCE=UNVERIFIED'
+        ].each { canary ->
+            if (!(commandText + m14Text + editText).contains(canary)) {
+                throw new GradleException("M14 piston harness lost canary: ${canary}")
+            }
+        }
+        [
+                'assemble(',
+                'disassemble(',
+                'new PistonContraption',
+                'ControlledContraptionEntity.create',
+                'setPos(',
+                'teleportTo(',
+                'setSpeed(',
+                'setSource(',
+                'setNetwork(',
+                'RotationPropagator.handleAdded',
+                'create:gantry',
+                'Gantry'
+        ].each { forbidden ->
+            if (m14Text.contains(forbidden)) {
+                throw new GradleException("M14.1 harness must not fake piston assembly/motion or pull in deferred systems: ${forbidden}")
+            }
+        }
+
+        if (!sourceSets.main.java.matching {
+            include 'dev/ryanhcode/sable/command/M14TestCommands.java'
+        }.files.contains(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))) {
+            throw new GradleException('M14 command source is not selected by sourceSets.main')
+        }
+
+        File createJar = targetCreateJar
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M14 piston preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'assets/create/blockstates/sticky_mechanical_piston.json',
+                    'com/simibubi/create/content/contraptions/piston/MechanicalPistonBlock.class',
+                    'com/simibubi/create/content/contraptions/piston/MechanicalPistonBlockEntity.class',
+                    'com/simibubi/create/content/contraptions/piston/PistonContraption.class',
+                    'com/simibubi/create/content/contraptions/piston/LinearActuatorBlockEntity.class',
+                    'com/simibubi/create/content/contraptions/TranslatingContraption.class',
+                    'com/simibubi/create/content/contraptions/ControlledContraptionEntity.class',
+                    'com/simibubi/create/content/contraptions/chassis/RadialChassisBlock.class',
+                    'assets/create/blockstates/mechanical_piston.json',
+                    'assets/create/blockstates/piston_extension_pole.json',
+                    'assets/create/blockstates/mechanical_piston_head.json',
+                    'assets/create/blockstates/radial_chassis.json',
+                    'assets/create/blockstates/creative_motor.json',
+                    'assets/create/blockstates/shaft.json'
+            ].each { entryName ->
+                if (jarFile.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 Mechanical Piston class/asset missing for M14: ${entryName}")
+                }
+            }
+
+            def pistonBe = jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/contraptions/piston/MechanicalPistonBlockEntity.class')).withCloseable { stream ->
+                readClassStructure(stream)
+            }
+            [
+                    'assemble()V',
+                    'disassemble()V',
+                    'getMovementSpeed()F',
+                    'getExtensionRange()I',
+                    'getInitialOffset()I',
+                    'toMotionVector(F)Lnet/minecraft/world/phys/Vec3;',
+                    'toPosition(F)Lnet/minecraft/world/phys/Vec3;'
+            ].each { method ->
+                if (!pistonBe.methods.containsKey(method)) {
+                    throw new GradleException("Create 6.0.8 MechanicalPistonBlockEntity lacks ${method}; actual methods were ${pistonBe.methods.keySet()}")
+                }
+            }
+
+            def actuator = jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/contraptions/piston/LinearActuatorBlockEntity.class')).withCloseable { stream ->
+                readClassStructure(stream)
+            }
+            [
+                    'tick()V',
+                    'moveAndCollideContraption()Z',
+                    'resetContraptionToOffset()V',
+                    'getInterpolatedOffset(F)F',
+                    'getMotionVector()Lnet/minecraft/world/phys/Vec3;',
+                    'attach(Lcom/simibubi/create/content/contraptions/ControlledContraptionEntity;)V'
+            ].each { method ->
+                if (!actuator.methods.containsKey(method)) {
+                    throw new GradleException("Create 6.0.8 LinearActuatorBlockEntity lacks ${method}; actual methods were ${actuator.methods.keySet()}")
+                }
+            }
+            [
+                    'offsetF',
+                    'runningZ',
+                    'assembleNextTickZ',
+                    'needsContraptionZ',
+                    'movedContraptionLcom/simibubi/create/content/contraptions/AbstractContraptionEntity;',
+                    'waitingForSpeedChangeZ',
+                    'clientOffsetDiffF'
+            ].each { field ->
+                if (!actuator.fields.containsKey(field)) {
+                    throw new GradleException("Create 6.0.8 LinearActuatorBlockEntity lacks diagnostic field ${field}; actual fields were ${actuator.fields.keySet()}")
+                }
+            }
+
+            def pistonContraption = jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/contraptions/piston/PistonContraption.class')).withCloseable { stream ->
+                readClassStructure(stream)
+            }
+            ['assemble(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)Z',
+             'toLocalPos(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/core/BlockPos;'].each { method ->
+                if (!pistonContraption.methods.containsKey(method)) {
+                    throw new GradleException("Create 6.0.8 PistonContraption lacks ${method}; actual methods were ${pistonContraption.methods.keySet()}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM14PistonHarnessBoundary PASS: /sable m14 spawn_piston creates a real '
+                + 'creative_motor -> vertical shaft -> mechanical_piston + behind-poles + off-axis chassis marker fixture '
+                + 'through canonical Sable edits, with inspect/validate reading live Create/Sable state only')
+    }
+}
+
+tasks.register('verifyM14PistonArchitectureBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M14 reuses the generic M13 Create contraption bridge without speculative piston behavior changes.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionColliderMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionContext.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionControllerLookup.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java'))
+
+    doLast {
+        String m14Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
+        String abstractMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java').getText('UTF-8')
+        String controlledMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java').getText('UTF-8')
+        String renderMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java').getText('UTF-8')
+        String colliderMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionColliderMixin.java').getText('UTF-8')
+        String contextText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionContext.java').getText('UTF-8')
+        String lookupText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionControllerLookup.java').getText('UTF-8')
+        String forgeRenderBridgeText = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+
+        [
+                '@Mixin(value = AbstractContraptionEntity.class, remap = false)',
+                'implements KinematicContraption',
+                'this.contraption.getContraptionWorld()',
+                'serverSubLevel.getPlot().addContraption(this)',
+                'SubLevelPhysicsSystem.require(serverLevel).getPipeline().add(this)',
+                'this.applyRotation(localVec, (float) partialTick)',
+                'sable$removedFromRuntime'
+        ].each { canary ->
+            if (!abstractMixinText.contains(canary)) {
+                throw new GradleException("M14 lost generic AbstractContraptionEntity bridge canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(value = ControlledContraptionEntity.class, remap = false)',
+                '@Redirect(method = "tickContraption"',
+                '@Redirect(method = "getController"',
+                'SableCreateContraptionControllerLookup.isControllerPositionLoaded(level, controllerPos)',
+                'SableCreateContraptionControllerLookup.getControllerBlockEntity(level, controllerPos)'
+        ].each { canary ->
+            if (!controlledMixinText.contains(canary)) {
+                throw new GradleException("M14 lost generic ControlledContraptionEntity controller bridge canary: ${canary}")
+            }
+        }
+        [
+                'AbstractContraptionEntity',
+                'dispatcher.render(contraptionEntity, x, y, z',
+                'visiblePosition.x - cameraPosition.x',
+                'poseStack.mulPose(new Quaternionf(renderPose.orientation()))',
+                'VisualizationManager;supportsVisualization'
+        ].each { canary ->
+            if (!renderMixinText.contains(canary) && !forgeRenderBridgeText.contains(canary)) {
+                throw new GradleException("M14 lost generic Sable/Create render bridge canary: ${canary}")
+            }
+        }
+        [
+                'ContraptionCollider.class',
+                'SableCreateContraptionContext.getContainingSubLevel(instance)',
+                'subLevel.logicalPose().transformPosition',
+                'rotationState.asMatrix()',
+                'instance.getContactPointMotion(localContactPoint)'
+        ].each { canary ->
+            if (!colliderMixinText.contains(canary)) {
+                throw new GradleException("M14 lost generic contraption collision bridge canary: ${canary}")
+            }
+        }
+        [
+                'getContainingSubLevel(final AbstractContraptionEntity entity)',
+                'entity instanceof ControlledContraptionEntity',
+                'Sable.HELPER.getContaining(entity.level(), controllerPos)'
+        ].each { canary ->
+            if (!contextText.contains(canary)) {
+                throw new GradleException("M14 lost generic contraption context canary: ${canary}")
+            }
+        }
+        [
+                'blockEntity instanceof IControlContraption',
+                'SubLevelBlockStateLookup.getBlockEntity(subLevel, controllerPos)'
+        ].each { canary ->
+            if (!lookupText.contains(canary)) {
+                throw new GradleException("M14 lost generic Create controller lookup canary: ${canary}")
+            }
+        }
+        [
+                'MechanicalBearing',
+                'BearingContraption',
+                'bearingAngle',
+                'setAngle(',
+                'PistonContraption(',
+                'new PistonContraption',
+                'moveAndCollideContraption()',
+                'movedContraption.move',
+                'ContraptionCollider.collideBlocks',
+                'CLIENT_RENDER=PASS',
+                'CLIENT_COLLISION=PASS',
+                'CLIENT_TARGETING=PASS'
+        ].each { forbidden ->
+            if (m14Text.contains(forbidden)) {
+                throw new GradleException("M14 harness must not hardcode bearing semantics, fake linear motion, or claim client runtime PASS: ${forbidden}")
+            }
+        }
+        if ((abstractMixinText + controlledMixinText + renderMixinText + colliderMixinText + contextText + lookupText).contains('MechanicalPistonBlockEntity')) {
+            throw new GradleException('M14.1 must not add piston-specific behavior to the accepted generic M13 contraption bridge')
+        }
+
+        logger.lifecycle('verifyM14PistonArchitectureBoundary PASS: M14 reuses generic Abstract/ControlledContraptionEntity '
+                + 'containment, controller lookup, rendering, and collision bridges; piston progress remains Create-owned '
+                + 'and client runtime domains stay UNVERIFIED in server validation')
+    }
+}
+
+tasks.register('verifyM14PistonFixtureBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M14 piston fixture follows Create 6.0.8 pole/head/axis rules and rejects the old invalid layout.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        String m14Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
+        [
+                'MOTOR_LOCAL = new BlockPos(0, -2, 0)',
+                'SHAFT_LOCAL = new BlockPos(0, -1, 0)',
+                'PISTON_LOCAL = BlockPos.ZERO',
+                'PISTON_FACING = Direction.EAST',
+                'EXPECTED_POLE_DIRECTION = PISTON_FACING.getOpposite()',
+                'PISTON_EXTENSION_POLES = 4',
+                'SPAWN_MOTOR_RPM = 0',
+                'DEFAULT_EXTEND_RPM = -32',
+                'DEFAULT_RETRACT_RPM = 32',
+                'setFixtureMotorSpeed(subLevel, SPAWN_MOTOR_RPM)',
+                'blocks.put(MOTOR_LOCAL, setProperty(requireBlockState(CREATIVE_MOTOR_ID), "facing", "up"))',
+                'blocks.put(SHAFT_LOCAL, setProperty(requireBlockState(SHAFT_ID), "axis", "y"))',
+                'setProperty(requireBlockState(STICKY_MECHANICAL_PISTON_ID), "facing", PISTON_FACING.getName())',
+                '"axis_along_first", "true"',
+                'for (final BlockPos pole : requiredPoleLocals())',
+                'setProperty(requireBlockState(PISTON_EXTENSION_POLE_ID), "facing", PISTON_FACING.getName())',
+                'staticHeadLocal=none_retracted_create_generates_head',
+                'frontHeadPresent',
+                'statePropertyName(pistonState, "state", "missing")',
+                'normalizePropertyValue(state.getValue(property))',
+                'extendedPoleLocals()',
+                'extension_pole_missing_or_wrong_axis_at_local_',
+                'static_piston_head_present_in_retracted_front',
+                'travel_path_blocked_at_local_',
+                'front_radial_chassis_not_configured_for_off_axis_marker'
+        ].each { canary ->
+            if (!m14Text.contains(canary)) {
+                throw new GradleException("M14 piston fixture lost canary: ${canary}")
+            }
+        }
+        [
+                'extensionPolesLocal=[(1,0,0),(2,0,0),(3,0,0)]',
+                'headLocal=(4,0,0)',
+                'MECHANICAL_PISTON_HEAD_ID',
+                'blocks.put(new BlockPos(-2, 0, 0), setProperty(requireBlockState(CREATIVE_MOTOR_ID), "facing", "east"))',
+                'blocks.put(new BlockPos(-1, 0, 0), setProperty(requireBlockState(SHAFT_ID), "axis", "x"))'
+        ].each { forbidden ->
+            if (m14Text.contains(forbidden)) {
+                throw new GradleException("M14 piston fixture still contains old invalid runtime layout: ${forbidden}")
+            }
+        }
+
+        File createJar = targetCreateJar
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M14 piston fixture verification: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'com/simibubi/create/content/kinetics/base/DirectionalAxisKineticBlock.class',
+                    'com/simibubi/create/content/contraptions/piston/MechanicalPistonBlock.class',
+                    'com/simibubi/create/content/contraptions/piston/PistonContraption.class',
+                    'com/simibubi/create/content/contraptions/chassis/RadialChassisBlock.class'
+            ].each { entryName ->
+                if (jarFile.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 class missing for M14 fixture verification: ${entryName}")
+                }
+            }
+            def directionalAxis = jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/kinetics/base/DirectionalAxisKineticBlock.class')).withCloseable { stream ->
+                readClassStructure(stream)
+            }
+            if (!directionalAxis.methods.containsKey('getRotationAxis(Lnet/minecraft/world/level/block/state/BlockState;)Lnet/minecraft/core/Direction$Axis;')) {
+                throw new GradleException("Create 6.0.8 DirectionalAxisKineticBlock lacks getRotationAxis; actual methods were ${directionalAxis.methods.keySet()}")
+            }
+            def pistonBlock = jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/contraptions/piston/MechanicalPistonBlock.class')).withCloseable { stream ->
+                readClassStructure(stream)
+            }
+            ['m_6227_(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/phys/BlockHitResult;)Lnet/minecraft/world/InteractionResult;',
+             'm_213897_(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/core/BlockPos;Lnet/minecraft/util/RandomSource;)V',
+             'isExtensionPole(Lnet/minecraft/world/level/block/state/BlockState;)Z',
+             'isPistonHead(Lnet/minecraft/world/level/block/state/BlockState;)Z'].each { method ->
+                if (!pistonBlock.methods.containsKey(method)) {
+                    throw new GradleException("Create 6.0.8 MechanicalPistonBlock lacks fixture rule method ${method}; actual methods were ${pistonBlock.methods.keySet()}")
+                }
+            }
+            String pistonContraptionText = new String(jarFile.getInputStream(jarFile.getJarEntry(
+                    'com/simibubi/create/content/contraptions/piston/PistonContraption.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            [
+                    'collectExtensions',
+                    'initialExtensionProgress',
+                    'ExtensionLength',
+                    'searchMovedStructure'
+            ].each { canary ->
+                if (!pistonContraptionText.contains(canary)) {
+                    throw new GradleException("Create 6.0.8 PistonContraption lost fixture semantic canary: ${canary}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM14PistonFixtureBoundary PASS: the fixture uses behind/opposite-facing extension '
+                + 'poles, no static retracted front head, a Y-axis drive for the east-facing piston, and an off-axis chassis marker')
+    }
+}
+
+tasks.register('verifyM14PistonCommandBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the expanded M14 command suite remains harness/control code rather than a piston implementation.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))
+
+    doLast {
+        String m14Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
+        [
+                'Commands.literal("list")',
+                'Commands.literal("remove")',
+                'Commands.literal("persistence")',
+                'Commands.literal("dump_layout")',
+                'Commands.literal("diagnose")',
+                'Commands.literal("pole_check")',
+                'Commands.literal("attachment_check")',
+                'Commands.literal("reset_fixture")',
+                'Commands.literal("snapshot")',
+                'Commands.literal("captured")',
+                'Commands.literal("lifecycle")',
+                'Commands.literal("cycle_check")',
+                'Commands.literal("endpoints")',
+                'Commands.literal("extend")',
+                'Commands.literal("retract")',
+                'Commands.literal("toggle")',
+                'Commands.literal("stop_piston")',
+                'Commands.literal("set_motor_speed")',
+                'Commands.literal("reverse_motor")',
+                'Commands.literal("test_stationary")',
+                'Commands.literal("test_translate_parent")',
+                'Commands.literal("test_rotate_parent")',
+                'Commands.literal("test_combined_parent")',
+                'setFixtureMotorSpeed',
+                'readFieldRaw(motor, "generatedSpeed")',
+                'invokeIntArgRaw(behaviour, "setValue", rpm)',
+                'REJECTED_FIXTURE_INVALID',
+                'NOOP_ALREADY_EXTENDED',
+                'REJECTED_LIVE_CONTRAPTION',
+                'result=APPLIED_M10_PHYSICS_VELOCITY',
+                'SableCommandHelper.requireSubLevelPhysicsSystem(context)',
+                'handle.setLinearAndAngularVelocity(linearVelocity, angularVelocityRad)',
+                'handle.teleport(after, subLevel.logicalPose().orientation())',
+                'gravityStillActive=true',
+                'anchored=false',
+                'Refusing to remove non-M14-looking sub-level'
+        ].each { canary ->
+            if (!m14Text.contains(canary)) {
+                throw new GradleException("M14 command suite lost canary: ${canary}")
+            }
+        }
+        [
+                'assemble(',
+                'disassemble(',
+                'new PistonContraption',
+                'movedContraption.move',
+                'setPos(',
+                'teleportTo(',
+                'setLinearAndAngularVelocity(new Vector3d(0.0, 0.0, 0.0)'
+        ].each { forbidden ->
+            if (m14Text.contains(forbidden)) {
+                throw new GradleException("M14 command suite must not implement piston/body motion directly: ${forbidden}")
+            }
+        }
+
+        logger.lifecycle('verifyM14PistonCommandBoundary PASS: expanded M14 commands inspect, clean up, control '
+                + 'fixture inputs through Create motor behaviour, and apply parent-body presets through the existing '
+                + 'M10 physics handle without custom piston motion')
+    }
+}
+
+tasks.register('verifyM14ValidationTruthfulnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M14 validation distinguishes malformed fixtures from merely unassembled pistons and does not claim client PASS.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))
+
+    doLast {
+        String m14Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
+        [
+                'FIXTURE_INVALID',
+                'UNASSEMBLED_READY',
+                'FIXTURE_LAYOUT=',
+                'KINETIC_DRIVE=',
+                'EXTENSION_CHAIN=',
+                'CLIENT_RENDER=UNVERIFIED',
+                'CLIENT_COLLISION=UNVERIFIED',
+                'CLIENT_TARGETING=UNVERIFIED',
+                'PERSISTENCE=UNVERIFIED',
+                'extension_pole_missing_or_wrong_axis_at_local_',
+                'kinetic_drive_not_ready',
+                'attached_structure_missing_at_local_',
+                'travel_path_blocked_at_local_',
+                'failures.addAll(fixture.failures())',
+                'statePropertyName(pistonState, "state", "missing")',
+                'normalizePropertyValue(state.getValue(property))',
+                'DISASSEMBLED_EXTENDED_VALID',
+                'ASSEMBLING',
+                'return "UNASSEMBLED_READY";',
+                'livePiston.capturedBlocks() >= MOVED_STRUCTURE_BLOCKS.size()',
+                'cycleState=',
+                'expectedForState=',
+                'PISTON_STATIC_MODEL=UNVERIFIED',
+                'PISTON_BER=UNVERIFIED',
+                'PISTON_VISUALIZATION=UNVERIFIED'
+        ].each { canary ->
+            if (!m14Text.contains(canary)) {
+                throw new GradleException("M14 validation truthfulness lost canary: ${canary}")
+            }
+        }
+        [
+                'CLIENT_RENDER=PASS',
+                'CLIENT_COLLISION=PASS',
+                'CLIENT_TARGETING=PASS',
+                'PERSISTENCE=PASS',
+                'UNASSEMBLED_VALID'
+        ].each { forbidden ->
+            if (m14Text.contains(forbidden)) {
+                throw new GradleException("M14 validation must not claim unverified client/runtime domains or bless malformed unassembled fixtures: ${forbidden}")
+            }
+        }
+
+        logger.lifecycle('verifyM14ValidationTruthfulnessBoundary PASS: M14 validation reports fixture/layout/kinetic '
+                + 'readiness separately and leaves client runtime domains UNVERIFIED')
+    }
+}
+
+tasks.register('verifyM14PistonLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M14 full-cycle harness observes Create lifecycle state without simulating piston motion.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
+        [
+                'STICKY_MECHANICAL_PISTON_ID',
+                'Commands.literal("cycle_check")',
+                'Commands.literal("endpoints")',
+                'MOVING_EXTEND',
+                'MOVING_RETRACT',
+                'RETRACTED_READY',
+                'EXTENDED_READY',
+                'liveContraptionId=',
+                'duplicates=',
+                'missingAttachment=',
+                'expectedNextAction='
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M14 lifecycle harness lost canary: ${canary}")
+            }
+        }
+        File createJar = targetCreateJar
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing Create 6.0.8 jar for lifecycle verification: ${createJar}")
+        }
+        JarFile jar = new JarFile(createJar)
+        try {
+            def piston = jar.getInputStream(jar.getJarEntry(
+                    'com/simibubi/create/content/contraptions/piston/MechanicalPistonBlock.class')).withCloseable { stream ->
+                readClassStructure(stream)
+            }
+            def contraption = jar.getInputStream(jar.getJarEntry(
+                    'com/simibubi/create/content/contraptions/piston/PistonContraption.class')).withCloseable { stream ->
+                readClassStructure(stream)
+            }
+            if (!piston.methods.keySet().any { it.startsWith('isStickyPiston(') }) {
+                throw new GradleException('Create 6.0.8 sticky piston predicate is missing')
+            }
+            if (!contraption.methods.keySet().any { it.startsWith('addToInitialFrontier(') }) {
+                throw new GradleException('Create 6.0.8 piston retract frontier is missing')
+            }
+            String bytes = new String(jar.getInputStream(jar.getJarEntry(
+                    'com/simibubi/create/content/contraptions/piston/PistonContraption.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            if (!bytes.contains('isStickyPiston')) {
+                throw new GradleException('Create 6.0.8 retract frontier no longer checks sticky piston ownership')
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyM14PistonLifecycleBoundary PASS: cycle and endpoint diagnostics observe Create-owned state, and Create 6.0.8 exposes the sticky retract frontier')
+    }
+}
+
+tasks.register('verifyM14PistonAttachmentBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M14 fixture relies on normal sticky-piston and chassis attachment semantics.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
+        [
+                'create:sticky_mechanical_piston',
+                'STICKY_MECHANICAL_PISTON_ID',
+                'setProperty(requireBlockState(RADIAL_CHASSIS_ID), "axis", "x")',
+                '"sticky_north", "true"',
+                'MOVED_STRUCTURE_BLOCKS',
+                'capturedBlockEntries',
+                'sourcePlot=UNAVAILABLE_AFTER_CREATE_REMOVAL',
+                'capturedRole'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M14 attachment harness lost canary: ${canary}")
+            }
+        }
+        [
+                'getBlocks().put',
+                'getBlocks().remove',
+                'new PistonContraption',
+                'teleportTo(',
+                'setPos('
+        ].each { forbidden ->
+            if (text.contains(forbidden)) {
+                throw new GradleException("M14 attachment harness must not mutate Create captured blocks or entity position: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM14PistonAttachmentBoundary PASS: piston-head ownership is delegated to Create sticky semantics and chassis marker attachment remains normal Create connectivity')
+    }
+}
+
+tasks.register('verifyM14PistonRenderingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the static piston casing uses Create baked models while its shaft uses the existing BER fallback.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        String renderText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java').getText('UTF-8')
+        String berText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java').getText('UTF-8')
+        [
+                'BlockRenderDispatcher',
+                'isCreatePistonModelFallback',
+                'getBlockModel(blockState)',
+                'SABLE_M14_PISTON_STATIC_MODEL'
+        ].each { canary ->
+            if (!renderText.contains(canary)) {
+                throw new GradleException("M14 piston rendering lost canary: ${canary}")
+            }
+        }
+        if (!berText.contains('returnedVisualizationSupported = sableSubLevel ? false')) {
+            throw new GradleException('M14 piston rendering must retain the scoped Sable BER fallback')
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            ['assets/create/blockstates/mechanical_piston.json',
+             'assets/create/blockstates/sticky_mechanical_piston.json',
+             'assets/create/models/block/mechanical_piston/normal/block.json',
+             'com/simibubi/create/content/contraptions/piston/MechanicalPistonRenderer.class'].each { entry ->
+                if (jar.getJarEntry(entry) == null) {
+                    throw new GradleException("Create 6.0.8 rendering entry missing: ${entry}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyM14PistonRenderingBoundary PASS: Sable uses Create baked piston models plus the scoped Create BER, without Flywheel-global or hand-built geometry changes')
+    }
+}
+
+tasks.register('verifyM14PistonStaticRenderingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M14 sticky piston casing fallback is model/layer aware and diagnostic, not custom geometry.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        String renderText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java').getText('UTF-8')
+        [
+                'isCreatePistonModelFallback',
+                'RenderType.solid().equals(layer)',
+                'countVisibleQuads',
+                'model.getQuads(blockState, null, RANDOM)',
+                'SABLE_M14_PISTON_STATIC_MODEL stage=MODEL_FALLBACK_ENTERED',
+                'SABLE_M14_PISTON_STATIC_MODEL stage=MODEL_DRAW_CALLED',
+                'SABLE_M14_STATIC_BLOCK_DECISION',
+                'visibleQuadCount',
+                'geometryEmitted=',
+                'SableSubLevelRenderPlatform.INSTANCE.tesselateBlock'
+        ].each { canary ->
+            if (!renderText.contains(canary)) {
+                throw new GradleException("M14 static piston rendering lost canary: ${canary}")
+            }
+        }
+        [
+                'manualPiston',
+                'FakePiston',
+                'new Cube',
+                'create_piston_texture',
+                'enableFlywheel'
+        ].each { forbidden ->
+            if (renderText.contains(forbidden)) {
+                throw new GradleException("M14 static piston rendering must use Create/Minecraft models, not fake/global rendering: ${forbidden}")
+            }
+        }
+
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            [
+                    'assets/create/blockstates/sticky_mechanical_piston.json',
+                    'assets/create/models/block/mechanical_piston/sticky/block.json',
+                    'assets/create/models/block/mechanical_piston/normal/block.json',
+                    'com/simibubi/create/content/contraptions/piston/MechanicalPistonRenderer.class'
+            ].each { entry ->
+                if (jar.getJarEntry(entry) == null) {
+                    throw new GradleException("Create 6.0.8 static piston render entry missing: ${entry}")
+                }
+            }
+            String stickyBlockstate = jar.getInputStream(jar.getJarEntry(
+                    'assets/create/blockstates/sticky_mechanical_piston.json')).getText('UTF-8')
+            String normalModel = jar.getInputStream(jar.getJarEntry(
+                    'assets/create/models/block/mechanical_piston/normal/block.json')).getText('UTF-8')
+            if (!stickyBlockstate.contains('mechanical_piston/sticky/block')) {
+                throw new GradleException('Create sticky piston blockstate no longer points at the sticky baked casing model')
+            }
+            if (!normalModel.contains('"elements"') || !normalModel.contains('andesite_casing_piston')) {
+                throw new GradleException('Create normal piston casing model no longer exposes baked casing elements')
+            }
+        } finally {
+            jar.close()
+        }
+
+        logger.lifecycle('verifyM14PistonStaticRenderingBoundary PASS: piston casing fallback uses real Create baked models, forces only the scoped solid-layer fallback when quads exist, and logs per-block skip/draw evidence')
+    }
+}
+
+tasks.register('verifyM14ParentMotionHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M14 parent-motion presets apply the existing M10 physics controls and do not anchor the body.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))
+
+    doLast {
+        String m14Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
+        [
+                'Commands.literal("prepare_airborne")',
+                'private static int prepareAirborne',
+                'handle.teleport(after, subLevel.logicalPose().orientation())',
+                'handle.setLinearAndAngularVelocity(new Vector3d(), new Vector3d())',
+                'gravityStillActive=true',
+                'anchored=false',
+                'private static int setBodyVelocity',
+                'handle.setLinearAndAngularVelocity(linearVelocity, angularVelocityRad)',
+                'result=APPLIED_M10_PHYSICS_VELOCITY',
+                'Math.toRadians(20.0)',
+                'Math.toRadians(12.0)',
+                'next=/sable m14 extend <target>'
+        ].each { canary ->
+            if (!m14Text.contains(canary)) {
+                throw new GradleException("M14 parent motion harness lost canary: ${canary}")
+            }
+        }
+        [
+                'use=/sable m10 set_velocity',
+                'anchor=true',
+                'setNoGravity',
+                'disableGravity',
+                'while (',
+                'scheduleAtFixedRate',
+                'setPoseEveryTick'
+        ].each { forbidden ->
+            if (m14Text.contains(forbidden)) {
+                throw new GradleException("M14 parent motion harness must be one-shot M10 physics control, not instruction-only or anchored: ${forbidden}")
+            }
+        }
+
+        logger.lifecycle('verifyM14ParentMotionHarnessBoundary PASS: parent presets now apply existing M10 body velocity, prepare_airborne is one-shot and leaves gravity active')
+    }
+}
+
+tasks.register('verifyM14DiagnosticCoordinateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M14 diagnostics distinguish raw plot, Sable-local, and visible-world anchors.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java'))
+
+    doLast {
+        String m14Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
+        [
+                'createAnchorRawPlot=',
+                'createAnchorSubLevelLocal=',
+                'createAnchorVisibleWorld=',
+                'expectedVisibleMovementAxis=',
+                'actualVisibleMovementAxis=UNVERIFIED',
+                'axisAlignmentDot=UNVERIFIED',
+                'actualVisibleAnchor=UNVERIFIED',
+                'final BlockPos createAnchorPlot = SubLevelBlockEditHelper.localOffsetToPlotBlock(subLevel, createAnchorLocal)',
+                'subLevel.logicalPose().transformPosition(new Vector3d(',
+                'createAnchorPlot.getX(), createAnchorPlot.getY(), createAnchorPlot.getZ())'
+        ].each { canary ->
+            if (!m14Text.contains(canary)) {
+                throw new GradleException("M14 diagnostic coordinate contract lost canary: ${canary}")
+            }
+        }
+        if (m14Text.contains('transformPosition(\n                    new Vector3d(createAnchorLocal.getX()')) {
+            throw new GradleException('M14 snapshot must not transform local command offsets as visible-world plot coordinates')
+        }
+        [
+                'CLIENT_RENDER=PASS',
+                'CLIENT_COLLISION=PASS',
+                'axisAlignmentDot=PASS',
+                'positionError=0'
+        ].each { forbidden ->
+            if (m14Text.contains(forbidden)) {
+                throw new GradleException("M14 diagnostics must not claim runtime-only visual/physics PASS from server state: ${forbidden}")
+            }
+        }
+
+        logger.lifecycle('verifyM14DiagnosticCoordinateBoundary PASS: snapshot labels raw plot, Sable-local, and visible-world anchors separately and avoids hidden-plot/local coordinate mixing')
+    }
+}
+
+tasks.register('verifyM14FinalAcceptanceBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the final M14 runtime procedure is short and focused on the remaining real acceptance gaps.'
+
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+
+    doLast {
+        String smokeText = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        [
+                '## M14 Final Mechanical Piston Harness',
+                '### Phase A: Piston Visual',
+                '/sable m14 spawn_piston m14_final',
+                '/sable m14 diagnose @e[name=m14_final,limit=1]',
+                'sticky piston casing should be visible',
+                'stage=MODEL_DRAW_CALLED',
+                'geometryEmitted=true',
+                '### Phase B: Lifecycle Regression',
+                '/sable m14 extend @e[name=m14_final,limit=1]',
+                '/sable m14 retract @e[name=m14_final,limit=1]',
+                '### Phase C: Airborne Rotation',
+                '/sable m14 prepare_airborne @e[name=m14_final,limit=1]',
+                '/sable m14 test_rotate_parent @e[name=m14_final,limit=1]',
+                '### Phase D: Combined Parent Motion',
+                '/sable m14 test_combined_parent @e[name=m14_final,limit=1]',
+                'T_world_block = T_world_sable(t) * T_create_linear(offset(t)) * T_create_local'
+        ].each { canary ->
+            if (!smokeText.contains(canary)) {
+                throw new GradleException("M14 final acceptance doc lost canary: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifyM14FinalAcceptanceBoundary PASS: final M14 smoke covers piston casing, one lifecycle regression, airborne rotation, combined parent motion, and persistence without reopening closed phases')
     }
 }
 

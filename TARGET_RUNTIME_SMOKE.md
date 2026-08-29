@@ -2227,3 +2227,108 @@ Then reassemble through the normal bearing interaction.
 Expected: Create captures the edited attachment according to normal Create
 rules, the edited shape is visible as a rotating contraption, and no duplicate
 static/moved blocks remain.
+
+## M14 Final Mechanical Piston Harness
+
+M14 validates linear Create contraptions inside Sable. M13 is closed; this
+sequence focuses only on final piston visual coverage and parent-motion
+composition. Stop at the first meaningful failure.
+
+### Phase A: Piston Visual
+
+```text
+/sable m14 spawn_piston m14_final
+/sable m14 validate @e[name=m14_final,limit=1]
+/sable m14 diagnose @e[name=m14_final,limit=1]
+/sable m14 dump_layout @e[name=m14_final,limit=1]
+```
+
+Expected: fresh fixture is `UNASSEMBLED_READY`, piston state is `retracted`,
+motor value is `0`, `FIXTURE_LAYOUT=PASS`, `EXTENSION_CHAIN=PASS`, and client
+domains remain `UNVERIFIED`. The sticky piston casing should be visible as a
+normal Create piston casing; motor, shaft, and piston should be visually
+distinct. The log should include `SABLE_M14_PISTON_STATIC_MODEL` with
+`stage=MODEL_DRAW_CALLED`, nonzero `visibleQuadCount`, and
+`geometryEmitted=true`.
+
+```text
+(0,-2,0) create:creative_motor[facing=up], stopped at spawn
+(0,-1,0) create:shaft[axis=y]
+(0,0,0) create:sticky_mechanical_piston[facing=east,axis_along_first=true,state=retracted]
+(-1,0,0)..(-4,0,0) create:piston_extension_pole[facing=east]
+(1,0,0) create:radial_chassis[axis=x,sticky_north=true]
+(1,1,0) minecraft:stone off-axis marker
+positive-X travel cells beyond the marker clear while retracted
+```
+
+### Phase B: Lifecycle Regression
+
+```text
+/sable m14 extend @e[name=m14_final,limit=1]
+/sable m14 captured @e[name=m14_final,limit=1]
+/sable m14 cycle_check @e[name=m14_final,limit=1]
+/sable m14 retract @e[name=m14_final,limit=1]
+/sable m14 cycle_check @e[name=m14_final,limit=1]
+/sable m14 endpoints @e[name=m14_final,limit=1]
+/sable m14 extend @e[name=m14_final,limit=1]
+/sable m14 cycle_check @e[name=m14_final,limit=1]
+```
+
+Expected: repeated extend/retract/extend still works without
+`reset_fixture`; the sticky piston pulls the chassis and off-axis marker back,
+no payload blocks are lost or duplicated, and the final extend is accepted.
+
+### Phase C: Airborne Rotation
+
+```text
+/sable m14 retract @e[name=m14_final,limit=1]
+/sable m14 prepare_airborne @e[name=m14_final,limit=1]
+/sable m14 test_rotate_parent @e[name=m14_final,limit=1]
+/sable m14 extend @e[name=m14_final,limit=1]
+/sable m14 snapshot @e[name=m14_final,limit=1]
+```
+
+Expected: `prepare_airborne` moves the Sable body up once, zeroes velocity, and
+does not anchor it. `test_rotate_parent` actually applies M10 physics angular
+velocity. During extension, the piston axis rotates with Sable-local +X; it
+must not continue along fixed world +X or hidden-plot +X.
+
+### Phase D: Combined Parent Motion
+
+```text
+/sable m14 retract @e[name=m14_final,limit=1]
+/sable m14 prepare_airborne @e[name=m14_final,limit=1]
+/sable m14 test_combined_parent @e[name=m14_final,limit=1]
+/sable m14 extend @e[name=m14_final,limit=1]
+/sable m14 snapshot @e[name=m14_final,limit=1]
+```
+
+Expected transform: `T_world_block = T_world_sable(t) * T_create_linear(offset(t)) * T_create_local`.
+Gravity may move the whole body during observation; that is expected.
+
+### Phase E: Persistence
+
+```text
+/sable m14 persistence @e[name=m14_final,limit=1]
+Save & Quit, reopen the same world
+/sable m14 list
+/sable m14 inspect @e[name=m14_final,limit=1]
+/sable m14 validate @e[name=m14_final,limit=1]
+/sable m14 persistence @e[name=m14_final,limit=1]
+```
+
+Expected: the live sublevel is recoverable by name/UUID and persistence remains
+a before/after runtime comparison rather than a pre-save PASS claim.
+
+### Phase J: Second Fixture
+
+```text
+/sable m14 spawn_piston m14_piston_2
+/sable m14 list
+/sable m14 extend @e[name=m14_piston,limit=1]
+/sable m14 extend @e[name=m14_piston_2,limit=1]
+/sable m14 snapshot @e[name=m14_piston,limit=1]
+/sable m14 snapshot @e[name=m14_piston_2,limit=1]
+```
+
+Expected: two fixtures operate independently with no singleton test state.
