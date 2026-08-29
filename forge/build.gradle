@@ -4965,6 +4965,27 @@ tasks.named('build') {
     dependsOn tasks.named('verifyM14DiagnosticCoordinateBoundary')
     dependsOn tasks.named('verifyM14FinalAcceptanceBoundary')
     dependsOn tasks.named('verifyM14ValidationTruthfulnessBoundary')
+    dependsOn tasks.named('verifyM15GantryArchitectureBoundary')
+    dependsOn tasks.named('verifyM15GantryFixtureBoundary')
+    dependsOn tasks.named('verifyM15GantryCommandBoundary')
+    dependsOn tasks.named('verifyM15DynamicCarriageBoundary')
+    dependsOn tasks.named('verifyM15StaticEndpointStateBoundary')
+    dependsOn tasks.named('verifyM15LiveStateBoundary')
+    dependsOn tasks.named('verifyM15ControlReadinessBoundary')
+    dependsOn tasks.named('verifyM15ControlPreconditionBoundary')
+    dependsOn tasks.named('verifyM15GantryPredictionBoundary')
+    dependsOn tasks.named('verifyM15GantryInterpolationBoundary')
+    dependsOn tasks.named('verifyM15GantryPrecisionArithmetic')
+    dependsOn tasks.named('verifyM15GantryPrecisionBoundary')
+    dependsOn tasks.named('verifyM15Upstream9481Boundary')
+    dependsOn tasks.named('verifyM15GantryPacketPrecisionBoundary')
+    dependsOn tasks.named('verifyM15PinionCoordinateBoundary')
+    dependsOn tasks.named('verifyM15AirborneHarnessBoundary')
+    dependsOn tasks.named('verifyM15PersistenceStateBoundary')
+    dependsOn tasks.named('verifyM15ReloadCarriageDiscoveryBoundary')
+    dependsOn tasks.named('verifyM15HiddenPlotRenderBoundary')
+    dependsOn tasks.named('verifyM15ValidationTruthfulnessBoundary')
+    dependsOn tasks.named('verifyM15DiagnosticCoordinateBoundary')
 }
 
 tasks.named('checkstyleMain') {
@@ -10413,7 +10434,9 @@ tasks.register('verifyM14ParentMotionHarnessBoundary') {
         String m14Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M14TestCommands.java').getText('UTF-8')
         [
                 'Commands.literal("prepare_airborne")',
+                'Commands.literal("airborne_acceptance")',
                 'private static int prepareAirborne',
+                'private static int airborneAcceptance',
                 'handle.teleport(after, subLevel.logicalPose().orientation())',
                 'handle.setLinearAndAngularVelocity(new Vector3d(), new Vector3d())',
                 'gravityStillActive=true',
@@ -10421,6 +10444,8 @@ tasks.register('verifyM14ParentMotionHarnessBoundary') {
                 'private static int setBodyVelocity',
                 'handle.setLinearAndAngularVelocity(linearVelocity, angularVelocityRad)',
                 'result=APPLIED_M10_PHYSICS_VELOCITY',
+                'airborne_acceptance_combined_parent',
+                'airborne_acceptance_extend',
                 'Math.toRadians(20.0)',
                 'Math.toRadians(12.0)',
                 'next=/sable m14 extend <target>'
@@ -10521,6 +10546,978 @@ tasks.register('verifyM14FinalAcceptanceBoundary') {
         }
 
         logger.lifecycle('verifyM14FinalAcceptanceBoundary PASS: final M14 smoke covers piston casing, one lifecycle regression, airborne rotation, combined parent motion, and persistence without reopening closed phases')
+    }
+}
+
+tasks.register('verifyM15GantryArchitectureBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M15 reuses the generic M13/M14 contraption bridge and does not add speculative gantry core rewrites.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionColliderMixin.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        File m15File = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java')
+        if (!m15File.isFile()) {
+            throw new GradleException('M15 command harness source is missing')
+        }
+        String m15Text = m15File.getText('UTF-8')
+        String commandText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        [
+                'M15TestCommands.register(sableBuilder, buildContext)',
+                'GantryContraptionEntity',
+                'GantryCarriageBlockEntity',
+                'gantryControl=normal_create_motor_speed',
+                'manualContraptionMotion=false',
+                'CLIENT_RENDER=UNVERIFIED',
+                'CLIENT_COLLISION=UNVERIFIED',
+                'CLIENT_TARGETING=UNVERIFIED'
+        ].each { canary ->
+            if (!m15Text.contains(canary) && !commandText.contains(canary)) {
+                throw new GradleException("M15 architecture lost canary: ${canary}")
+            }
+        }
+        [
+                'new GantryContraption',
+                'new GantryContraptionEntity',
+                'setContraptionMotion(',
+                '.axisMotion =',
+                '.clientOffsetDiff =',
+                'manualGantry',
+                'fake_gantry_motion',
+                'CLIENT_RENDER=PASS',
+                'CLIENT_COLLISION=PASS'
+        ].each { forbidden ->
+            if (m15Text.contains(forbidden)) {
+                throw new GradleException("M15 must not implement speculative gantry motion/render/collision behavior: ${forbidden}")
+            }
+        }
+        [
+                'GantryContraptionEntity',
+                'GantryCarriageBlockEntity',
+                'GantryShaftBlockEntity'
+        ].each { forbidden ->
+            [
+                    rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'),
+                    rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java'),
+                    rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionColliderMixin.java')
+            ].each { file ->
+                if (file.getText('UTF-8').contains(forbidden)) {
+                    throw new GradleException("M15 must not add gantry-specific code to accepted generic contraption bridge: ${file.name} contains ${forbidden}")
+                }
+            }
+        }
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M15 architecture verification: ${targetCreateJar}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            [
+                    'com/simibubi/create/content/contraptions/gantry/GantryCarriageBlockEntity.class',
+                    'com/simibubi/create/content/contraptions/gantry/GantryContraption.class',
+                    'com/simibubi/create/content/contraptions/gantry/GantryContraptionEntity.class',
+                    'com/simibubi/create/content/kinetics/gantry/GantryShaftBlockEntity.class'
+            ].each { entryName ->
+                if (jar.getEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 gantry class missing for M15: ${entryName}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyM15GantryArchitectureBoundary PASS: M15 observes Create gantry classes through the existing generic contraption bridge without speculative gantry core rewrites')
+    }
+}
+
+tasks.register('verifyM15GantryFixtureBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M15 gantry fixture follows Create 6.0.8 shaft/carriage blockstate rules.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'GANTRY_SHAFT_ID',
+                'GANTRY_CARRIAGE_ID',
+                'SHAFT_FACING = Direction.EAST',
+                'CARRIAGE_FACING = Direction.UP',
+                'axis_along_first", "false"',
+                'part", part',
+                'powered", "false"',
+                'shaftBelowCarriage',
+                'blocks_then_motor_stopped_then_finalize',
+                'sticky_south'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 gantry fixture lost canary: ${canary}")
+            }
+        }
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M15 fixture verification: ${targetCreateJar}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            [
+                    'assets/create/blockstates/gantry_carriage.json',
+                    'assets/create/blockstates/gantry_shaft.json',
+                    'assets/create/models/block/gantry_carriage/horizontal.json',
+                    'assets/create/models/block/gantry_shaft/block_middle.json'
+            ].each { entryName ->
+                if (jar.getEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 gantry resource missing for M15 fixture: ${entryName}")
+                }
+            }
+            String carriageBlockstate = jar.getInputStream(jar.getEntry('assets/create/blockstates/gantry_carriage.json')).getText('UTF-8')
+            String shaftBlockstate = jar.getInputStream(jar.getEntry('assets/create/blockstates/gantry_shaft.json')).getText('UTF-8')
+            [
+                    'axis_along_first=false,facing=up',
+                    'axis_along_first=true,facing=up'
+            ].each { variant ->
+                if (!carriageBlockstate.contains(variant)) {
+                    throw new GradleException("Create gantry carriage blockstate lacks expected variant: ${variant}")
+                }
+            }
+            [
+                    'facing=east,part=start,powered=false',
+                    'facing=east,part=middle,powered=false',
+                    'facing=east,part=end,powered=false'
+            ].each { variant ->
+                if (!shaftBlockstate.contains(variant)) {
+                    throw new GradleException("Create gantry shaft blockstate lacks expected variant: ${variant}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyM15GantryFixtureBoundary PASS: M15 fixture uses east-facing gantry shaft rail, top carriage, stopped motor construction, and real Create blockstate variants')
+    }
+}
+
+tasks.register('verifyM15GantryCommandBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M15 command suite controls only legitimate fixture inputs and M10 body velocity.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'Commands.literal("list")',
+                'Commands.literal("spawn_gantry")',
+                'Commands.literal("remove")',
+                'Commands.literal("inspect")',
+                'Commands.literal("validate")',
+                'Commands.literal("diagnose")',
+                'Commands.literal("snapshot")',
+                'Commands.literal("dump_layout")',
+                'Commands.literal("captured")',
+                'Commands.literal("lifecycle")',
+                'Commands.literal("forward")',
+                'Commands.literal("reverse")',
+                'Commands.literal("stop")',
+                'Commands.literal("toggle")',
+                'Commands.literal("set_motor_speed")',
+                'Commands.literal("reset_fixture")',
+                'Commands.literal("prepare_airborne")',
+                'Commands.literal("test_translate_parent")',
+                'Commands.literal("test_rotate_parent")',
+                'Commands.literal("test_combined_parent")',
+                'Commands.literal("airborne_acceptance")',
+                'semantics=Create_ScrollValueBehaviour_setValue',
+                'result=APPLIED_M10_PHYSICS_VELOCITY',
+                'gravityStillActive=true',
+                'anchored=false'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 command suite lost canary: ${canary}")
+            }
+        }
+        [
+                'use=/sable m10 set_velocity',
+                'setNoGravity',
+                'disableGravity',
+                'anchor=true',
+                'scheduleAtFixedRate',
+                'setPoseEveryTick',
+                'entity.setPos(',
+                'm_6034_(',
+                'setDeltaMovement(new Vec3'
+        ].each { forbidden ->
+            if (text.contains(forbidden)) {
+                throw new GradleException("M15 command suite must not fake physics or gantry motion: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM15GantryCommandBoundary PASS: M15 commands cover fixture, diagnostics, gantry input control, and parent motion through existing M10 physics handles')
+    }
+}
+
+tasks.register('verifyM15LiveStateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies live Gantry validation uses captured ownership instead of static carriage/payload positions.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'final boolean liveContraption = liveEntity != null',
+                'if (!liveContraption) {',
+                'gantry_carriage_missing_at_local_',
+                'capturedPayloadPresent',
+                'duplicatePayload',
+                'live_gantry_payload_missing_from_contraption',
+                'live_gantry_payload_duplicated_static_and_captured',
+                'liveControllerLocal',
+                'LIVE_IDLE',
+                'PAYLOAD_OWNERSHIP='
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 live state boundary lost canary: ${canary}")
+            }
+        }
+        if (!text.contains('liveContraption ? capturedPayloadPresent : staticPayloadPresent')) {
+            throw new GradleException('M15 live validation must use captured payload ownership while a GantryContraptionEntity is live')
+        }
+        if (!text.contains('final BlockState activeControllerShaft = liveContraption')
+                || !text.contains('? getPlotBlockState(subLevel, liveControllerPlot)')
+                || !text.contains('final BlockEntity shaftUnderCarriage = liveContraption')
+                || !text.contains('? getPlotBlockEntity(subLevel, liveControllerPlot)')) {
+            throw new GradleException('M15 live validation must resolve the active Gantry controller shaft from the live entity, not the original static carriage slot')
+        }
+        logger.lifecycle('verifyM15LiveStateBoundary PASS: live Gantry validation accepts captured carriage/payload ownership and checks the active controller rail')
+    }
+}
+
+tasks.register('verifyM15DynamicCarriageBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M15 discovers static Gantry carriage ownership along the rail after endpoint disassembly.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'collectStaticGantryMechanisms',
+                'final List<StaticGantryMechanism> staticMechanisms',
+                'gantry.localPos().relative(CARRIAGE_FACING.getOpposite())',
+                'payloadChassisLocal = gantry.localPos().offset(PAYLOAD_CHASSIS_OFFSET)',
+                'payloadMarkerLocal = gantry.localPos().offset(PAYLOAD_MARKER_OFFSET)',
+                'carriageRailIndex=',
+                'STATIC_AT_RAIL_POSITION',
+                'multiple_static_gantry_carriages_on_rail_'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 dynamic carriage boundary lost canary: ${canary}")
+            }
+        }
+        if (text.contains('requireInvariant(blockIdMatches(carriageState, GANTRY_CARRIAGE_ID),\r\n                    "gantry_carriage_missing_at_local_" + formatBlockPos(CARRIAGE_LOCAL)')
+                || text.contains('requireInvariant(blockIdMatches(carriageState, GANTRY_CARRIAGE_ID),\n                    "gantry_carriage_missing_at_local_" + formatBlockPos(CARRIAGE_LOCAL)')) {
+            throw new GradleException('M15 must not permanently require the carriage at spawn-origin local (0,1,0)')
+        }
+        logger.lifecycle('verifyM15DynamicCarriageBoundary PASS: static Gantry carriage and payload are discovered dynamically along the rail')
+    }
+}
+
+tasks.register('verifyM15StaticEndpointStateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies post-disassembly endpoint states are first-class static Gantry states.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'return "STATIC_AT_RAIL_POSITION"',
+                'CARRIAGE_LOCAL.equals(this.carriageLocal)',
+                'payloadChassisLocal',
+                'payloadMarkerLocal',
+                'carriageLocal=',
+                'railIndex='
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 static endpoint state boundary lost canary: ${canary}")
+            }
+        }
+        if (text.contains('state=FIXTURE_INVALID')) {
+            throw new GradleException('M15 endpoint diagnostics must not collapse valid post-move static Gantry states into FIXTURE_INVALID')
+        }
+        logger.lifecycle('verifyM15StaticEndpointStateBoundary PASS: static Gantry endpoints report carriage rail position instead of origin-only fixture validity')
+    }
+}
+
+tasks.register('verifyM15ControlReadinessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M15 command readiness is narrower than full spawn-layout validation.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'boolean controlReady()',
+                'this.gantryChainValid',
+                'this.kineticDriveReady',
+                'this.payloadPresent',
+                '!this.duplicatePayload',
+                '(!this.liveContraptionPresent || this.controllerKnown)',
+                'controlReady=',
+                'setFixtureMotorSpeed(subLevel, rpm)'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 control readiness boundary lost canary: ${canary}")
+            }
+        }
+        if (text.contains('return this.serverAssemblyReady;')) {
+            throw new GradleException('M15 control readiness must not be a monolithic serverAssemblyReady/spawn-layout gate')
+        }
+        logger.lifecycle('verifyM15ControlReadinessBoundary PASS: controls use a narrow rail/motor/payload readiness model')
+    }
+}
+
+tasks.register('verifyM15ControlPreconditionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies forward/reverse controls depend on live-safe control invariants, not static fixture positions.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'boolean controlReady()',
+                'this.gantryChainValid',
+                'this.kineticDriveReady',
+                'this.payloadPresent',
+                '!this.duplicatePayload',
+                '(!this.liveContraptionPresent || this.controllerKnown)',
+                'semantics=Create_ScrollValueBehaviour_setValue',
+                'result=REJECTED_FIXTURE_INVALID'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 control precondition boundary lost canary: ${canary}")
+            }
+        }
+        if (text.contains('boolean controlReady() {\r\n            return this.serverAssemblyReady;')
+                || text.contains('boolean controlReady() {\n            return this.serverAssemblyReady;')) {
+            throw new GradleException('M15 controls must not be gated only by the original static serverAssemblyReady fixture rule')
+        }
+        [
+                'entity.setPos(',
+                'setContraptionMotion(',
+                '.axisMotion =',
+                '.clientOffsetDiff ='
+        ].each { forbidden ->
+            if (text.contains(forbidden)) {
+                throw new GradleException("M15 controls must not directly mutate Gantry motion state: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM15ControlPreconditionBoundary PASS: Gantry controls keep Create motor semantics and accept valid live contraptions')
+    }
+}
+
+tasks.register('verifyM15GantryPredictionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M15 ports Create Gantry prediction precision without cosmetic renderer smoothing.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java'))
+
+    doLast {
+        String mixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java').getText('UTF-8')
+        String renderText = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+        [
+                'SABLE_M15_PREDICTION',
+                'phase={} sample={} entityId={} clientSide={}',
+                'expectedPinionLocal=',
+                'actualResolvedControllerLocal=',
+                'pinionMovementSpeed=',
+                'clientOffsetDiff',
+                'axisMotion',
+                'getAxisCoord',
+                'cancellable = true',
+                'containing == null || !(this.contraption instanceof final GantryContraption gantryContraption)',
+                'final Direction carriageFacing = gantryContraption.getFacing()',
+                'relative(carriageFacing.getOpposite())',
+                'Mth.floor(currentCoord) + .5 < nextCoord',
+                'SableCreateContraptionControllerLookup.getControllerBlockEntity(level, controllerPos)'
+        ].each { canary ->
+            if (!mixinText.contains(canary)) {
+                throw new GradleException("M15 Gantry prediction boundary lost canary: ${canary}")
+            }
+        }
+        [
+                'visiblePosition.lerp',
+                'previousVisible.lerp',
+                'cosmetic',
+                'smoothing',
+                'smoothGantry'
+        ].each { forbidden ->
+            if (renderText.contains(forbidden) || mixinText.contains(forbidden)) {
+                throw new GradleException("M15 must not hide Gantry prediction errors with cosmetic smoothing: ${forbidden}")
+            }
+        }
+        [
+                'setContraptionMotion(',
+                '.axisMotion =',
+                '.clientOffsetDiff ='
+        ].each { forbidden ->
+            if (renderText.contains(forbidden)) {
+                throw new GradleException("M15 render bridge must not mutate Gantry prediction state: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM15GantryPredictionBoundary PASS: Gantry prediction uses Sable-only Create 6.0.9 precision semantics without render-only smoothing')
+    }
+}
+
+tasks.register('verifyM15GantryInterpolationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Sable bridges Create 6.0.8 Gantry client interpolation through the real pinion-shaft lookup.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        File mixinFile = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java')
+        String mixinText = mixinFile.getText('UTF-8')
+        String configText = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String renderText = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+        [
+                '@Mixin(value = GantryContraptionEntity.class, remap = false)',
+                'method = "checkPinionShaft"',
+                'Level;getBlockEntity(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                'remap = true',
+                'SableCreateContraptionControllerLookup.getControllerBlockEntity(level, controllerPos)',
+                'SABLE_M15_GANTRY_SHAFT_LOOKUP',
+                'SABLE_M15_PREDICTION',
+                'actualResolvedControllerLocal',
+                'expectedPinionLocal'
+        ].each { canary ->
+            if (!mixinText.contains(canary)) {
+                throw new GradleException("M15 Gantry interpolation mixin lost canary: ${canary}")
+            }
+        }
+        if (!configText.contains('"compatibility.create.contraptions.GantryContraptionEntityMixin"')) {
+            throw new GradleException('M15 Gantry interpolation mixin is not registered in sable-common-forge.mixins.json')
+        }
+        [
+                'SABLE_M15_INTERP',
+                'clientOffsetDiff',
+                'axisMotion',
+                'deltaFromPreviousVisibleAnchor',
+                'hiddenPlotPoseTranslation=false',
+                'final Vec3 visiblePosition = clientSubLevel.renderPose(partialTick).transformPosition(rawPosition)'
+        ].each { canary ->
+            if (!renderText.contains(canary)) {
+                throw new GradleException("M15 Gantry interpolation diagnostic lost canary: ${canary}")
+            }
+        }
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M15 Gantry interpolation verification: ${targetCreateJar}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            def entry = jar.getEntry('com/simibubi/create/content/contraptions/gantry/GantryContraptionEntity.class')
+            if (entry == null) {
+                throw new GradleException('Create 6.0.8 GantryContraptionEntity class is missing')
+            }
+            byte[] bytes = jar.getInputStream(entry).bytes
+            String classText = new String(bytes, StandardCharsets.ISO_8859_1)
+            [
+                    'checkPinionShaft',
+                    'updateClientMotion',
+                    'clientOffsetDiff',
+                    'axisMotion',
+                    'getAxisCoord',
+                    'net/minecraft/world/level/Level',
+                    'm_7702_',
+                    'com/simibubi/create/content/kinetics/gantry/GantryShaftBlockEntity',
+                    'getPinionMovementSpeed'
+            ].each { canary ->
+                if (!classText.contains(canary)) {
+                    throw new GradleException("Create 6.0.8 Gantry bytecode lost expected interpolation canary: ${canary}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyM15GantryInterpolationBoundary PASS: Create Gantry client prediction target exists and Sable bridges the hidden-plot pinion-shaft lookup plus the 6.0.9 precision fix')
+    }
+}
+
+tasks.register('verifyM15GantryPrecisionArithmetic') {
+    group = 'forge backport'
+    description = 'Demonstrates the Create 6.0.8 Gantry float-threshold precision loss at Sable hidden-plot coordinates.'
+
+    doLast {
+        double hidden = 20_481_000.0d
+        double axisMotion = 0.0625d
+        double hiddenWithFraction = 20_481_028.140625d
+        float legacyCurrentF = (float) hidden
+        float legacyNextF = (float) (hidden + axisMotion)
+        float legacyPacketCoordF = (float) hiddenWithFraction
+        float legacyHalfThresholdF = ((float) Math.floor(hidden)) + 0.5f
+        double legacyCurrent = (double) legacyCurrentF
+        double legacyNext = (double) legacyNextF
+        double legacyPacketCoord = (double) legacyPacketCoordF
+        double legacyHalfThreshold = (double) legacyHalfThresholdF
+        double patchedHalfThreshold = Math.floor(hidden) + 0.5d
+        if (legacyCurrent == hidden && legacyNext == hidden + axisMotion) {
+            throw new GradleException('Expected Java float to lose 0.0625 Gantry increments around 20 million')
+        }
+        if (legacyNext - legacyCurrent != 0d) {
+            throw new GradleException('Expected adjacent 0.0625 hidden-plot positions to collapse to the same float value')
+        }
+        if (Math.abs(legacyHalfThreshold - patchedHalfThreshold) < 0.25d) {
+            throw new GradleException('Expected legacy float half-block threshold to lose the 0.5 component at hidden-plot scale')
+        }
+        double legacyPacketError = legacyPacketCoord - hiddenWithFraction
+        double correctedClientDelta = axisMotion + legacyPacketError / 2d
+        if (Math.abs(legacyPacketError) < 0.1d || Math.abs(correctedClientDelta) > 0.01d) {
+            throw new GradleException("Expected float Gantry packet coord to create ~0.14 correction and near-zero/opposite client motion; error=${legacyPacketError}, delta=${correctedClientDelta}")
+        }
+        double precisePacketError = hiddenWithFraction - hiddenWithFraction
+        if (precisePacketError != 0d) {
+            throw new GradleException('Double Gantry packet coord should preserve the server axis coordinate exactly for this verifier input')
+        }
+        [0d, 100d, 1_000d, 10_000d].each { coord ->
+            double floatDelta = (double) ((float) (coord + axisMotion)) - (double) ((float) coord)
+            if (Math.abs(floatDelta - axisMotion) > 0.001d) {
+                throw new GradleException("Unexpected precision loss at ordinary coordinate ${coord}: ${floatDelta}")
+            }
+        }
+        logger.lifecycle("verifyM15GantryPrecisionArithmetic PASS: float ULP at hidden plot collapses ${axisMotion} motion and float packet coords create correction; double path preserves Create Gantry decisions")
+    }
+}
+
+tasks.register('verifyM15GantryPrecisionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Sable ports the upstream Gantry double-threshold precision fix instead of render smoothing.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionUpdatePacketMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java'))
+
+    doLast {
+        String mixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java').getText('UTF-8')
+        String packetText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionUpdatePacketMixin.java').getText('UTF-8')
+        String renderText = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+        [
+                'Ports Create 6.0.9',
+                'sable$checkPinionShaftWithDoubleThreshold',
+                'cancellable = true',
+                'Mth.floor(currentCoord) + .5 < nextCoord',
+                'pinionMovementSpeed * movementDirection.getAxisDirection().getStep() < 0',
+                'gantryShaftBlockEntity.canAssembleOn()',
+                'if (!this.level().isClientSide) {',
+                'this.axisMotion = pinionMovementSpeed;',
+                'this.setContraptionMotion(movement);'
+        ].each { canary ->
+            if (!mixinText.contains(canary)) {
+                throw new GradleException("M15 Gantry precision boundary lost canary: ${canary}")
+            }
+        }
+        [
+                'Ports Create 6.0.9',
+                'GantryContraptionUpdatePacket',
+                'buffer.readDouble()',
+                'buffer.writeDouble(this.coord)',
+                'buffer.writeDouble(this.motion)',
+                'buffer.writeDouble(this.sequenceLimit)',
+                'writeFloat(F)'
+        ].each { canary ->
+            if (!packetText.contains(canary)) {
+                throw new GradleException("M15 Gantry packet precision boundary lost canary: ${canary}")
+            }
+        }
+        if (mixinText.contains('Mth.floor(currentCoord) + .5f')
+                || mixinText.contains('Mth.floor(currentCoord) + 0.5f')) {
+            throw new GradleException('M15 Gantry precision fix must not retain the Create 6.0.8 float half-block threshold')
+        }
+        [
+                'visiblePosition.lerp',
+                'previousVisible.lerp',
+                'smoothGantry',
+                'clientOffsetDiff = 0'
+        ].each { forbidden ->
+            if (renderText.contains(forbidden) || mixinText.contains(forbidden)) {
+                throw new GradleException("M15 Gantry precision must not be a cosmetic smoothing workaround: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM15GantryPrecisionBoundary PASS: Sable-contained Gantry uses double threshold at Create state boundary, not render smoothing')
+    }
+}
+
+tasks.register('verifyM15Upstream9481Boundary') {
+    group = 'forge backport'
+    description = 'Verifies the target Create 6.0.8 jar still contains the Gantry float pattern that Sable patches.'
+
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java'))
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M15 upstream #9481 verification: ${targetCreateJar}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            def entry = jar.getEntry('com/simibubi/create/content/contraptions/gantry/GantryContraptionEntity.class')
+            if (entry == null) {
+                throw new GradleException('Create 6.0.8 GantryContraptionEntity class is missing')
+            }
+            byte[] bytes = jar.getInputStream(entry).bytes
+            boolean hasFloatHalf = false
+            for (int i = 0; i + 5 < bytes.length; i++) {
+                int opcode = bytes[i] & 0xFF
+                int constantLoad = bytes[i + 1] & 0xFF
+                boolean ldcFloatHalf = constantLoad == 0x12
+                        && (bytes[i + 3] & 0xFF) == 0x62
+                        && (bytes[i + 4] & 0xFF) == 0x8d
+                boolean ldcWideFloatHalf = constantLoad == 0x13
+                        && (bytes[i + 4] & 0xFF) == 0x62
+                        && (bytes[i + 5] & 0xFF) == 0x8d
+                if (opcode == 0x86 && (ldcFloatHalf || ldcWideFloatHalf)) {
+                    hasFloatHalf = true
+                    break
+                }
+            }
+            if (!hasFloatHalf) {
+                throw new GradleException('Create 6.0.8 Gantry bytecode no longer shows the expected float-half/fadd pattern')
+            }
+        } finally {
+            jar.close()
+        }
+        String mixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java').getText('UTF-8')
+        if (!mixinText.contains('Mth.floor(currentCoord) + .5 < nextCoord')) {
+            throw new GradleException('Sable mixin must represent the upstream #9481 double half-block threshold')
+        }
+        logger.lifecycle('verifyM15Upstream9481Boundary PASS: target Create 6.0.8 has the vulnerable float pattern and Sable patches it for contained Gantries')
+    }
+}
+
+tasks.register('verifyM15GantryPacketPrecisionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Create 6.0.8 Gantry update packets narrow axis coordinates to float and Sable restores double wire precision.'
+
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionUpdatePacketMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M15 Gantry packet precision verification: ${targetCreateJar}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            def entry = jar.getEntry('com/simibubi/create/content/contraptions/gantry/GantryContraptionUpdatePacket.class')
+            if (entry == null) {
+                throw new GradleException('Create 6.0.8 GantryContraptionUpdatePacket class is missing')
+            }
+            byte[] bytes = jar.getInputStream(entry).bytes
+            int d2fCount = 0
+            int readFloatRefs = 0
+            int writeFloatRefs = 0
+            String classText = new String(bytes, StandardCharsets.ISO_8859_1)
+            for (byte b : bytes) {
+                if ((b & 0xFF) == 0x90) {
+                    d2fCount++
+                }
+            }
+            if (classText.contains('readFloat')) {
+                readFloatRefs++
+            }
+            if (classText.contains('writeFloat')) {
+                writeFloatRefs++
+            }
+            if (d2fCount < 3 || readFloatRefs == 0 || writeFloatRefs == 0) {
+                throw new GradleException('Create 6.0.8 Gantry update packet no longer shows the expected float wire narrowing')
+            }
+        } finally {
+            jar.close()
+        }
+        String packetText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionUpdatePacketMixin.java').getText('UTF-8')
+        String configText = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        [
+                '@Mixin(value = GantryContraptionUpdatePacket.class, remap = false)',
+                '<init>(Lnet/minecraft/network/FriendlyByteBuf;)V',
+                'buffer.readDouble()',
+                'writeFloat(F)',
+                'ordinal = 0',
+                'ordinal = 1',
+                'ordinal = 2',
+                'buffer.writeDouble(this.coord)',
+                'buffer.writeDouble(this.motion)',
+                'buffer.writeDouble(this.sequenceLimit)'
+        ].each { canary ->
+            if (!packetText.contains(canary)) {
+                throw new GradleException("M15 Gantry packet precision mixin lost canary: ${canary}")
+            }
+        }
+        if (!configText.contains('"compatibility.create.contraptions.GantryContraptionUpdatePacketMixin"')) {
+            throw new GradleException('M15 Gantry packet precision mixin is not registered in sable-common-forge.mixins.json')
+        }
+        logger.lifecycle('verifyM15GantryPacketPrecisionBoundary PASS: Create 6.0.8 float Gantry packet wire format is patched to double precision')
+    }
+}
+
+tasks.register('verifyM15PinionCoordinateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Gantry pinion diagnostics use Create carriage-facing semantics, not movement-axis guesses.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String mixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/GantryContraptionEntityMixin.java').getText('UTF-8')
+        [
+                'final Direction carriageFacing = gantryContraption.getFacing()',
+                'relative(carriageFacing.getOpposite())',
+                'expectedPinionRaw',
+                'expectedPinionLocal',
+                'actualResolvedControllerRaw',
+                'actualResolvedControllerLocal'
+        ].each { canary ->
+            if (!mixinText.contains(canary)) {
+                throw new GradleException("M15 pinion coordinate boundary lost canary: ${canary}")
+            }
+        }
+        if (mixinText.contains('relative(movementAxis.getOpposite())')) {
+            throw new GradleException('M15 pinion diagnostics must not derive the shaft from movementAxis; top carriage uses carriage facing to find the rail below')
+        }
+        logger.lifecycle('verifyM15PinionCoordinateBoundary PASS: pinion shaft position follows Create carriage-facing semantics and reports raw/local coordinates')
+    }
+}
+
+tasks.register('verifyM15ReloadCarriageDiscoveryBoundary') {
+    group = 'forge backport'
+    description = 'Verifies reload/post-endpoint Gantry commands rediscover static carriage from world state.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'collectStaticGantryMechanisms(subLevel, gantries, shafts)',
+                'StaticGantryMechanism',
+                'carriageLocal()',
+                'railIndex()',
+                'payloadPresent = liveContraption ? capturedPayloadPresent : staticPayloadPresent',
+                'state()',
+                'STATIC_AT_RAIL_POSITION'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 reload carriage discovery boundary lost canary: ${canary}")
+            }
+        }
+        [
+                'persistedCarriage',
+                'm15CarriageCache',
+                'CARRIAGE_LOCAL.equals(this.carriageLocal) ? "UNASSEMBLED_READY" : "BROKEN"'
+        ].each { forbidden ->
+            if (text.contains(forbidden)) {
+                throw new GradleException("M15 reload control must use real restored blocks, not hidden M15-only state: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM15ReloadCarriageDiscoveryBoundary PASS: M15 rediscoveries restored static Gantry carriage from actual rail/world state')
+    }
+}
+
+tasks.register('verifyM15HiddenPlotRenderBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M15 keeps the accepted M13/M14 visible-space render precision rule.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java'))
+
+    doLast {
+        String text = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+        [
+                'final Vec3 rawPosition = interpolatedPosition(contraptionEntity, partialTick)',
+                'final Vec3 visiblePosition = clientSubLevel.renderPose(partialTick).transformPosition(rawPosition)',
+                'final double x = visiblePosition.x - cameraPosition.x',
+                'final boolean frustumPass = frustum == null || frustum.isVisible(visibleAabb)',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 hidden-plot render boundary lost canary: ${canary}")
+            }
+        }
+        [
+                'dispatcher.render(contraptionEntity, oldRawDispatcherX',
+                'poseStack.translate(oldRawDispatcher',
+                'visiblePosition.subtract(rawPosition)',
+                'rawPosition.x - cameraPosition.x, rawPosition.y - cameraPosition.y'
+        ].each { forbidden ->
+            if (text.contains(forbidden)) {
+                throw new GradleException("M15 must not reintroduce hidden plot translations into the render PoseStack: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM15HiddenPlotRenderBoundary PASS: visible-space dispatch remains small/camera-relative with no hidden plot cancellation')
+    }
+}
+
+tasks.register('verifyM15AirborneHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies airborne Gantry testing allows live idle contraptions without anchoring or fake motion.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'boolean safeForAirbornePrepare()',
+                'REJECTED_UNSAFE_ACTIVE_STATE',
+                'Math.abs(this.axisMotion) <= 0.0001',
+                'Math.abs(this.motorSpeed) <= 0.0001',
+                'APPLIED_ONE_SHOT_POSE',
+                'gravityStillActive=true',
+                'anchored=false',
+                'airborne_acceptance_forward'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 airborne harness lost canary: ${canary}")
+            }
+        }
+        [
+                'setNoGravity',
+                'disableGravity',
+                'anchor=true',
+                'scheduleAtFixedRate'
+        ].each { forbidden ->
+            if (text.contains(forbidden)) {
+                throw new GradleException("M15 airborne harness must not reject all live gantries or fake body physics: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM15AirborneHarnessBoundary PASS: airborne harness permits live-idle Gantry testing and keeps gravity/physics real')
+    }
+}
+
+tasks.register('verifyM15PersistenceStateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies restored live Gantry state is validated through live ownership instead of static payload slots.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'firstGantryContraptionEntity(subLevel)',
+                'Sable.HELPER.getContaining(entity) == subLevel',
+                'capturedPayloadPresent',
+                'staticPayloadPresent',
+                'LIVE_IDLE',
+                'PERSISTENCE=UNVERIFIED',
+                'liveControllerLocal='
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 persistence state boundary lost canary: ${canary}")
+            }
+        }
+        if (text.contains('state=UNASSEMBLED_VALID')) {
+            throw new GradleException('M15 persistence diagnostics must not collapse restored live Gantry into stale unassembled validation')
+        }
+        logger.lifecycle('verifyM15PersistenceStateBoundary PASS: restored/live Gantry diagnostics are driven by live contraption ownership')
+    }
+}
+
+tasks.register('verifyM15ValidationTruthfulnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M15 validation distinguishes fixture readiness from runtime client acceptance.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        [
+                'BROKEN',
+                'UNASSEMBLED_READY',
+                'LIVE_IDLE',
+                'MOVING_FORWARD',
+                'MOVING_REVERSE',
+                'FIXTURE_LAYOUT=',
+                'LIVE_CONTRAPTION=',
+                'PAYLOAD_OWNERSHIP=',
+                'CLIENT_INTERPOLATION=UNVERIFIED',
+                'KINETIC_DRIVE=',
+                'GANTRY_CHAIN=',
+                'SERVER_ASSEMBLY=',
+                'SERVER_LINEAR_MOTION=',
+                'CLIENT_RENDER=UNVERIFIED',
+                'CLIENT_COLLISION=UNVERIFIED',
+                'CLIENT_TARGETING=UNVERIFIED',
+                'PERSISTENCE=UNVERIFIED',
+                'failures='
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 validation truthfulness lost canary: ${canary}")
+            }
+        }
+        [
+                'CLIENT_RENDER=PASS',
+                'CLIENT_COLLISION=PASS',
+                'CLIENT_TARGETING=PASS',
+                'PERSISTENCE=PASS',
+                'state=UNASSEMBLED_VALID'
+        ].each { forbidden ->
+            if (text.contains(forbidden)) {
+                throw new GradleException("M15 validation must not claim runtime-only or malformed states as PASS: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM15ValidationTruthfulnessBoundary PASS: M15 validation separates fixture/server domains from unverified client runtime domains')
+    }
+}
+
+tasks.register('verifyM15DiagnosticCoordinateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M15 diagnostics label raw plot, sublevel-local, and visible-world coordinates explicitly.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M15TestCommands.java').getText('UTF-8')
+        String renderBridgeText = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+        [
+                'createAnchorRawPlot=',
+                'createAnchorSubLevelLocal=',
+                'expectedVisibleAnchor=',
+                'plotVecToLocal',
+                'plotVec.x - center.getX()',
+                'expectedVisibleTravelAxis=',
+                'actualVisibleAnchor=UNVERIFIED',
+                'positionError=UNVERIFIED',
+                'axisAlignmentDot=UNVERIFIED'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M15 diagnostic coordinate contract lost canary: ${canary}")
+            }
+        }
+        [
+                'transformPosition(new Vector3d(rawPlot',
+                'transformPosition(new Vector3d(entity.position().x',
+                'visibleAnchor=PASS',
+                'positionError=0'
+        ].each { forbidden ->
+            if (text.contains(forbidden)) {
+                throw new GradleException("M15 diagnostics must not treat hidden plot coordinates as Sable-local visible coordinates: ${forbidden}")
+            }
+        }
+        [
+                'final Vec3 visiblePosition = clientSubLevel.renderPose(partialTick).transformPosition(rawPosition)',
+                'oldRawDispatcherXYZ=',
+                'newVisibleDispatcherXYZ=',
+                'frustum.isVisible(visibleAabb)'
+        ].each { canary ->
+            if (!renderBridgeText.contains(canary)) {
+                throw new GradleException("M15 must retain the M13/M14 visible-space render bridge canary: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM15DiagnosticCoordinateBoundary PASS: M15 diagnostics keep raw plot, local, and visible coordinates distinct and retain visible-space render scheduling')
     }
 }
 

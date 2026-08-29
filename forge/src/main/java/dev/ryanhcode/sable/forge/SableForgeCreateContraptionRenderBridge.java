@@ -19,7 +19,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 
+import java.lang.reflect.Field;
 import java.util.Collections;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -30,6 +32,8 @@ import java.util.concurrent.ConcurrentHashMap;
 final class SableForgeCreateContraptionRenderBridge {
     private static final Set<String> LOGGED_RENDER_STAGE =
             Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private static final Map<Integer, Integer> LOGGED_M15_INTERP_SAMPLES = new ConcurrentHashMap<>();
+    private static final Map<Integer, Vec3> LAST_M15_VISIBLE_ANCHOR = new ConcurrentHashMap<>();
 
     private SableForgeCreateContraptionRenderBridge() {
     }
@@ -94,6 +98,8 @@ final class SableForgeCreateContraptionRenderBridge {
                     rawPosition, visiblePosition, cameraPosition, rawAabb, visibleAabb,
                     true, true, oldRawDispatcherX, oldRawDispatcherY, oldRawDispatcherZ,
                     x, y, z);
+            logGantryInterpolationSample(contraptionEntity, partialTick, rawPosition, visiblePosition,
+                    cameraPosition, x, y, z);
             poseStack.pushPose();
             dispatcher.render(contraptionEntity, x, y, z, contraptionEntity.getYRot(), partialTick,
                     poseStack, bufferSource, packedLight);
@@ -182,5 +188,60 @@ final class SableForgeCreateContraptionRenderBridge {
                 frustumPass,
                 entity.getRotationState(),
                 entity.getContraption() == null ? 0 : entity.getContraption().getBlocks().size());
+    }
+
+    private static void logGantryInterpolationSample(final AbstractContraptionEntity entity,
+                                                     final float partialTick,
+                                                     final Vec3 rawPosition,
+                                                     final Vec3 visiblePosition,
+                                                     final Vec3 cameraPosition,
+                                                     final double dispatcherX,
+                                                     final double dispatcherY,
+                                                     final double dispatcherZ) {
+        if (!entity.getClass().getName().contains("GantryContraptionEntity")) {
+            return;
+        }
+        final int sample = LOGGED_M15_INTERP_SAMPLES.merge(entity.getId(), 1, Integer::sum);
+        if (sample > 12) {
+            return;
+        }
+        final Vec3 previousVisible = LAST_M15_VISIBLE_ANCHOR.put(entity.getId(), visiblePosition);
+        final double visibleDelta = previousVisible == null ? 0.0 : visiblePosition.distanceTo(previousVisible);
+        Sable.LOGGER.info("SABLE_M15_INTERP sample={} entityId={} partialTick={} axisMotion={} clientOffsetDiff={} "
+                        + "movementAxis={} rawPrevious=({},{},{}) rawCurrent={} interpolatedRaw={} "
+                        + "cameraPos={} visibleAnchor={} deltaFromPreviousVisibleAnchor={} "
+                        + "dispatcherXYZ=({},{},{}) hiddenPlotPoseTranslation=false",
+                sample,
+                entity.getId(),
+                partialTick,
+                readFieldRaw(entity, "axisMotion"),
+                readFieldRaw(entity, "clientOffsetDiff"),
+                readFieldRaw(entity, "movementAxis"),
+                entity.xOld,
+                entity.yOld,
+                entity.zOld,
+                entity.position(),
+                rawPosition,
+                cameraPosition,
+                visiblePosition,
+                visibleDelta,
+                dispatcherX,
+                dispatcherY,
+                dispatcherZ);
+    }
+
+    private static Object readFieldRaw(final Object target, final String fieldName) {
+        for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                final Field field = type.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return field.get(target);
+            } catch (final NoSuchFieldException ignored) {
+                // Gantry interpolation fields live on the concrete Create entity class.
+            } catch (final ReflectiveOperationException | RuntimeException ignored) {
+                return "unavailable";
+            }
+        }
+        return "unavailable";
     }
 }

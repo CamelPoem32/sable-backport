@@ -2306,6 +2306,15 @@ must not continue along fixed world +X or hidden-plot +X.
 Expected transform: `T_world_block = T_world_sable(t) * T_create_linear(offset(t)) * T_create_local`.
 Gravity may move the whole body during observation; that is expected.
 
+The shorthand regression command performs the same one-shot airborne prep,
+M10 body velocity, and normal Create motor extension without anchoring or
+manual contraption motion:
+
+```text
+/sable m14 airborne_acceptance @e[name=m14_final,limit=1]
+/sable m14 snapshot @e[name=m14_final,limit=1]
+```
+
 ### Phase E: Persistence
 
 ```text
@@ -2332,3 +2341,90 @@ a before/after runtime comparison rather than a pre-save PASS claim.
 ```
 
 Expected: two fixtures operate independently with no singleton test state.
+
+## M15 Gantry Precision Harness
+
+M15 validates a second independent Create linear contraption mechanism inside
+Sable. M13 and M14 are closed; this short sequence targets only the current
+Gantry precision/prediction repair. Stop at the first meaningful failure that
+makes later phases unsafe.
+
+### Phase A: Fresh Fixture
+
+```text
+/sable m15 spawn_gantry m15_final
+/sable m15 validate @e[name=m15_final,limit=1]
+```
+
+Expected: either `UNASSEMBLED_READY` with `FIXTURE_LAYOUT=PASS`,
+`KINETIC_DRIVE=PASS`, `GANTRY_CHAIN=PASS`, and client domains `UNVERIFIED`,
+or a concrete `BROKEN` reason that identifies the first Create rule
+the fixture violates.
+
+### Phase B: Forward Precision Trip
+
+```text
+/sable m15 forward @e[name=m15_final,limit=1]
+```
+
+Watch one full trip. Expected: visible movement is smooth, with no roughly
+once-per-second jumps and no visible backwards micro-corrections. After Create
+naturally disassembles at another rail position, run:
+
+```text
+/sable m15 snapshot @e[name=m15_final,limit=1]
+/sable m15 validate @e[name=m15_final,limit=1]
+/sable m15 reverse @e[name=m15_final,limit=1]
+```
+
+Expected: state is `STATIC_AT_RAIL_POSITION`, not `BROKEN`; the current
+carriage local coordinate and rail index are discovered dynamically; reverse
+is accepted and the Gantry reassembles/travels back.
+
+### Phase C: Reverse Precision Trip
+
+```text
+/sable m15 snapshot @e[name=m15_final,limit=1]
+```
+
+Watch the return trip. Expected: movement remains smooth in the opposite
+direction; commands remain functional; collision behavior is unchanged. If it
+is still jerky, copy the nearby `SABLE_M15_INTERP` and `SABLE_M15_PREDICTION`
+lines. A good run should show server/client motion with the same sign,
+`clientOffsetDiff` staying small, `expectedPinionLocal` matching
+`actualResolvedControllerLocal`, and visible anchors progressing monotonically.
+
+### Phase D: Mid-Run Control
+
+```text
+/sable m15 forward @e[name=m15_final,limit=1]
+/sable m15 stop @e[name=m15_final,limit=1]
+/sable m15 reverse @e[name=m15_final,limit=1]
+/sable m15 snapshot @e[name=m15_final,limit=1]
+```
+
+Expected: all controls remain accepted while the mechanism is healthy. Commands
+still manipulate only the Create motor value.
+
+### Phase E: Reload
+
+```text
+/sable m15 snapshot @e[name=m15_final,limit=1]
+Save & Quit, reopen the same world
+/sable m15 snapshot @e[name=m15_final,limit=1]
+/sable m15 validate @e[name=m15_final,limit=1]
+/sable m15 reverse @e[name=m15_final,limit=1]
+```
+
+Expected: a restored static carriage is found wherever Create restored it on
+the rail, and motor control remains functional after reload.
+
+### Phase F: Airborne Acceptance
+
+```text
+/sable m15 airborne_acceptance @e[name=m15_final,limit=1]
+/sable m15 snapshot @e[name=m15_final,limit=1]
+```
+
+Expected transform: `T_world_block = T_world_sable(t) * T_create_gantry_motion(t) * T_create_local`.
+This phase should run only after endpoint/reload control is accepted.

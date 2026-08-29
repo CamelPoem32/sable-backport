@@ -81,6 +81,8 @@
         "m11.create.ValueSettingsPacketAccessor",
         "compatibility.create.contraptions.AbstractContraptionEntityMixin",
         "compatibility.create.contraptions.ControlledContraptionEntityMixin",
+        "compatibility.create.contraptions.GantryContraptionEntityMixin",
+        "compatibility.create.contraptions.GantryContraptionUpdatePacketMixin",
         "compatibility.create.contraptions.ControlledContraptionEntityAccessor",
         "compatibility.create.contraptions.ContraptionColliderMixin",
         "compatibility.create.contraptions.Matrix3dAccessor",

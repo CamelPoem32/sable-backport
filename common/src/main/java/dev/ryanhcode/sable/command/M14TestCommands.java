@@ -170,7 +170,10 @@ public final class M14TestCommands {
                                 .executes(M14TestCommands::testRotateParent)))
                 .then(Commands.literal("test_combined_parent")
                         .then(Commands.argument("target", SubLevelArgumentType.singleSubLevel())
-                                .executes(M14TestCommands::testCombinedParent))));
+                                .executes(M14TestCommands::testCombinedParent)))
+                .then(Commands.literal("airborne_acceptance")
+                        .then(Commands.argument("target", SubLevelArgumentType.singleSubLevel())
+                                .executes(M14TestCommands::airborneAcceptance))));
     }
 
     private static int list(final CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -722,6 +725,28 @@ public final class M14TestCommands {
     private static int testCombinedParent(final CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         return setBodyVelocity(context, "combined_parent", new Vector3d(0.0, 0.6, 0.0),
                 new Vector3d(0.0, Math.toRadians(12.0), 0.0));
+    }
+
+    private static int airborneAcceptance(final CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        final int prepared = prepareAirborne(context);
+        if (prepared == 0) {
+            return 0;
+        }
+        setBodyVelocity(context, "airborne_acceptance_combined_parent", new Vector3d(0.0, 0.6, 0.0),
+                new Vector3d(0.0, Math.toRadians(12.0), 0.0));
+        final int extended = setMotorSpeed(context, -Math.abs(DEFAULT_EXTEND_RPM), "airborne_acceptance_extend");
+        final ServerSubLevel subLevel = SubLevelArgumentType.getSingleSubLevel(context, "target");
+        final String line = "SABLE_M14_AIRBORNE_ACCEPTANCE id=" + subLevel.getUniqueId()
+                + " result=" + (extended > 0 ? "APPLIED" : "REJECTED")
+                + " preparedAirborne=true"
+                + " bodyVelocity=combined_parent"
+                + " pistonControl=normal_create_motor_speed"
+                + " gravityStillActive=true"
+                + " anchored=false"
+                + " manualContraptionMotion=false";
+        send(context, line);
+        Sable.LOGGER.info(line);
+        return extended > 0 ? 1 : 0;
     }
 
     private static int setBodyVelocity(final CommandContext<CommandSourceStack> context,
