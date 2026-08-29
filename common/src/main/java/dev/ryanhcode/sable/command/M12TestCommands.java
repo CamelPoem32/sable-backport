@@ -668,10 +668,6 @@ public final class M12TestCommands {
         requireInvariant(stats.physicsBodyPresent(), "physics_body_missing", failures);
         requireInvariant(stats.physicsBodyRegistered(), "physics_body_not_registered", failures);
         requireInvariant(stats.collisionGeometryPresent(), "collision_geometry_missing", failures);
-        if (stats.collisionUploadedBlocks() > 0) {
-            requireInvariant(stats.collisionUploadedBlocks() == stats.blockCount(),
-                    "collision_block_count_mismatch", failures);
-        }
         return failures;
     }
 

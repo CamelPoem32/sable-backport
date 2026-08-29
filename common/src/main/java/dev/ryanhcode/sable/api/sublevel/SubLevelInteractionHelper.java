@@ -10,6 +10,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -86,6 +87,7 @@ public final class SubLevelInteractionHelper {
 
         logServerInteraction(subLevel, player, packet, plotBlockPos, visibleWorldHit, reachDistance,
                 result, "server_game_mode_useItemOn", oldState, newState);
+        logServerEdit(subLevel, player, packet, oldState, newState, result);
     }
 
     private static void logServerInteraction(final ServerSubLevel subLevel,
@@ -115,5 +117,27 @@ public final class SubLevelInteractionHelper {
                 stateBefore,
                 stateAfter,
                 stateBefore != null && stateAfter != null && !stateBefore.equals(stateAfter));
+    }
+
+    private static void logServerEdit(final ServerSubLevel subLevel,
+                                      final ServerPlayer player,
+                                      final ServerboundUseItemOnSubLevelPacket packet,
+                                      @Nullable final BlockState stateBefore,
+                                      @Nullable final BlockState stateAfter,
+                                      final InteractionResult result) {
+        final ItemStack stack = player.getItemInHand(packet.hand());
+        final boolean blockItem = stack.getItem() instanceof BlockItem;
+        final boolean stateChanged = stateBefore != null && stateAfter != null && !stateBefore.equals(stateAfter);
+        if (!blockItem && !stateChanged) {
+            return;
+        }
+        Sable.LOGGER.info("SABLE_M13_EDIT action=place sublevel={} localPos={} state={} "
+                        + "serverResolved=true result={} stateAfter={} stateChanged={}",
+                subLevel.getUniqueId(),
+                packet.localBlockPos(),
+                stateBefore,
+                result,
+                stateAfter,
+                stateChanged);
     }
 }

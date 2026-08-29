@@ -13,6 +13,7 @@ import net.minecraft.server.level.BlockDestructionProgress;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.fml.ModList;
 
 import java.util.SortedSet;
 
@@ -72,5 +73,9 @@ final class SableForgeClientRenderEvents {
                 cameraPosition.z,
                 event.getPoseStack().last().pose(),
                 event.getPartialTick());
+
+        if (ModList.get().isLoaded("create")) {
+            SableForgeCreateContraptionRenderBridge.render(event, level, cameraPosition);
+        }
     }
 }

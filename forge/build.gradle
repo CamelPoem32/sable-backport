@@ -13,13 +13,79 @@ import java.util.zip.ZipOutputStream
 plugins {
     id 'java-library'
     id 'maven-publish'
-    id 'net.minecraftforge.gradle'
     id 'checkstyle'
 }
 
-apply plugin: 'org.spongepowered.mixin'
+def sableCheapTaskInvocation = gradle.startParameter.taskNames.any { taskName ->
+    taskName == 'spotlessApply'
+            || taskName.endsWith(':spotlessApply')
+            || taskName == 'verifyCheapTasksDoNotResolveCompileClasspath'
+            || taskName.endsWith(':verifyCheapTasksDoNotResolveCompileClasspath')
+}
 
-evaluationDependsOn(':sable_companion_1_20')
+if (sableCheapTaskInvocation) {
+    // ForgeGradle 6 validates its Minecraft userdev repository from an
+    // afterEvaluate callback. A source-only invocation must therefore stop before
+    // that plugin is applied; the normal branch below still applies it unchanged.
+    tasks.register('verifyCheapTasksDoNotResolveCompileClasspath') {
+        group = 'forge backport'
+        description = 'Guards source-only Forge tasks against configuration-time Minecraft/Companion resolution.'
+
+        inputs.file(rootProject.file('sable_companion_1_20/build.gradle'))
+        inputs.file(rootProject.file('settings.gradle'))
+        inputs.file(rootProject.file('forge/build.gradle'))
+
+        doLast {
+            if (pluginManager.hasPlugin('net.minecraftforge.gradle')) {
+                throw new GradleException('ForgeGradle was applied during a source-only invocation')
+            }
+            if (configurations.findByName('_compileJava_1') != null
+                    || configurations.findByName('minecraft') != null) {
+                throw new GradleException('Forge userdev configurations exist during a source-only invocation')
+            }
+            def companionProject = project(':sable_companion_1_20')
+            if (companionProject.pluginManager.hasPlugin('net.minecraftforge.gradle')) {
+                throw new GradleException('Companion applied ForgeGradle during a source-only invocation')
+            }
+
+            String forgeText = rootProject.file('forge/build.gradle').getText('UTF-8')
+            String companionText = rootProject.file('sable_companion_1_20/build.gradle').getText('UTF-8')
+            String forgeConfigurationText = forgeText.substring(
+                    0,
+                    forgeText.indexOf("tasks.register('verifyCheapTasksDoNotResolveCompileClasspath')")
+            )
+            String forgeNormalBranch = forgeText.substring(forgeText.indexOf("apply plugin: 'net.minecraftforge.gradle'"))
+
+            if (forgeConfigurationText.contains("evaluationDependsOn(':sable_companion_1_20')")) {
+                throw new GradleException('Forge must not eagerly evaluate the Companion project for source-only tasks')
+            }
+            if (!forgeText.contains('if (sableCheapTaskInvocation)')
+                    || !forgeText.contains("apply plugin: 'net.minecraftforge.gradle'")) {
+                throw new GradleException('ForgeGradle must remain available behind an explicit task-isolation boundary')
+            }
+            if (companionText.contains("id 'net.minecraftforge.gradle'")
+                    || companionText.contains('minecraft "net.minecraftforge:forge')) {
+                throw new GradleException('Companion must remain a plain Java library; ForgeGradle/Minecraft must not configure it eagerly')
+            }
+            if (!companionText.contains("tasks.named('compileJava')")
+                    || !companionText.contains('doFirst')
+                    || !companionText.contains("classpath = project(':forge').configurations.minecraft")) {
+                throw new GradleException('Companion Minecraft classpath must be attached inside compileJava.doFirst')
+            }
+            if (!forgeNormalBranch.contains("project(':sable_companion_1_20').provider")) {
+                throw new GradleException('Forge cross-project Companion output wiring is not provider-backed')
+            }
+
+            logger.lifecycle('verifyCheapTasksDoNotResolveCompileClasspath PASS: source-only branch '
+                    + 'does not apply ForgeGradle; production compile/build branch retains lazy execution-scoped classpaths')
+        }
+    }
+
+    return
+}
+
+apply plugin: 'net.minecraftforge.gradle'
+apply plugin: 'org.spongepowered.mixin'
 
 base {
     archivesName = "${mod_id}-forge-${forge_minecraft_version}"
@@ -36,7 +102,9 @@ sourceSets {
         resources.setSrcDirs([sourceSets.main.output.resourcesDir])
         output.classesDirs.setFrom(
                 sourceSets.main.output.classesDirs,
-                project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+                project(':sable_companion_1_20').provider {
+                    project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+                }
         )
         compileClasspath += sourceSets.main.compileClasspath
         runtimeClasspath += output + sourceSets.main.runtimeClasspath
@@ -120,7 +188,10 @@ minecraft {
 
 def forgeBackportSourceExclusions = [
         // M0-M2 optional integrations and debug/test Mixins.
-        'dev/ryanhcode/sable/mixin/compatibility/**',
+        'dev/ryanhcode/sable/mixin/compatibility/computercraft/**',
+        'dev/ryanhcode/sable/mixin/compatibility/exposure/**',
+        'dev/ryanhcode/sable/mixin/compatibility/iris/**',
+        'dev/ryanhcode/sable/mixin/compatibility/vista/**',
         'dev/ryanhcode/sable/mixin/sublevel_render/impl/sodium/**',
         'dev/ryanhcode/sable/mixin/debug_render/**',
         'dev/ryanhcode/sable/mixin/loaded_chunk_debug/**',
@@ -179,7 +250,6 @@ def forgeBackportSourceExclusions = [
         'dev/ryanhcode/sable/mixin/camera/new_camera_types/**',
         'dev/ryanhcode/sable/mixinhelpers/camera/new_camera_types/**',
         'dev/ryanhcode/sable/mixinterface/camera/camera_zoom/CameraZoomExtension.java',
-        'dev/ryanhcode/sable/mixin/clip_overwrite/GameRendererMixin.java',
         'dev/ryanhcode/sable/mixin/entity/entity_rotations_and_riding/EntityTypeMixin.java',
         'dev/ryanhcode/sable/mixin/entity/entity_sublevel_collision/PlayerMixin.java',
         'dev/ryanhcode/sable/mixin/player_standup/**',
@@ -350,6 +420,8 @@ configurations {
 
 def targetModpackModsDir = rootProject.file('../target_modpack/mods')
 def targetCreateJar = new File(targetModpackModsDir, "create-${forge_minecraft_version}-${forge_create_version}.jar")
+def targetJadeJar = new File(targetModpackModsDir, 'Jade-1.20.1-Forge-11.13.3.jar')
+def targetJadeAddonsJar = new File(targetModpackModsDir, 'JadeAddons-1.20.1-Forge-5.5.1.jar')
 def targetModpackRepository = layout.buildDirectory.dir('targetModpackRepository')
 def veilDevelopmentRuntime = layout.buildDirectory.file(
         "m6Runtime/Veil-forge-${forge_minecraft_version}-${forge_veil_version}-mapped-dev.jar")
@@ -838,7 +910,9 @@ dependencies {
     rapierBackportImplementation('org.apache.maven:maven-artifact:3.8.5') {
         transitive = false
     }
-    rapierBackportCompileOnly files(project(':sable_companion_1_20').sourceSets.main.output.classesDirs)
+    rapierBackportCompileOnly files(project(':sable_companion_1_20').provider {
+        project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+    })
 
     compileOnly fg.deobf("local.target:create-${forge_minecraft_version}:${forge_create_version}")
     compileOnly fg.deobf("local.target:flywheel-forge-${forge_minecraft_version}:${forge_flywheel_version}")
@@ -3055,6 +3129,214 @@ def readClassStructure = { InputStream rawInput ->
     [access: classAccess, fields: readMembers(), methods: readMembers()]
 }
 
+def readClassMethodInvocations = { InputStream rawInput ->
+    DataInputStream input = new DataInputStream(new BufferedInputStream(rawInput))
+    if (input.readInt() != 0xCAFEBABE as int) {
+        throw new GradleException('Invalid class-file magic')
+    }
+    input.readUnsignedShort()
+    input.readUnsignedShort()
+
+    int constantPoolCount = input.readUnsignedShort()
+    int[] tags = new int[constantPoolCount]
+    String[] utf8 = new String[constantPoolCount]
+    int[] classNameIndex = new int[constantPoolCount]
+    int[] refClassIndex = new int[constantPoolCount]
+    int[] refNameAndTypeIndex = new int[constantPoolCount]
+    int[] nameAndTypeNameIndex = new int[constantPoolCount]
+    int[] nameAndTypeDescriptorIndex = new int[constantPoolCount]
+    for (int index = 1; index < constantPoolCount; index++) {
+        int tag = input.readUnsignedByte()
+        tags[index] = tag
+        switch (tag) {
+            case 1:
+                utf8[index] = input.readUTF()
+                break
+            case 3:
+            case 4:
+                input.readInt()
+                break
+            case 5:
+            case 6:
+                input.readLong()
+                index++
+                break
+            case 7:
+                classNameIndex[index] = input.readUnsignedShort()
+                break
+            case 8:
+            case 16:
+            case 19:
+            case 20:
+                input.readUnsignedShort()
+                break
+            case 9:
+            case 10:
+            case 11:
+                refClassIndex[index] = input.readUnsignedShort()
+                refNameAndTypeIndex[index] = input.readUnsignedShort()
+                break
+            case 12:
+                nameAndTypeNameIndex[index] = input.readUnsignedShort()
+                nameAndTypeDescriptorIndex[index] = input.readUnsignedShort()
+                break
+            case 17:
+            case 18:
+                input.readUnsignedShort()
+                input.readUnsignedShort()
+                break
+            case 15:
+                input.readUnsignedByte()
+                input.readUnsignedShort()
+                break
+            default:
+                throw new GradleException("Unsupported class-file constant-pool tag ${tag}")
+        }
+    }
+
+    def skipAttributes = { int count ->
+        count.times {
+            input.readUnsignedShort()
+            long length = Integer.toUnsignedLong(input.readInt())
+            input.skipNBytes(length)
+        }
+    }
+
+    def invocationName = { int constantPoolIndex ->
+        int tag = tags[constantPoolIndex]
+        if (tag != 10 && tag != 11) {
+            return null
+        }
+        int classIndex = refClassIndex[constantPoolIndex]
+        int nameAndTypeIndex = refNameAndTypeIndex[constantPoolIndex]
+        String owner = utf8[classNameIndex[classIndex]]
+        String name = utf8[nameAndTypeNameIndex[nameAndTypeIndex]]
+        String descriptor = utf8[nameAndTypeDescriptorIndex[nameAndTypeIndex]]
+        "${owner}.${name}${descriptor}"
+    }
+
+    def u1 = { byte[] code, int offset -> code[offset] & 0xFF }
+    def u2 = { byte[] code, int offset -> ((code[offset] & 0xFF) << 8) | (code[offset + 1] & 0xFF) }
+    def operandLength = { int opcode ->
+        if ([0x10, 0x12, 0x15, 0x16, 0x17, 0x18, 0x19, 0x36, 0x37, 0x38, 0x39, 0x3A, 0xA9, 0xBC].contains(opcode)) {
+            return 1
+        }
+        if ((opcode >= 0x99 && opcode <= 0xA8)
+                || [0x11, 0x13, 0x14, 0x84, 0xB2, 0xB3, 0xB4, 0xB5, 0xBB, 0xBD, 0xC0, 0xC1, 0xC6, 0xC7].contains(opcode)) {
+            return 2
+        }
+        if (opcode == 0xC5) {
+            return 3
+        }
+        if (opcode == 0xC8 || opcode == 0xC9) {
+            return 4
+        }
+        0
+    }
+    def parseInvocations = { byte[] code ->
+        def invocations = []
+        int offset = 0
+        while (offset < code.length) {
+            int opcode = u1(code, offset)
+            switch (opcode) {
+                case 0xB6:
+                case 0xB7:
+                case 0xB8:
+                    String invocation = invocationName(u2(code, offset + 1))
+                    if (invocation != null) {
+                        invocations.add(invocation)
+                    }
+                    offset += 3
+                    break
+                case 0xB9:
+                    String invocation = invocationName(u2(code, offset + 1))
+                    if (invocation != null) {
+                        invocations.add(invocation)
+                    }
+                    offset += 5
+                    break
+                case 0xBA:
+                    offset += 5
+                    break
+                case 0xAA:
+                    int position = offset + 1
+                    position += (4 - (position % 4)) % 4
+                    int low = ((code[position + 4] & 0xFF) << 24) | ((code[position + 5] & 0xFF) << 16)
+                            | ((code[position + 6] & 0xFF) << 8) | (code[position + 7] & 0xFF)
+                    int high = ((code[position + 8] & 0xFF) << 24) | ((code[position + 9] & 0xFF) << 16)
+                            | ((code[position + 10] & 0xFF) << 8) | (code[position + 11] & 0xFF)
+                    offset = position + 12 + ((high - low + 1) * 4)
+                    break
+                case 0xAB:
+                    int position = offset + 1
+                    position += (4 - (position % 4)) % 4
+                    int pairs = ((code[position + 4] & 0xFF) << 24) | ((code[position + 5] & 0xFF) << 16)
+                            | ((code[position + 6] & 0xFF) << 8) | (code[position + 7] & 0xFF)
+                    offset = position + 8 + (pairs * 8)
+                    break
+                case 0xC4:
+                    int widenedOpcode = u1(code, offset + 1)
+                    offset += widenedOpcode == 0x84 ? 6 : 4
+                    break
+                default:
+                    offset += 1 + operandLength(opcode)
+                    break
+            }
+        }
+        invocations
+    }
+
+    input.readUnsignedShort()
+    input.readUnsignedShort()
+    input.readUnsignedShort()
+    int interfaceCount = input.readUnsignedShort()
+    interfaceCount.times { input.readUnsignedShort() }
+
+    int fieldCount = input.readUnsignedShort()
+    fieldCount.times {
+        input.readUnsignedShort()
+        input.readUnsignedShort()
+        input.readUnsignedShort()
+        skipAttributes(input.readUnsignedShort())
+    }
+
+    int methodCount = input.readUnsignedShort()
+    def methods = [:]
+    methodCount.times {
+        input.readUnsignedShort()
+        String name = utf8[input.readUnsignedShort()]
+        String descriptor = utf8[input.readUnsignedShort()]
+        String methodKey = "${name}${descriptor}"
+        def invocations = []
+        int attributeCount = input.readUnsignedShort()
+        attributeCount.times {
+            String attributeName = utf8[input.readUnsignedShort()]
+            long attributeLength = Integer.toUnsignedLong(input.readInt())
+            if (attributeName == 'Code') {
+                input.readUnsignedShort()
+                input.readUnsignedShort()
+                int codeLength = input.readInt()
+                byte[] code = new byte[codeLength]
+                input.readFully(code)
+                invocations.addAll(parseInvocations(code))
+                int exceptionTableLength = input.readUnsignedShort()
+                exceptionTableLength.times {
+                    input.readUnsignedShort()
+                    input.readUnsignedShort()
+                    input.readUnsignedShort()
+                    input.readUnsignedShort()
+                }
+                skipAttributes(input.readUnsignedShort())
+            } else {
+                input.skipNBytes(attributeLength)
+            }
+        }
+        methods[methodKey] = invocations
+    }
+
+    [methods: methods]
+}
+
 tasks.register('verifyForgeAccessTransformer') {
     group = 'verification'
     description = 'Validates curated Forge AT provenance and transformed 1.20.1 class members.'
@@ -4656,6 +4938,21 @@ tasks.named('check') {
 
 tasks.named('build') {
     dependsOn tasks.named('verifyRapierPackagedArtifact')
+    dependsOn tasks.named('verifyM13ContraptionMixinTargets')
+    dependsOn tasks.named('verifyM13ContraptionLifecycleBoundary')
+    dependsOn tasks.named('verifyM13ContraptionControllerBoundary')
+    dependsOn tasks.named('verifyM13ContraptionRenderBoundary')
+    dependsOn tasks.named('verifyM13ContraptionCollisionBoundary')
+    dependsOn tasks.named('verifyGameRendererMixinBoundary')
+    dependsOn tasks.named('verifyM13ClientTargetBoundary')
+    dependsOn tasks.named('verifyM13JadeIsolationBoundary')
+    dependsOn tasks.named('verifyM13JadeRuntimeTargets')
+    dependsOn tasks.named('verifyM13StaticBlockEditBoundary')
+    dependsOn tasks.named('verifyM13AssembledInteractionBoundary')
+    dependsOn tasks.named('verifyM13ValidationTruthfulnessBoundary')
+    dependsOn tasks.named('verifyInteractionDistanceMixinBoundary')
+    dependsOn tasks.named('verifyPackagedMixinImplementationClasses')
+    dependsOn tasks.named('verifyM13PackagedContraptionMixinBoundary')
 }
 
 tasks.named('checkstyleMain') {
@@ -6405,6 +6702,7 @@ tasks.register('verifyM11SubLevelInteractionBoundary') {
 
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelInteractionHelper.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MultiPlayerGameModeMixin.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundUseItemOnSubLevelPacket.java'))
@@ -6413,6 +6711,7 @@ tasks.register('verifyM11SubLevelInteractionBoundary') {
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableServerPacketHandlers.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/BlockGetterMixin.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/PlayerMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/ServerPlayerGameModeMixin.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
     inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java'))
     inputs.file(rootProject.file('common/src/main/resources/sable.mixins.json'))
@@ -6422,6 +6721,7 @@ tasks.register('verifyM11SubLevelInteractionBoundary') {
     doLast {
         String helperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelInteractionHelper.java').getText('UTF-8')
         String clientHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java').getText('UTF-8')
+        String targetHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java').getText('UTF-8')
         String minecraftMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java').getText('UTF-8')
         String clientMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MultiPlayerGameModeMixin.java').getText('UTF-8')
         String packetText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/packets/tcp/ServerboundUseItemOnSubLevelPacket.java').getText('UTF-8')
@@ -6429,7 +6729,8 @@ tasks.register('verifyM11SubLevelInteractionBoundary') {
         String tcpText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableTCPPackets.java').getText('UTF-8')
         String serverHandlersText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/tcp/SableServerPacketHandlers.java').getText('UTF-8')
         String clipText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/BlockGetterMixin.java').getText('UTF-8')
-        String reachText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/PlayerMixin.java').getText('UTF-8')
+        String playerReachText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/PlayerMixin.java').getText('UTF-8')
+        String gameModeReachText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/ServerPlayerGameModeMixin.java').getText('UTF-8')
         String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
         String lookupText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelBlockStateLookup.java').getText('UTF-8')
         String commonMixinText = rootProject.file('common/src/main/resources/sable.mixins.json').getText('UTF-8')
@@ -6442,6 +6743,7 @@ tasks.register('verifyM11SubLevelInteractionBoundary') {
                 'this.rightClickDelay = 4',
                 'ci.cancel()',
                 'method = "tick"',
+                'ClientSubLevelTargetHelper.refreshMinecraftHitResult(this.player, this.level, this.hitResult)',
                 'ClientSubLevelInteractionHelper.refreshHeldUseTarget(this.player, this.level, this.hitResult)',
                 'm11.interaction.MultiPlayerGameModeMixin',
                 'method = "useItemOn"',
@@ -6464,15 +6766,13 @@ tasks.register('verifyM11SubLevelInteractionBoundary') {
                 'stack.useOn(context)',
                 'refreshHeldUseTarget',
                 'minecraft.hitResult = povHitResult',
-                'Sable.HELPER.getContaining(level, hitResult.getBlockPos())',
-                'hitResult.getBlockPos().subtract(center)',
-                'JOMLConversion.toJOML(hitResult.getLocation())',
-                '.sub(center.getX(), center.getY(), center.getZ())',
-                'final Direction localFace = hitResult.getDirection()',
-                'clientSubLevel.renderPose().transformPosition(hitResult.getLocation())',
+                'ClientSubLevelTargetHelper.resolveFromHit(level, hitResult)',
+                'target.localBlockPos()',
+                'target.localHit()',
+                'target.localFace()',
+                'target.visibleWorldHit()',
                 'SableTCPPackets.sendToServer(new ServerboundUseItemOnSubLevelPacket',
-                'clientSubLevel.getUniqueId()',
-                'localBlockPos.immutable()',
+                'target.subLevel().getUniqueId()',
                 'SABLE_M11_INTERACT_CLIENT',
                 'SABLE_M11_WRENCH_CLIENT',
                 'SABLE_M11_MOTOR_CLIENT',
@@ -6485,6 +6785,22 @@ tasks.register('verifyM11SubLevelInteractionBoundary') {
         ].each { canary ->
             if (!clientHelperText.contains(canary)) {
                 throw new GradleException("M11 interaction client helper lost hit/packet canary: ${canary}")
+            }
+        }
+        [
+                'public record Target(ClientSubLevel subLevel',
+                'Sable.HELPER.getContaining(level, blockHitResult.getBlockPos())',
+                'plotBlockPos.subtract(center)',
+                'JOMLConversion.toJOML(blockHitResult.getLocation())',
+                '.sub(center.getX(), center.getY(), center.getZ())',
+                'blockHitResult.getDirection()',
+                'clientSubLevel.renderPose().transformPosition(blockHitResult.getLocation())',
+                'Minecraft.getInstance().hitResult = target.hitResult()',
+                'SABLE_M13_TARGET',
+                'targetType=STATIC_SABLE_BLOCK'
+        ].each { canary ->
+            if (!targetHelperText.contains(canary)) {
+                throw new GradleException("M13 client target helper lost canonical hit canary: ${canary}")
             }
         }
 
@@ -6563,9 +6879,9 @@ tasks.register('verifyM11SubLevelInteractionBoundary') {
                 'pose.transformPositionInverse(JOMLConversion.toJOML(clipContext.getTo()))',
                 'BlockGetterClipHelper.originalClip(subLevel.getLevel(), subClipContext)',
                 'minResult = subResult',
-                'hitResult.getDirection()'
+                'blockHitResult.getDirection()'
         ].each { canary ->
-            if (!(clipText + clientHelperText + helperText).contains(canary)) {
+            if (!(clipText + clientHelperText + targetHelperText + helperText).contains(canary)) {
                 throw new GradleException("M11 interaction lost world-ray-to-local-hit canary: ${canary}")
             }
         }
@@ -6575,7 +6891,7 @@ tasks.register('verifyM11SubLevelInteractionBoundary') {
                 'subLevel.logicalPose().transformPositionInverse(player.getEyePosition())',
                 'new AABB(pos).distanceToSqr(eyePos)'
         ].each { canary ->
-            if (!reachText.contains(canary)) {
+            if (!(playerReachText + gameModeReachText).contains(canary)) {
                 throw new GradleException("M11 interaction lost sublevel reach-validation canary: ${canary}")
             }
         }
@@ -6907,6 +7223,143 @@ tasks.register('verifyM11CreateValueSettingsInteractionBoundary') {
         logger.lifecycle('verifyM11CreateValueSettingsInteractionBoundary PASS: Sable client hits run Create\'s '
                 + 'RightClickBlock value-settings path against the actual client BlockEntity, keep Minecraft.hitResult '
                 + 'pointing at the Sable target while RMB is held, and do not implement a Sable-specific motor UI')
+    }
+}
+
+tasks.register('verifyInteractionDistanceMixinBoundary') {
+    group = 'forge backport'
+    description = 'Bytecode-verifies the 1.20.1 interaction-distance mixin injection targets.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/PlayerMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/ServerPlayerGameModeMixin.java'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+
+    doLast {
+        File forgeMappedClasses = layout.buildDirectory.dir('compileClasspath/forgeMappedClasses').get().asFile
+        if (!forgeMappedClasses.isDirectory()) {
+            throw new GradleException("Missing staged mapped Minecraft classes for interaction-distance verification: ${forgeMappedClasses}")
+        }
+        File javap = new File(System.getProperty('java.home'),
+                'bin/javap' + (System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows') ? '.exe' : ''))
+        if (!javap.isFile()) {
+            throw new GradleException("Could not find javap executable at ${javap}")
+        }
+
+        def disassemble = { String className ->
+            ByteArrayOutputStream output = new ByteArrayOutputStream()
+            exec {
+                executable = javap.absolutePath
+                args '-classpath', forgeMappedClasses.absolutePath, '-c', '-p', className
+                standardOutput = output
+            }
+            output.toString('UTF-8')
+        }
+        def section = { String text, String start, String end ->
+            int begin = text.indexOf(start)
+            if (begin < 0) {
+                throw new GradleException("Bytecode verifier could not find method section start: ${start}")
+            }
+            int finish = text.indexOf(end, begin + start.length())
+            if (finish < 0) {
+                finish = text.length()
+            }
+            text.substring(begin, finish)
+        }
+
+        String playerMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/PlayerMixin.java').getText('UTF-8')
+        String gameModeMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/ServerPlayerGameModeMixin.java').getText('UTF-8')
+        String mixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String listenerBytecode = disassemble('net.minecraft.server.network.ServerGamePacketListenerImpl')
+        String gameModeBytecode = disassemble('net.minecraft.server.level.ServerPlayerGameMode')
+        String handlePlayerAction = section(listenerBytecode,
+                'public void handlePlayerAction(net.minecraft.network.protocol.game.ServerboundPlayerActionPacket);',
+                'private static boolean wasBlockPlacementAttempt')
+        String handleUseItemOn = section(listenerBytecode,
+                'public void handleUseItemOn(net.minecraft.network.protocol.game.ServerboundUseItemOnPacket);',
+                'private boolean testPlayerCanReach')
+        String handleInteract = section(listenerBytecode,
+                'public void handleInteract(net.minecraft.network.protocol.game.ServerboundInteractPacket);',
+                'public void handleClientCommand')
+        String handleBlockBreakAction = section(gameModeBytecode,
+                'public void handleBlockBreakAction(net.minecraft.core.BlockPos, net.minecraft.network.protocol.game.ServerboundPlayerActionPacket$Action, net.minecraft.core.Direction, int, int);',
+                'public void destroyAndAck')
+
+        if (handlePlayerAction.contains('testPlayerCanReach:(Lnet/minecraft/core/BlockPos;)Z')) {
+            throw new GradleException('Forge 47.4.20 handlePlayerAction unexpectedly calls ServerGamePacketListenerImpl#testPlayerCanReach; re-audit PlayerMixin targets before changing this verifier')
+        }
+        [
+                'ServerPlayerGameMode.handleBlockBreakAction:(Lnet/minecraft/core/BlockPos;Lnet/minecraft/network/protocol/game/ServerboundPlayerActionPacket$Action;Lnet/minecraft/core/Direction;II)V'
+        ].each { canary ->
+            if (!handlePlayerAction.contains(canary)) {
+                throw new GradleException("ServerGamePacketListenerImpl#handlePlayerAction lost bytecode canary: ${canary}")
+            }
+        }
+        [
+                'testPlayerCanReach:(Lnet/minecraft/core/BlockPos;)Z',
+                'ServerPlayer.canReach:(Lnet/minecraft/core/BlockPos;D)Z',
+                'ServerPlayer.canReachRaw:(Lnet/minecraft/core/BlockPos;D)Z',
+                'ForgeHooks.onLeftClickBlock',
+                'debugLogging:(Lnet/minecraft/core/BlockPos;ZILjava/lang/String;)V'
+        ].each { canary ->
+            if (!handleBlockBreakAction.contains(canary)) {
+                throw new GradleException("ServerPlayerGameMode#handleBlockBreakAction lost bytecode canary: ${canary}")
+            }
+        }
+        [
+                'testPlayerCanReach:(Lnet/minecraft/core/BlockPos;)Z',
+                'ServerPlayer.canReach:(Lnet/minecraft/core/BlockPos;D)Z',
+                'ServerPlayer.canReachRaw:(Lnet/minecraft/core/BlockPos;D)Z'
+        ].each { canary ->
+            if (!handleUseItemOn.contains(canary)) {
+                throw new GradleException("ServerGamePacketListenerImpl#handleUseItemOn lost bytecode canary: ${canary}")
+            }
+        }
+        if (!handleInteract.contains('ServerPlayer.canReachRaw:(Lnet/minecraft/world/entity/Entity;D)Z')) {
+            throw new GradleException('ServerGamePacketListenerImpl#handleInteract lost entity reach bytecode canary')
+        }
+
+        [
+                '@Mixin(ServerGamePacketListenerImpl.class)',
+                'method = "handleUseItemOn"',
+                'method = "handleInteract"',
+                'SABLE_M13_EDIT action=break phase=packet'
+        ].each { canary ->
+            if (!playerMixinText.contains(canary)) {
+                throw new GradleException("PlayerMixin lost packet-listener canary: ${canary}")
+            }
+        }
+        if (playerMixinText.contains('sable$testPlayerCanReachBlockAction')
+                || playerMixinText.contains('sable$logSubLevelBlockBreakResult')
+                || playerMixinText.contains('target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;testPlayerCanReach')
+                || playerMixinText.contains('ServerPlayerGameMode;handleBlockBreakAction')) {
+            throw new GradleException('PlayerMixin still contains a stale or diagnostic handlePlayerAction call-site wrapper that fails 0/1 at production startup')
+        }
+        if ((playerMixinText + gameModeMixinText).contains('remap = false')
+                && (playerMixinText + gameModeMixinText).contains('net/minecraft/server/level/ServerPlayer')) {
+            throw new GradleException('Minecraft-owned interaction-distance @At targets must remap for production; do not use remap=false on ServerPlayer/ServerPlayerGameMode targets')
+        }
+        [
+                '@Mixin(ServerPlayerGameMode.class)',
+                'method = "handleBlockBreakAction"',
+                'ServerPlayerGameMode;testPlayerCanReach',
+                'ServerPlayer;canReach',
+                'ServerPlayer;canReachRaw',
+                'original.call(gameMode, pos)',
+                'original.call(player, pos, slop)'
+        ].each { canary ->
+            if (!gameModeMixinText.contains(canary)) {
+                throw new GradleException("ServerPlayerGameModeMixin lost 1.20 break-reach canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('interaction_distance.PlayerMixin')
+                || !mixinConfigText.contains('interaction_distance.ServerPlayerGameModeMixin')) {
+            throw new GradleException('Forge mixin config must include both interaction-distance packet and game-mode mixins')
+        }
+
+        logger.lifecycle('verifyInteractionDistanceMixinBoundary PASS: PlayerMixin has no critical diagnostic '
+                + 'handlePlayerAction call-site wrapper, Minecraft-owned interaction-distance @At targets remap '
+                + 'for production, and block-break reach is wrapped at ServerPlayerGameMode#handleBlockBreakAction '
+                + 'where Forge 47.4.20 actually performs it')
     }
 }
 
@@ -7878,6 +8331,1473 @@ tasks.register('verifyM12ScaleHarnessBoundary') {
 
         logger.lifecycle('verifyM12ScaleHarnessBoundary PASS: scale fixtures are limited to small/medium/large '
                 + 'diagnostic platforms and acceptance reports visual/FPS criteria as manual observations')
+    }
+}
+
+tasks.register('verifyM13BearingHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M13 Mechanical Bearing harness uses real Create machinery and canonical Sable lifecycle.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M13TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionControllerLookup.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+    inputs.file(rootProject.file('forge/build.gradle'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.file(createDevelopmentRuntime)
+
+    doLast {
+        String commandText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String m13Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M13TestCommands.java').getText('UTF-8')
+        String mixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java').getText('UTF-8')
+        String controlledMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java').getText('UTF-8')
+        String controllerLookupText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionControllerLookup.java').getText('UTF-8')
+        String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+        String buildText = rootProject.file('forge/build.gradle').getText('UTF-8')
+        String mixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'M13TestCommands.register(sableBuilder, buildContext)',
+                'Commands.literal("m13")',
+                'Commands.literal("spawn_bearing")',
+                'Commands.literal("inspect")',
+                'Commands.literal("validate")',
+                'MECHANICAL_BEARING_ID = new ResourceLocation("create", "mechanical_bearing")',
+                'CREATIVE_MOTOR_ID = new ResourceLocation("create", "creative_motor")',
+                'SHAFT_ID = new ResourceLocation("create", "shaft")',
+                'RADIAL_CHASSIS_ID = new ResourceLocation("create", "radial_chassis")',
+                'setProperty(requireBlockState(MECHANICAL_BEARING_ID), "facing", "east")',
+                'setProperty(requireBlockState(CREATIVE_MOTOR_ID), "facing", "east")',
+                'setProperty(requireBlockState(SHAFT_ID), "axis", "x")',
+                'setProperty(requireBlockState(RADIAL_CHASSIS_ID), "axis", "x")',
+                '"sticky_north", "true"',
+                'MOVED_STRUCTURE_BLOCKS',
+                'SubLevelBlockEditHelper.setLocalBlock(subLevel, entry.getKey(), entry.getValue(), 3, false)',
+                'SubLevelBlockEditHelper.finalizeBlockChanges(subLevel, changes)',
+                'assemblyPath=normal_create_mechanical_bearing',
+                'SABLE_M13_VALIDATE state=',
+                'UNASSEMBLED_VALID',
+                'ASSEMBLED_VALID',
+                'compatibility.create.contraptions.AbstractContraptionEntityMixin',
+                'compatibility.create.contraptions.ControlledContraptionEntityMixin'
+        ].each { canary ->
+            if (!(commandText + m13Text + editText + mixinConfigText).contains(canary)) {
+                throw new GradleException("M13 bearing harness lost canary: ${canary}")
+            }
+        }
+        [
+                'implements KinematicContraption',
+                '@Mixin(value = AbstractContraptionEntity.class, remap = false)',
+                'MassTracker.build(this.sable$blockGetter(), this.sable$localBounds)',
+                'this.contraption.getContraptionWorld()',
+                'serverSubLevel.getPlot().addContraption(this)',
+                'SubLevelPhysicsSystem.require(serverLevel).getPipeline().add(this)',
+                '@Inject(method = "contraptionInitialize", at = @At("HEAD"))',
+                '@Inject(method = {"remove", "m_142687_"}, at = @At("HEAD"), remap = false)',
+                'sable$removedFromRuntime',
+                'serverSubLevel.getPlot().removeContraption(this)',
+                'physics.getPipeline().remove(this)',
+                'SABLE_M13_CONTRAPTION phase=registered',
+                'SABLE_M13_CONTRAPTION phase=removed'
+        ].each { canary ->
+            if (!mixinText.contains(canary)) {
+                throw new GradleException("M13 Create contraption adapter lost canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(value = ControlledContraptionEntity.class, remap = false)',
+                '@Redirect(method = "tickContraption"',
+                '@Redirect(method = "getController"',
+                'SableCreateContraptionControllerLookup.isControllerPositionLoaded(level, controllerPos)',
+                'SableCreateContraptionControllerLookup.getControllerBlockEntity(level, controllerPos)',
+                'SABLE_M13_CONTROLLER_LOOKUP'
+        ].each { canary ->
+            if (!controlledMixinText.contains(canary)) {
+                throw new GradleException("M13 controlled contraption controller bridge lost canary: ${canary}")
+            }
+        }
+        [
+                'public static boolean isControllerPositionLoaded',
+                'Sable.HELPER.getContaining(level, controllerPos)',
+                'SubLevelBlockStateLookup.getBlockEntity(subLevel, controllerPos)',
+                'blockEntity instanceof IControlContraption'
+        ].each { canary ->
+            if (!controllerLookupText.contains(canary)) {
+                throw new GradleException("M13 Sable controller lookup helper lost canary: ${canary}")
+            }
+        }
+        String sourceExclusionsText = buildText.substring(
+                buildText.indexOf('def forgeBackportSourceExclusions'),
+                buildText.indexOf('def forgeCommonReplacementFiles'))
+        if (sourceExclusionsText.contains("'dev/ryanhcode/sable/mixin/compatibility/**'")) {
+            throw new GradleException('Forge source selection must not exclude the whole compatibility mixin tree; M13 Create adapter must compile')
+        }
+        if (!sourceSets.main.java.matching {
+            include 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'
+        }.files.contains(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'))) {
+            throw new GradleException('M13 Create contraption mixin source is not selected by sourceSets.main')
+        }
+        if (!sourceSets.main.java.matching {
+            include 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java'
+        }.files.contains(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java'))) {
+            throw new GradleException('M13 Create controlled contraption mixin source is not selected by sourceSets.main')
+        }
+        [
+                'assemble(',
+                'new BearingContraption',
+                'ControlledContraptionEntity.create',
+                'setSpeed(',
+                'setSource(',
+                'setNetwork(',
+                'generatedSpeed.value',
+                'RotationPropagator.handleAdded'
+        ].each { forbidden ->
+            if (m13Text.contains(forbidden)) {
+                throw new GradleException("M13 bearing harness must not fake assembly or write Create internals: ${forbidden}")
+            }
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing staged Create 6.0.8 jar for M13 bearing preflight: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            [
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.class',
+                    'com/simibubi/create/content/contraptions/ControlledContraptionEntity.class',
+                    'com/simibubi/create/content/contraptions/bearing/BearingContraption.class',
+                    'com/simibubi/create/content/contraptions/bearing/MechanicalBearingBlock.class',
+                    'com/simibubi/create/content/contraptions/bearing/MechanicalBearingBlockEntity.class',
+                    'com/simibubi/create/content/contraptions/chassis/RadialChassisBlock.class',
+                    'assets/create/blockstates/mechanical_bearing.json',
+                    'assets/create/blockstates/creative_motor.json',
+                    'assets/create/blockstates/shaft.json',
+                    'assets/create/blockstates/radial_chassis.json'
+            ].each { entryName ->
+                if (jarFile.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 Mechanical Bearing class/asset missing for M13: ${entryName}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM13BearingHarnessBoundary PASS: /sable m13 spawn_bearing creates a real '
+                + 'creative_motor -> shaft -> mechanical_bearing fixture through canonical Sable edits, and the '
+                + 'Create AbstractContraptionEntity adapter registers real contraptions with Sable plot/physics state')
+    }
+}
+
+tasks.register('verifyM13ContraptionCoordinateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M13 contraption bridge keeps hidden plot coordinates distinct from visible Sable/world coordinates.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M13TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionControllerLookup.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/AbstractSableMixinPlugin.java'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+
+    doLast {
+        String m13Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M13TestCommands.java').getText('UTF-8')
+        String mixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java').getText('UTF-8')
+        String controlledMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java').getText('UTF-8')
+        String controllerLookupText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionControllerLookup.java').getText('UTF-8')
+        String pluginText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/AbstractSableMixinPlugin.java').getText('UTF-8')
+        String mixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'final BlockPos createAnchorLocal = localPos.relative(facing)',
+                'final BlockPos createAnchorPlot = SubLevelBlockEditHelper.localOffsetToPlotBlock(subLevel, createAnchorLocal)',
+                'subLevel.logicalPose().transformPosition(',
+                'expectedVisibleAnchor=',
+                'rawEntityPositionLooksLikePlot=',
+                'containingSubLevelKnown=',
+                'controllerPos=',
+                'normalControllerLoaded=',
+                'sableControllerIsControl=',
+                'entityAngle=',
+                'rotationState=',
+                'contraption_hidden_plot_uncontained',
+                'Sable.HELPER.getContaining(entity) == subLevel',
+                'SABLE_M13_BEARING'
+        ].each { canary ->
+            if (!m13Text.contains(canary)) {
+                throw new GradleException("M13 coordinate diagnostics lost canary: ${canary}")
+            }
+        }
+        [
+                'Sable.HELPER.getContaining(this)',
+                'subLevel.logicalPose().transformPositionInverse(localVec)',
+                'Sable.HELPER.projectOutOfSubLevel(instance.level(), new Vector3d(x, y, z), new Vector3d())',
+                'this.sable$massTracker.getCenterOfMass()',
+                'this.getPrevAnchorVec().lerp(this.getAnchorVec(), partialTick)',
+                'this.applyRotation(localVec, (float) partialTick)',
+                'VecHelper.getCenterOf(BlockPos.ZERO)',
+                'this.contraption.getContraptionWorld()',
+                'getPipeline().add(this)',
+                '@Inject(method = {"remove", "m_142687_"}, at = @At("HEAD"), remap = false)',
+                'serverSubLevel.getPlot().removeContraption(this)',
+                'physics.getPipeline().remove(this)'
+        ].each { canary ->
+            if (!mixinText.contains(canary)) {
+                throw new GradleException("M13 contraption coordinate bridge lost canary: ${canary}")
+            }
+        }
+        [
+                'SableCreateContraptionControllerLookup.isControllerPositionLoaded(level, controllerPos)',
+                'SableCreateContraptionControllerLookup.getControllerBlockEntity(level, controllerPos)'
+        ].each { canary ->
+            if (!controlledMixinText.contains(canary)) {
+                throw new GradleException("M13 controlled contraption mixin lost controller-lookup canary: ${canary}")
+            }
+        }
+        [
+                'Sable.HELPER.getContaining(level, controllerPos)',
+                'SubLevelBlockStateLookup.getBlockEntity(subLevel, controllerPos)'
+        ].each { canary ->
+            if (!controllerLookupText.contains(canary)) {
+                throw new GradleException("M13 controller lookup helper lost coordinate canary: ${canary}")
+            }
+        }
+        [
+                'mixinClassName.startsWith("dev.ryanhcode.sable.mixin.compatibility.")',
+                'final String modId = parts[3].equals("mixin") ? parts[5] : parts[6]',
+                'this.modLoadedCache.computeIfAbsent('
+        ].each { canary ->
+            if (!pluginText.contains(canary)) {
+                throw new GradleException("M13 optional Create mixin gating lost canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('compatibility.create.contraptions.AbstractContraptionEntityMixin')
+                || !mixinConfigText.contains('compatibility.create.contraptions.ControlledContraptionEntityMixin')) {
+            throw new GradleException('M13 Create contraption mixin is not registered in the Forge mixin config')
+        }
+        [
+                'create:train',
+                'Train',
+                'MechanicalPiston',
+                'PistonContraption',
+                'PulleyContraption',
+                'GantryContraption',
+                'CarriageContraption',
+                'ElevatorContraption'
+        ].each { forbidden ->
+            if ((m13Text + mixinText).contains(forbidden)) {
+                throw new GradleException("M13.1 must not pull in deferred contraption systems: ${forbidden}")
+            }
+        }
+        if (m13Text.contains('level.setBlock') || m13Text.contains('ServerLevel.setBlock')) {
+            throw new GradleException('M13 commands must not treat hidden plot coordinates as parent-world mutation coordinates')
+        }
+
+        logger.lifecycle('verifyM13ContraptionCoordinateBoundary PASS: M13 distinguishes local bearing anchor, '
+                + 'hidden plot anchor, and visible Sable pose, while the Create contraption adapter registers '
+                + 'kinematic pose from Create anchor/rotation and remains Create-gated')
+    }
+}
+
+tasks.register('verifyM13ContraptionLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M13 contraption removal lifecycle uses a Java 17/MC 1.20-safe Mixin hook.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+
+    doLast {
+        String contraptionMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java').getText('UTF-8')
+        String mixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'public void setRemoved(',
+                'protected void setRemoved(',
+                'private void setRemoved(',
+                'super.setRemoved(removalReason)'
+        ].each { forbidden ->
+            if (contraptionMixinText.contains(forbidden)) {
+                throw new GradleException("M13 1.20 lifecycle port must not override final Entity#setRemoved: ${forbidden}")
+            }
+        }
+        [
+                '@Inject(method = "contraptionInitialize", at = @At("HEAD"))',
+                '@Inject(method = {"remove", "m_142687_"}, at = @At("HEAD"), remap = false)',
+                'private boolean sable$initialized = false',
+                'private boolean sable$removedFromRuntime = false',
+                'this.sable$removedFromRuntime = true',
+                'Sable.HELPER.getContaining(this)',
+                'serverSubLevel.getPlot().removeContraption(this)',
+                'SubLevelPhysicsSystem.get(serverLevel)',
+                'physics.getPipeline().remove(this)',
+                'SABLE_M13_CONTRAPTION phase=registered',
+                'SABLE_M13_CONTRAPTION phase=removed'
+        ].each { canary ->
+            if (!contraptionMixinText.contains(canary)) {
+                throw new GradleException("M13 contraption lifecycle hook lost canary: ${canary}")
+            }
+        }
+        if (!mixinConfigText.contains('compatibility.create.contraptions.AbstractContraptionEntityMixin')
+                || mixinConfigText.contains('compatibility.create.contraptions.EntityContraptionRemovalMixin')) {
+            throw new GradleException('M13 contraption lifecycle must register only the Create AbstractContraptionEntity adapter')
+        }
+
+        logger.lifecycle('verifyM13ContraptionLifecycleBoundary PASS: M13 initializes at Create '
+                + 'contraptionInitialize() and removes through a guarded Create remove(RemovalReason) hook '
+                + 'without overriding final Entity#setRemoved')
+    }
+}
+
+tasks.register('verifyM13ContraptionMixinTargets') {
+    group = 'forge backport'
+    description = 'Verifies M13 Create 6.0.8 mixin targets exist with their mapped and production descriptors.'
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+
+    inputs.file(createDevelopmentRuntime)
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java'))
+
+    doLast {
+        File mappedCreateJar = createDevelopmentRuntime.get().asFile
+        if (!mappedCreateJar.isFile()) {
+            throw new GradleException("Missing mapped Create 6.0.8 runtime for M13 mixin target verification: ${mappedCreateJar}")
+        }
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing production Create 6.0.8 jar for M13 mixin target verification: ${targetCreateJar}")
+        }
+
+        String targetClass = 'com/simibubi/create/content/contraptions/AbstractContraptionEntity.class'
+        def expectedMapped = [
+                'contraptionInitialize()V',
+                'remove(Lnet/minecraft/world/entity/Entity$RemovalReason;)V',
+                'moveCollidedEntitiesOnDisassembly(Lcom/simibubi/create/content/contraptions/StructureTransform;)V',
+                'toLocalVector(Lnet/minecraft/world/phys/Vec3;F)Lnet/minecraft/world/phys/Vec3;'
+        ] as Set
+        def expectedProduction = [
+                'contraptionInitialize()V',
+                'm_8119_()V',
+                'm_142687_(Lnet/minecraft/world/entity/Entity$RemovalReason;)V',
+                'moveCollidedEntitiesOnDisassembly(Lcom/simibubi/create/content/contraptions/StructureTransform;)V',
+                'toLocalVector(Lnet/minecraft/world/phys/Vec3;F)Lnet/minecraft/world/phys/Vec3;'
+        ] as Set
+
+        def readMethods = { File jarPath, Set<String> expected, String label ->
+            JarFile jarFile = new JarFile(jarPath)
+            try {
+                def entry = jarFile.getJarEntry(targetClass)
+                if (entry == null) {
+                    throw new GradleException("${label} Create jar is missing ${targetClass}")
+                }
+                def structure = jarFile.getInputStream(entry).withCloseable { stream -> readClassStructure(stream) }
+                def actual = structure.methods.keySet() as Set
+                expected.each { method ->
+                    if (!actual.contains(method)) {
+                        throw new GradleException("${label} Create 6.0.8 target lacks ${method}; actual methods were ${actual}")
+                    }
+                }
+                structure
+            } finally {
+                jarFile.close()
+            }
+        }
+
+        readMethods(mappedCreateJar, expectedMapped, 'mapped-dev')
+        def productionStructure = readMethods(targetCreateJar, expectedProduction, 'production')
+        if (productionStructure.methods.containsKey('tick()V')) {
+            throw new GradleException('Production Create 6.0.8 AbstractContraptionEntity unexpectedly exposes tick()V; verify the target artifact before changing M13 injection names')
+        }
+
+        String controlledTargetClass = 'com/simibubi/create/content/contraptions/ControlledContraptionEntity.class'
+        def expectedControlled = [
+                'tickContraption()V',
+                'getController()Lcom/simibubi/create/content/contraptions/IControlContraption;',
+                'setAngle(F)V',
+                'getRotationState()Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity$ContraptionRotationState;',
+                'applyLocalTransforms(Lcom/mojang/blaze3d/vertex/PoseStack;F)V'
+        ] as Set
+        [mappedCreateJar: mappedCreateJar, production: targetCreateJar].each { label, jarPath ->
+            JarFile jarFile = new JarFile(jarPath)
+            try {
+                def entry = jarFile.getJarEntry(controlledTargetClass)
+                if (entry == null) {
+                    throw new GradleException("${label} Create jar is missing ${controlledTargetClass}")
+                }
+                def structure = jarFile.getInputStream(entry).withCloseable { stream -> readClassStructure(stream) }
+                def actual = structure.methods.keySet() as Set
+                expectedControlled.each { method ->
+                    if (!actual.contains(method)) {
+                        throw new GradleException("${label} Create 6.0.8 ControlledContraptionEntity lacks ${method}; actual methods were ${actual}")
+                    }
+                }
+            } finally {
+                jarFile.close()
+            }
+        }
+
+        String mixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java').getText('UTF-8')
+        String controlledMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java').getText('UTF-8')
+        if (mixinText.contains('@Inject(method = "tick"')) {
+            throw new GradleException('M13 mixin still targets AbstractContraptionEntity#tick; production Create uses obfuscated m_8119_() and initialization belongs at contraptionInitialize()')
+        }
+        [
+                '@Inject(method = "contraptionInitialize", at = @At("HEAD"))',
+                '@Inject(method = {"remove", "m_142687_"}, at = @At("HEAD"), remap = false)',
+                'moveCollidedEntitiesOnDisassembly',
+                'toLocalVector'
+        ].each { canary ->
+            if (!mixinText.contains(canary)) {
+                throw new GradleException("M13 mixin target declaration lost canary: ${canary}")
+            }
+        }
+        [
+                '@Redirect(method = "tickContraption"',
+                '@Redirect(method = "getController"',
+                'Level;isLoaded',
+                'Level;getBlockEntity'
+        ].each { canary ->
+            if (!controlledMixinText.contains(canary)) {
+                throw new GradleException("M13 controlled contraption mixin target declaration lost canary: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifyM13ContraptionMixinTargets PASS: Create 6.0.8 mapped-dev and production '
+                + 'AbstractContraptionEntity and ControlledContraptionEntity expose all M13 target methods/descriptors; no inherited tick target remains')
+    }
+}
+
+tasks.register('verifyM13ContraptionControllerBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M13 keeps Create bearing rotation authoritative while bridging Sable controller lookup.'
+    dependsOn tasks.named('verifyM13ContraptionMixinTargets')
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionControllerLookup.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M13TestCommands.java'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+
+    doLast {
+        String helperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionControllerLookup.java').getText('UTF-8')
+        String controlledMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.java').getText('UTF-8')
+        String m13Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M13TestCommands.java').getText('UTF-8')
+        String mixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'Sable.HELPER.getContaining(level, controllerPos)',
+                'SubLevelBlockStateLookup.getBlockEntity(subLevel, controllerPos)',
+                'blockEntity instanceof IControlContraption',
+                'return level.getBlockEntity(controllerPos)'
+        ].each { canary ->
+            if (!helperText.contains(canary)) {
+                throw new GradleException("M13 controller lookup helper lost canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(value = ControlledContraptionEntity.class, remap = false)',
+                '@Redirect(method = "tickContraption"',
+                '@Redirect(method = "getController"',
+                'SableCreateContraptionControllerLookup.isControllerPositionLoaded(level, controllerPos)',
+                'SableCreateContraptionControllerLookup.getControllerBlockEntity(level, controllerPos)',
+                'SABLE_M13_CONTROLLER_LOOKUP'
+        ].each { canary ->
+            if (!controlledMixinText.contains(canary)) {
+                throw new GradleException("M13 controlled contraption controller bridge lost canary: ${canary}")
+            }
+        }
+        [
+                'bearingAngle=',
+                'entityAngle=',
+                'entityAngleDelta=',
+                'normalControllerLoaded=',
+                'normalControllerIsControl=',
+                'sableControllerIsControl=',
+                'rotationState=',
+                'RADIAL_CHASSIS_ID = new ResourceLocation("create", "radial_chassis")',
+                '"sticky_north", "true"',
+                'MOVED_STRUCTURE_BLOCKS'
+        ].each { canary ->
+            if (!m13Text.contains(canary)) {
+                throw new GradleException("M13 bearing runtime diagnostics/fixture lost canary: ${canary}")
+            }
+        }
+        [
+                'setAngle(',
+                'putfield      #190',
+                'angle =',
+                'manuallyRotate',
+                'MechanicalBearingBlockEntity'
+        ].each { forbidden ->
+            if (helperText.contains(forbidden) || controlledMixinText.contains(forbidden)) {
+                throw new GradleException("M13 controller bridge must not own Create angle/rotation math: ${forbidden}")
+            }
+        }
+        if (!mixinConfigText.contains('compatibility.create.contraptions.ControlledContraptionEntityMixin')) {
+            throw new GradleException('M13 controlled contraption controller bridge is not registered in the Forge mixin config')
+        }
+
+        logger.lifecycle('verifyM13ContraptionControllerBoundary PASS: ControlledContraptionEntity keeps Create '
+                + 'angle/RotationState authoritative while Sable only bridges controller loaded/entity lookup for plot positions')
+    }
+}
+
+tasks.register('verifyM13ContraptionRenderBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Sable-contained Create contraptions use Create rendering with a Sable parent transform.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java'))
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java')
+    inputs.file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java')
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.file(targetCreateJar)
+
+    doLast {
+        String renderMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java').getText('UTF-8')
+        String renderEventText = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java').getText('UTF-8')
+        String renderBridgeText = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+        String mixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                '@Mixin(value = ContraptionEntityRenderer.class, remap = false)',
+                'SableCreateContraptionContext.getContainingSubLevel(entity)',
+                'clientSubLevel.renderPose(partialTick)',
+                'poseStack.mulPose(new Quaternionf(renderPose.orientation()))',
+                'VisualizationManager;supportsVisualization',
+                'sableContraption ? false : originalVisualizationSupported',
+                'original.call(level)',
+                'SABLE_M13_RENDER',
+                'renderedBlockCount='
+        ].each { canary ->
+            if (!renderMixinText.contains(canary)) {
+                throw new GradleException("M13 contraption render bridge lost canary: ${canary}")
+            }
+        }
+        [
+                'ModList.get().isLoaded("create")',
+                'SableForgeCreateContraptionRenderBridge.render(event, level, cameraPosition)',
+                'level.entitiesForRendering()',
+                'entity instanceof final AbstractContraptionEntity contraptionEntity',
+                'contraptionEntity.shouldRenderAtSqrDistance(visiblePosition.distanceToSqr(cameraPosition))',
+                'frustum.isVisible(visibleAabb)',
+                'renderCullingAabb(contraptionEntity, rawPosition)',
+                'visibleAabb(clientSubLevel, rawAabb, partialTick)',
+                'oldRawDispatcherX = rawPosition.x - cameraPosition.x',
+                'x = visiblePosition.x - cameraPosition.x',
+                'newVisibleDispatcherXYZ',
+                'logRenderStage("VISIBLE_DISTANCE_PASS"',
+                'logRenderStage("VISIBLE_FRUSTUM_PASS"',
+                'logRenderStage("DISPATCH_BEGIN"',
+                'logRenderStage("DISPATCH_END"',
+                'dispatcher.render(contraptionEntity',
+                'dispatcher.getPackedLightCoords(contraptionEntity',
+                'SABLE_M13_RENDER stage={}',
+                'CLIENT_ENTITY_EXISTS'
+        ].each { canary ->
+            if (!(renderEventText + renderBridgeText).contains(canary)) {
+                throw new GradleException("M13 contraption render scheduling bridge lost canary: ${canary}")
+            }
+        }
+        [
+                'dispatcher.shouldRender(contraptionEntity',
+                'event.getFrustum().isVisible(rawAabb)',
+                'final double x = rawPosition.x - cameraPosition.x'
+        ].each { forbidden ->
+            if (renderBridgeText.contains(forbidden)) {
+                throw new GradleException("M13 Sable contraption render scheduling must not cull against raw hidden coordinates: ${forbidden}")
+            }
+        }
+        if (renderMixinText.contains('&& entity.isReadyForRender()')) {
+            throw new GradleException('Sable contraption renderer must not gate hidden-plot entities on Create isReadyForRender()')
+        }
+        [
+                'SABLE_M13_RENDER stage={}',
+                'RENDER_METHOD_ENTERED',
+                'CREATE_READY_STATE',
+                'GEOMETRY_EMISSION_REACHED',
+                'poseStack.mulPose(new Quaternionf(renderPose.orientation()))',
+                'poseTranslationAtRendererEntry',
+                'clientSubLevel.renderPose(partialTick)'
+        ].each { canary ->
+            if (!renderMixinText.contains(canary)) {
+                throw new GradleException("M13 Create renderer entry diagnostics/outer transform lost canary: ${canary}")
+            }
+        }
+        if (renderMixinText.contains('poseStack.translate(visiblePosition.x - rawPosition.x')
+                || renderMixinText.contains('visiblePosition.x - rawPosition.x, visiblePosition.y - rawPosition.y')) {
+            throw new GradleException('M13 contraption renderer must not cancel hidden plot coordinates inside the PoseStack')
+        }
+        if (!renderMixinText.contains('suppressed_for_visible_bridge')
+                || !renderMixinText.contains('cir.setReturnValue(false)')) {
+            throw new GradleException('M13 Create shouldRender hook must suppress accidental hidden-space vanilla scheduling and leave visible scheduling to the Forge bridge')
+        }
+        [
+                'manuallyRender',
+                'BlockRenderDispatcher',
+                'Blocks.STONE',
+                'setAngle(',
+                'angleDelta ='
+        ].each { forbidden ->
+            if (renderMixinText.contains(forbidden)) {
+                throw new GradleException("M13 contraption render bridge must not replace Create rendering/math: ${forbidden}")
+            }
+        }
+        if (!mixinConfigText.contains('compatibility.create.contraptions.ContraptionEntityRendererMixin')) {
+            throw new GradleException('M13 Create contraption renderer bridge is not registered in the Forge client mixin config')
+        }
+        if (!sourceSets.main.java.matching {
+            include 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java'
+        }.files.contains(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java'))) {
+            throw new GradleException('M13 Create contraption renderer mixin source is not selected by sourceSets.main')
+        }
+
+        File createJar = targetCreateJar
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing production Create 6.0.8 jar for direct M13 renderer verification: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            String rendererClass = 'com/simibubi/create/content/contraptions/render/ContraptionEntityRenderer.class'
+            def entry = jarFile.getJarEntry(rendererClass)
+            if (entry == null) {
+                throw new GradleException("Create 6.0.8 jar is missing ${rendererClass}")
+            }
+            def structure = jarFile.getInputStream(entry).withCloseable { stream -> readClassStructure(stream) }
+            def actualMethods = structure.methods.keySet() as Set
+            [
+                    'render(Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V',
+                    'shouldRender(Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;Lnet/minecraft/client/renderer/culling/Frustum;DDD)Z'
+            ].each { method ->
+                if (!actualMethods.contains(method)) {
+                    throw new GradleException("Create 6.0.8 ContraptionEntityRenderer lacks ${method}; actual methods were ${actualMethods}")
+                }
+            }
+            def invocations = jarFile.getInputStream(entry).withCloseable { stream -> readClassMethodInvocations(stream) }
+            String shouldRenderMethod = 'shouldRender(Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;Lnet/minecraft/client/renderer/culling/Frustum;DDD)Z'
+            [
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.getContraption()Lcom/simibubi/create/content/contraptions/Contraption;' : 1,
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.isAliveOrStale()Z' : 1,
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.isReadyForRender()Z' : 1,
+                    'net/minecraft/client/renderer/entity/EntityRenderer.m_5523_(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/client/renderer/culling/Frustum;DDD)Z' : 1
+            ].each { invocation, expectedCount ->
+                int actualCount = invocations.methods[shouldRenderMethod].count { it == invocation }
+                if (actualCount != expectedCount) {
+                    throw new GradleException("Create 6.0.8 production ${shouldRenderMethod} expected ${expectedCount} call(s) to ${invocation}, found ${actualCount}; actual calls were ${invocations.methods[shouldRenderMethod]}")
+                }
+            }
+            String renderMethod = 'render(Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V'
+            [
+                    'com/simibubi/create/content/contraptions/Contraption.getOrCreateClientContraptionLazy()Lcom/simibubi/create/content/contraptions/render/ClientContraption;' : 1,
+                    'com/simibubi/create/content/contraptions/render/ClientContraption.getRenderLevel()Lcom/simibubi/create/foundation/virtualWorld/VirtualRenderWorld;' : 1,
+                    'com/simibubi/create/content/contraptions/render/ClientContraption.getMatrices()Lcom/simibubi/create/content/contraptions/render/ContraptionMatrices;' : 1,
+                    'com/simibubi/create/content/contraptions/render/ContraptionMatrices.setup(Lcom/mojang/blaze3d/vertex/PoseStack;Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;)V' : 1,
+                    'dev/engine_room/flywheel/api/visualization/VisualizationManager.supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z' : 1,
+                    'com/simibubi/create/content/contraptions/render/ContraptionEntityRenderer.getBuffer(Lcom/simibubi/create/content/contraptions/Contraption;Lcom/simibubi/create/foundation/virtualWorld/VirtualRenderWorld;Lnet/minecraft/client/renderer/RenderType;)Lnet/createmod/catnip/render/SuperByteBuffer;' : 1,
+                    'net/createmod/catnip/render/SuperByteBuffer.renderInto(Lcom/mojang/blaze3d/vertex/PoseStack;Lcom/mojang/blaze3d/vertex/VertexConsumer;)V' : 1,
+                    'com/simibubi/create/foundation/render/BlockEntityRenderHelper.renderBlockEntities(Ljava/util/List;Ljava/util/BitSet;Ljava/util/BitSet;Lcom/simibubi/create/foundation/virtualWorld/VirtualRenderWorld;Lnet/minecraft/world/level/Level;Lcom/mojang/blaze3d/vertex/PoseStack;Lorg/joml/Matrix4f;Lnet/minecraft/client/renderer/MultiBufferSource;F)V' : 1,
+                    'com/simibubi/create/content/contraptions/render/ContraptionEntityRenderer.renderActors(Lnet/minecraft/world/level/Level;Lcom/simibubi/create/foundation/virtualWorld/VirtualRenderWorld;Lcom/simibubi/create/content/contraptions/Contraption;Lcom/simibubi/create/content/contraptions/render/ContraptionMatrices;Lnet/minecraft/client/renderer/MultiBufferSource;)V' : 1
+            ].each { invocation, expectedCount ->
+                int actualCount = invocations.methods[renderMethod].count { it == invocation }
+                if (actualCount != expectedCount) {
+                    throw new GradleException("Create 6.0.8 production ${renderMethod} expected ${expectedCount} call(s) to ${invocation}, found ${actualCount}; actual calls were ${invocations.methods[renderMethod]}")
+                }
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM13ContraptionRenderBoundary PASS: Sable-contained Create contraptions preserve '
+                + 'Create ContraptionEntityRenderer/ContraptionMatrices rendering, force only the Sable entity '
+                + 'to Create vanilla rendering when Flywheel would need a moving-frame visual, and compose the '
+                + 'parent Sable render pose before Create applies bearing rotation')
+    }
+}
+
+tasks.register('verifyM13JadeRuntimeTargets') {
+    group = 'forge backport'
+    description = 'Directly verifies Sable Jade/Jade Addons mixin targets against the installed target-pack jars.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/BlockAccessorImplMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/RayTracingMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jadeaddons/CreatePluginMixin.java'))
+    inputs.file(targetJadeJar)
+    inputs.file(targetJadeAddonsJar)
+
+    doLast {
+        String blockText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/BlockAccessorImplMixin.java').getText('UTF-8')
+        String rayText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/RayTracingMixin.java').getText('UTF-8')
+        String addonText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jadeaddons/CreatePluginMixin.java').getText('UTF-8')
+        [
+                [rayText, 'Lnet/minecraft/world/phys/AABB;clip', 'remap = true'],
+                [rayText, 'Lnet/minecraft/world/phys/Vec3;distanceToSqr', 'remap = true'],
+                [blockText, 'Lnet/minecraft/core/BlockPos;distSqr', 'remap = true'],
+                [addonText, 'Lnet/minecraft/world/entity/Entity;getEyePosition', 'remap = true'],
+                [addonText, 'Lnet/minecraft/world/entity/Entity;getViewVector', 'remap = true']
+        ].each { sourceTarget ->
+            if (!sourceTarget[0].contains(sourceTarget[1]) || !sourceTarget[0].contains(sourceTarget[2])) {
+                throw new GradleException("Jade production mixin target must be remapped through sable.refmap.json: ${sourceTarget[1]}")
+            }
+        }
+
+        if (!targetJadeJar.isFile()) {
+            throw new GradleException("Missing target-pack Jade 11.13.3 jar for direct verification: ${targetJadeJar}")
+        }
+        if (!targetJadeAddonsJar.isFile()) {
+            throw new GradleException("Missing target-pack Jade Addons 5.5.1 jar for direct verification: ${targetJadeAddonsJar}")
+        }
+
+        JarFile jadeJar = new JarFile(targetJadeJar)
+        try {
+            String rayTracingClass = 'snownee/jade/overlay/RayTracing.class'
+            def rayEntry = jadeJar.getJarEntry(rayTracingClass)
+            if (rayEntry == null) {
+                throw new GradleException("Jade 11.13.3 jar is missing ${rayTracingClass}")
+            }
+            def rayInvocations = jadeJar.getInputStream(rayEntry).withCloseable { stream -> readClassMethodInvocations(stream) }
+            String rayMethod = 'getEntityHitResult(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/AABB;Ljava/util/function/Predicate;)Lnet/minecraft/world/phys/EntityHitResult;'
+            [
+                    'net/minecraft/world/phys/AABB.m_82371_(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;)Ljava/util/Optional;' : 1,
+                    'net/minecraft/world/phys/Vec3.m_82557_(Lnet/minecraft/world/phys/Vec3;)D' : 1
+            ].each { invocation, expectedCount ->
+                int actualCount = rayInvocations.methods[rayMethod].count { it == invocation }
+                if (actualCount != expectedCount) {
+                    throw new GradleException("Jade 11.13.3 production ${rayMethod} expected ${expectedCount} call(s) to ${invocation}, found ${actualCount}; actual calls were ${rayInvocations.methods[rayMethod]}")
+                }
+            }
+
+            String blockAccessorClass = 'snownee/jade/impl/BlockAccessorImpl.class'
+            def blockEntry = jadeJar.getJarEntry(blockAccessorClass)
+            if (blockEntry == null) {
+                throw new GradleException("Jade 11.13.3 jar is missing ${blockAccessorClass}")
+            }
+            def blockInvocations = jadeJar.getInputStream(blockEntry).withCloseable { stream -> readClassMethodInvocations(stream) }
+            String blockMethod = 'lambda$handleRequest$0(Lsnownee/jade/api/BlockAccessor;Lnet/minecraft/server/level/ServerPlayer;Ljava/util/function/Consumer;)V'
+            String distInvocation = 'net/minecraft/core/BlockPos.m_123331_(Lnet/minecraft/core/Vec3i;)D'
+            int distCount = blockInvocations.methods[blockMethod].count { it == distInvocation }
+            if (distCount != 1) {
+                throw new GradleException("Jade 11.13.3 production ${blockMethod} expected 1 call to ${distInvocation}, found ${distCount}; actual calls were ${blockInvocations.methods[blockMethod]}")
+            }
+        } finally {
+            jadeJar.close()
+        }
+
+        JarFile jadeAddonsJar = new JarFile(targetJadeAddonsJar)
+        try {
+            String createPluginClass = 'snownee/jade/addon/create/CreatePlugin.class'
+            def createPluginEntry = jadeAddonsJar.getJarEntry(createPluginClass)
+            if (createPluginEntry == null) {
+                throw new GradleException("Jade Addons 5.5.1 jar is missing ${createPluginClass}")
+            }
+            def invocations = jadeAddonsJar.getInputStream(createPluginEntry).withCloseable { stream -> readClassMethodInvocations(stream) }
+            String method = 'lambda$registerClient$1(Lnet/minecraft/world/entity/Entity;)Z'
+            [
+                    'net/minecraft/world/entity/Entity.m_20299_(F)Lnet/minecraft/world/phys/Vec3;' : 1,
+                    'net/minecraft/world/entity/Entity.m_20252_(F)Lnet/minecraft/world/phys/Vec3;' : 1
+            ].each { invocation, expectedCount ->
+                int actualCount = invocations.methods[method].count { it == invocation }
+                if (actualCount != expectedCount) {
+                    throw new GradleException("Jade Addons 5.5.1 production ${method} expected ${expectedCount} call(s) to ${invocation}, found ${actualCount}; actual calls were ${invocations.methods[method]}")
+                }
+            }
+        } finally {
+            jadeAddonsJar.close()
+        }
+
+        logger.lifecycle('verifyM13JadeRuntimeTargets PASS: Jade 11.13.3 and Jade Addons 5.5.1 production bytecode '
+                + 'contains every required Sable injection target, with Minecraft-owned @At calls remapped by refmap')
+    }
+}
+
+tasks.register('verifyM13ContraptionCollisionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Create contraption collision is adapted through the registered outer Sable frame.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionColliderMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/Matrix3dAccessor.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityAccessor.java'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.file(targetCreateJar)
+
+    doLast {
+        String colliderText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionColliderMixin.java').getText('UTF-8')
+        String configText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        [
+                'SableCreateContraptionContext.getContainingSubLevel(instance)',
+                'instance.getBoundingBox()',
+                'visibleAabb.transform(subLevel.logicalPose(), visibleAabb)',
+                'subLevel.logicalPose().transformPosition(instance.position())',
+                'subLevel.logicalPose().transformPositionInverse(localVec)',
+                'rotationState.asMatrix()',
+                'getContactPointMotion',
+                '@Mixin(value = ContraptionCollider.class, remap = false)',
+                'target = "Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;getBoundingBox()Lnet/minecraft/world/phys/AABB;",',
+                'target = "Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;position()Lnet/minecraft/world/phys/Vec3;",',
+                'remap = true'
+        ].each { canary ->
+            if (!colliderText.contains(canary)) {
+                throw new GradleException("M13 contraption collision bridge lost canary: ${canary}")
+            }
+        }
+        [
+                'compatibility.create.contraptions.ContraptionColliderMixin',
+                'compatibility.create.contraptions.Matrix3dAccessor',
+                'compatibility.create.contraptions.ControlledContraptionEntityAccessor'
+        ].each { entry ->
+            if (!configText.contains(entry)) {
+                throw new GradleException("M13 contraption collision support is not registered: ${entry}")
+            }
+        }
+        ['Blocks.STONE', 'new VoxelShape', 'Rapier', 'Native'].each { forbidden ->
+            if (colliderText.contains(forbidden)) {
+                throw new GradleException("M13 collision bridge must not replace Create collision with static/custom physics: ${forbidden}")
+            }
+        }
+
+        File createJar = targetCreateJar
+        if (!createJar.isFile()) {
+            throw new GradleException("Missing production Create 6.0.8 jar for direct M13 collision verification: ${createJar}")
+        }
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            String entryName = 'com/simibubi/create/content/contraptions/ContraptionCollider.class'
+            def entry = jarFile.getJarEntry(entryName)
+            if (entry == null) {
+                throw new GradleException("Create 6.0.8 jar is missing ${entryName}")
+            }
+            def invocations = jarFile.getInputStream(entry).withCloseable { stream -> readClassMethodInvocations(stream) }
+            String method = 'collideEntities(Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;)V'
+            if (!invocations.methods.containsKey(method)) {
+                throw new GradleException("Create 6.0.8 ContraptionCollider lacks ${method}; actual methods were ${invocations.methods.keySet()}")
+            }
+            def expectedInvocations = [
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.m_20191_()Lnet/minecraft/world/phys/AABB;'                                                     : 1,
+                    'net/minecraft/world/phys/AABB.m_82363_(DDD)Lnet/minecraft/world/phys/AABB;'                                                                                          : 1,
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.m_20182_()Lnet/minecraft/world/phys/Vec3;'                                                        : 1,
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.getPrevPositionVec()Lnet/minecraft/world/phys/Vec3;'                                              : 1,
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.getAnchorVec()Lnet/minecraft/world/phys/Vec3;'                                                    : 1,
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity$ContraptionRotationState.asMatrix()Lcom/simibubi/create/foundation/collision/Matrix3d;'           : 1,
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.toLocalVector(Lnet/minecraft/world/phys/Vec3;F)Lnet/minecraft/world/phys/Vec3;'                   : 2,
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.getContactPointMotion(Lnet/minecraft/world/phys/Vec3;)Lnet/minecraft/world/phys/Vec3;'            : 1
+            ]
+            expectedInvocations.each { invocation, expectedCount ->
+                int actualCount = invocations.methods[method].count { it == invocation }
+                if (actualCount != expectedCount) {
+                    throw new GradleException("Create 6.0.8 production ${method} expected ${expectedCount} call(s) to ${invocation}, found ${actualCount}; actual calls were ${invocations.methods[method]}")
+                }
+            }
+
+            String matrixEntryName = 'com/simibubi/create/foundation/collision/Matrix3d.class'
+            def matrixEntry = jarFile.getJarEntry(matrixEntryName)
+            if (matrixEntry == null) {
+                throw new GradleException("Create 6.0.8 jar is missing ${matrixEntryName}")
+            }
+            def matrixStructure = jarFile.getInputStream(matrixEntry).withCloseable { stream -> readClassStructure(stream) }
+            ['m00D', 'm01D', 'm02D', 'm10D', 'm11D', 'm12D', 'm20D', 'm21D', 'm22D'].each { field ->
+                if (!matrixStructure.fields.containsKey(field)) {
+                    throw new GradleException("Matrix3dAccessor target field is absent from production Create Matrix3d: ${field}; actual fields were ${matrixStructure.fields.keySet()}")
+                }
+            }
+
+            String controlledEntryName = 'com/simibubi/create/content/contraptions/ControlledContraptionEntity.class'
+            def controlledEntry = jarFile.getJarEntry(controlledEntryName)
+            if (controlledEntry == null) {
+                throw new GradleException("Create 6.0.8 jar is missing ${controlledEntryName}")
+            }
+            def controlledStructure = jarFile.getInputStream(controlledEntry).withCloseable { stream -> readClassStructure(stream) }
+            if (!controlledStructure.fields.containsKey('controllerPosLnet/minecraft/core/BlockPos;')) {
+                throw new GradleException("ControlledContraptionEntityAccessor target field controllerPos is absent from production Create; actual fields were ${controlledStructure.fields.keySet()}")
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM13ContraptionCollisionBoundary PASS: Create ContraptionCollider remains authoritative; '
+                + 'Sable adapts only bounds, positions, vectors, and rotation through the containing sublevel frame')
+    }
+}
+
+tasks.register('verifyGameRendererMixinBoundary') {
+    group = 'forge backport'
+    description = 'Bytecode-verifies the Forge 1.20.1 GameRenderer mixin target used for Sable picking.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/GameRendererMixin.java'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+
+    doLast {
+        File forgeMappedClasses = layout.buildDirectory.dir('compileClasspath/forgeMappedClasses').get().asFile
+        if (!forgeMappedClasses.isDirectory()) {
+            throw new GradleException("Missing staged mapped Minecraft classes for GameRenderer verification: ${forgeMappedClasses}")
+        }
+        File javap = new File(System.getProperty('java.home'),
+                'bin/javap' + (System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows') ? '.exe' : ''))
+        if (!javap.isFile()) {
+            throw new GradleException("Could not find javap executable at ${javap}")
+        }
+
+        def disassemble = { List<String> javapArgs ->
+            ByteArrayOutputStream output = new ByteArrayOutputStream()
+            exec {
+                executable = javap.absolutePath
+                args javapArgs
+                standardOutput = output
+            }
+            output.toString('UTF-8')
+        }
+        def section = { String text, String start, String end ->
+            int begin = text.indexOf(start)
+            if (begin < 0) {
+                throw new GradleException("GameRenderer bytecode verifier could not find method section start: ${start}")
+            }
+            int finish = text.indexOf(end, begin + start.length())
+            if (finish < 0) {
+                finish = text.length()
+            }
+            text.substring(begin, finish)
+        }
+
+        String mixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/GameRendererMixin.java').getText('UTF-8')
+        String mixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String gameRendererMethods = disassemble(['-classpath', forgeMappedClasses.absolutePath, '-p',
+                'net.minecraft.client.renderer.GameRenderer'])
+        String gameRendererBytecode = disassemble(['-classpath', forgeMappedClasses.absolutePath, '-c', '-p',
+                'net.minecraft.client.renderer.GameRenderer'])
+        String renderLevel = section(gameRendererBytecode,
+                'public void renderLevel(float, long, com.mojang.blaze3d.vertex.PoseStack);',
+                'public void resetData')
+
+        if (gameRendererMethods.contains('filterHitResult')) {
+            throw new GradleException('Forge 1.20.1 GameRenderer unexpectedly declares filterHitResult; re-audit before restoring that hook')
+        }
+        if (gameRendererMethods.contains('pick(net.minecraft.world.entity.Entity, double, double, float)')) {
+            throw new GradleException('Forge 1.20.1 GameRenderer unexpectedly declares pick(Entity,double,double,float); re-audit before restoring that hook')
+        }
+        if (!gameRendererMethods.contains('public void pick(float);')) {
+            throw new GradleException('Forge 1.20.1 GameRenderer lost public pick(float), the retained renderLevel hook must be re-audited')
+        }
+        if (!renderLevel.contains('Method pick:(F)V')) {
+            throw new GradleException('GameRenderer#renderLevel no longer invokes GameRenderer#pick(float); retained hook would match 0/1')
+        }
+
+        [
+                'method = "filterHitResult"',
+                'pick(Lnet/minecraft/world/entity/Entity;DDF)Lnet/minecraft/world/phys/HitResult;',
+                '@Redirect',
+                'sable$closerThan',
+                'sable$distanceToSqr',
+                'sable$getEyePosition'
+        ].each { stale ->
+            if (mixinText.contains(stale)) {
+                throw new GradleException("GameRendererMixin still contains stale 1.21 picking hook: ${stale}")
+            }
+        }
+        [
+                '@WrapOperation(method = "renderLevel"',
+                'target = "Lnet/minecraft/client/renderer/GameRenderer;pick(F)V"',
+                'extension.sable$pushPoseSupplier',
+                'try {',
+                'original.call(instance, f)',
+                'finally',
+                'extension.sable$popPoseSupplier'
+        ].each { canary ->
+            if (!mixinText.contains(canary)) {
+                throw new GradleException("GameRendererMixin lost retained 1.20.1 renderLevel pick bridge canary: ${canary}")
+            }
+        }
+        if (mixinText.contains('remap = false')) {
+            throw new GradleException('GameRendererMixin targets Minecraft-owned methods and must use normal remapping, not remap=false')
+        }
+        if (!mixinConfigText.contains('clip_overwrite.GameRendererMixin')) {
+            throw new GradleException('Forge mixin config must include the retained GameRenderer render-time pick bridge')
+        }
+
+        logger.lifecycle('verifyGameRendererMixinBoundary PASS: Forge 1.20.1 GameRenderer has no '
+                + 'filterHitResult or pick(Entity,double,double,float) target, the stale redirects are absent, '
+                + 'and the retained renderLevel hook bytecode-matches the real GameRenderer#pick(float) call')
+    }
+}
+
+tasks.register('verifyM13ClientTargetBoundary') {
+    group = 'forge backport'
+    description = 'Verifies passive hover and active interactions share one Sable client target abstraction.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/GameRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/BlockAccessorImplMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/RayTracingMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jadeaddons/CreatePluginMixin.java'))
+    inputs.file('src/main/resources/sable-common-forge.mixins.json')
+
+    doLast {
+        String targetHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java').getText('UTF-8')
+        String interactionText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java').getText('UTF-8')
+        String minecraftMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java').getText('UTF-8')
+        String clipGameRendererText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/GameRendererMixin.java').getText('UTF-8')
+        String jadeText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/BlockAccessorImplMixin.java').getText('UTF-8') +
+                rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/RayTracingMixin.java').getText('UTF-8') +
+                rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jadeaddons/CreatePluginMixin.java').getText('UTF-8')
+        String mixinConfigText = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'public record Target(ClientSubLevel subLevel',
+                'resolveFromHit',
+                'refreshMinecraftHitResult',
+                'Sable.HELPER.getContaining(level, blockHitResult.getBlockPos())',
+                'plotBlockPos.subtract(center)',
+                'JOMLConversion.toJOML(blockHitResult.getLocation())',
+                'blockHitResult.getDirection()',
+                'clientSubLevel.renderPose().transformPosition(blockHitResult.getLocation())',
+                'Minecraft.getInstance().hitResult = target.hitResult()',
+                'SABLE_M13_TARGET'
+        ].each { canary ->
+            if (!targetHelperText.contains(canary)) {
+                throw new GradleException("M13 client target helper lost canary: ${canary}")
+            }
+        }
+        if (!minecraftMixinText.contains('ClientSubLevelTargetHelper.refreshMinecraftHitResult(this.player, this.level, this.hitResult)')) {
+            throw new GradleException('M13 passive target refresh is not wired after client GameRenderer.pick')
+        }
+        if (!targetHelperText.contains('Minecraft.getInstance().hitResult = vanillaHit')) {
+            throw new GradleException('M13 passive target bridge must restore the vanilla hit result when no Sable target is active')
+        }
+        if (!interactionText.contains('ClientSubLevelTargetHelper.resolveFromHit(level, hitResult)')
+                || !interactionText.contains('target.localBlockPos()')
+                || !interactionText.contains('target.localFace()')) {
+            throw new GradleException('M11 active interactions must reuse the M13 canonical target helper')
+        }
+        [
+                'extension.sable$pushPoseSupplier',
+                'original.call(instance, f)',
+                'extension.sable$popPoseSupplier',
+                'target = "Lnet/minecraft/client/renderer/GameRenderer;pick(F)V"'
+        ].each { canary ->
+            if (!clipGameRendererText.contains(canary)) {
+                throw new GradleException("Sublevel GameRenderer pick bridge lost canary: ${canary}")
+            }
+        }
+        [
+                'method = "filterHitResult"',
+                'pick(Lnet/minecraft/world/entity/Entity;DDF)Lnet/minecraft/world/phys/HitResult;',
+                '@Redirect'
+        ].each { stale ->
+            if (clipGameRendererText.contains(stale)) {
+                throw new GradleException("Sublevel GameRenderer pick bridge still contains stale 1.21-only target: ${stale}")
+            }
+        }
+        [
+                'compatibility.jade.BlockAccessorImplMixin',
+                'compatibility.jade.RayTracingMixin',
+                'compatibility.jadeaddons.CreatePluginMixin',
+                'clip_overwrite.GameRendererMixin'
+        ].each { canary ->
+            if (!mixinConfigText.contains(canary)) {
+                throw new GradleException("Forge mixin config lost passive hover/Jade canary: ${canary}")
+            }
+        }
+        [
+                'distanceSquaredWithSubLevels',
+                'RayTracing',
+                'getEntityHitResult',
+                'renderPose().transformPositionInverse',
+                'CreatePlugin'
+        ].each { canary ->
+            if (!jadeText.contains(canary)) {
+                throw new GradleException("Jade/Create hover compatibility lost canary: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifyM13ClientTargetBoundary PASS: passive hover and active use paths share '
+                + 'ClientSubLevelTargetHelper, Forge enables the render-time GameRenderer pick bridge, and Jade '
+                + 'compatibility mixins are packaged for Sable-aware lookup/distance semantics')
+    }
+}
+
+tasks.register('verifyM13JadeIsolationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies optional Jade adapters preserve ordinary-world behavior and gate Sable transforms.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/BlockAccessorImplMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/RayTracingMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jadeaddons/CreatePluginMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java'))
+
+    doLast {
+        String blockText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/BlockAccessorImplMixin.java').getText('UTF-8')
+        String rayText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/RayTracingMixin.java').getText('UTF-8')
+        String addonText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jadeaddons/CreatePluginMixin.java').getText('UTF-8')
+        String targetText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java').getText('UTF-8')
+        String allText = blockText + rayText + addonText + targetText
+
+        [
+                'original.call(instance, vec3i)',
+                'Sable.HELPER.getContaining(world, instance)',
+                'Sable.HELPER.getContaining(world, vec3i)',
+                'original.call(aabb, start, end)',
+                'if (Sable.HELPER.getContaining(worldIn, vec3) == null)',
+                'original.call(instance, vec3)',
+                'original.call(instance, f)',
+                '@Pseudo',
+                'Minecraft.getInstance().hitResult = vanillaHit'
+        ].each { canary ->
+            if (!allText.contains(canary)) {
+                throw new GradleException("Jade/Sable target isolation lost canary: ${canary}")
+            }
+        }
+        if ((blockText + rayText + addonText).contains('Minecraft.getInstance().hitResult')) {
+            throw new GradleException('Jade adapters must not mutate Minecraft.hitResult globally')
+        }
+
+        logger.lifecycle('verifyM13JadeIsolationBoundary PASS: optional Jade adapters delegate ordinary targets unchanged, '
+                + 'apply Sable transforms only for Sable targets, and restore vanilla hit state on exit')
+    }
+}
+
+tasks.register('verifyM13StaticBlockEditBoundary') {
+    group = 'forge backport'
+    description = 'Verifies disassembled Sable blocks support normal server-authoritative breaking and placement.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/PlayerMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/ServerPlayerGameModeMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelInteractionHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+
+    doLast {
+        String playerReachText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/PlayerMixin.java').getText('UTF-8')
+        String gameModeReachText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/interaction_distance/ServerPlayerGameModeMixin.java').getText('UTF-8')
+        String interactionText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelInteractionHelper.java').getText('UTF-8')
+        String targetHelperText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java').getText('UTF-8')
+        String editText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+
+        [
+                'method = "handlePlayerAction"',
+                'SABLE_M13_EDIT action=break phase=packet'
+        ].each { canary ->
+            if (!playerReachText.contains(canary)) {
+                throw new GradleException("M13 static breaking bridge lost packet-listener canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(ServerPlayerGameMode.class)',
+                'method = "handleBlockBreakAction"',
+                'testPlayerCanReach',
+                'ServerPlayer;canReach',
+                'ServerPlayer;canReachRaw',
+                'sable$canReachBlockInSubLevel',
+                'subLevel.logicalPose().transformPositionInverse(player.getEyePosition())'
+        ].each { canary ->
+            if (!gameModeReachText.contains(canary)) {
+                throw new GradleException("M13 static breaking bridge lost canary: ${canary}")
+            }
+        }
+        if (playerReachText.contains('sable$testPlayerCanReachBlockAction')
+                || playerReachText.contains('sable$logSubLevelBlockBreakResult')
+                || playerReachText.contains('ServerPlayerGameMode;handleBlockBreakAction')) {
+            throw new GradleException('PlayerMixin must not carry critical handlePlayerAction call-site wrappers for block-breaking diagnostics/reach')
+        }
+        [
+                'player.gameMode.useItemOn(player, level, stack, packet.hand(), plotHitResult)',
+                'BlockItem',
+                'SABLE_M13_EDIT action=place',
+                'stateBefore',
+                'stateAfter',
+                'stateChanged'
+        ].each { canary ->
+            if (!interactionText.contains(canary)) {
+                throw new GradleException("M13 static placement bridge lost canary: ${canary}")
+            }
+        }
+        [
+                'Minecraft.getInstance().hitResult = target.hitResult()',
+                'targetType=STATIC_SABLE_BLOCK'
+        ].each { canary ->
+            if (!targetHelperText.contains(canary)) {
+                throw new GradleException("M13 static edit targeting lost client target canary: ${canary}")
+            }
+        }
+        [
+                'physicsSystem.finalizeExistingSubLevelStorage(subLevel, false, "block_edit")',
+                'SubLevelPhysicsSystem.get(subLevel.getLevel())'
+        ].each { canary ->
+            if (!editText.contains(canary)) {
+                throw new GradleException("M13 static edits lost canonical Sable lifecycle canary: ${canary}")
+            }
+        }
+        if (targetHelperText.contains('setBlock') || targetHelperText.contains('destroyBlock')) {
+            throw new GradleException('Client target helper must not authoritatively edit Sable blocks')
+        }
+
+        logger.lifecycle('verifyM13StaticBlockEditBoundary PASS: disassembled static Sable blocks use the shared '
+                + 'client target, vanilla mining reach checks are Sable-aware, placement delegates to normal '
+                + 'ServerPlayerGameMode.useItemOn, and resulting block changes reenter the canonical Sable edit lifecycle')
+    }
+}
+
+tasks.register('verifyM13AssembledInteractionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies assembled contraption interactions stay within normal Create semantics.'
+
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java'))
+    inputs.file(createDevelopmentRuntime)
+
+    doLast {
+        String abstractMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java').getText('UTF-8')
+        String renderMixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java').getText('UTF-8')
+
+        if (abstractMixinText.contains('destroyBlock') || abstractMixinText.contains('BlockItem')
+                || abstractMixinText.contains('handlePlayerInteraction(')) {
+            throw new GradleException('M13 must not invent direct mining/placement/use behavior on assembled contraption blocks')
+        }
+        if (!renderMixinText.contains('ContraptionEntityRenderer')
+                || !renderMixinText.contains('sableContraption ? false : originalVisualizationSupported')) {
+            throw new GradleException('M13 assembled contraption support must remain a rendering/coordinate bridge, not a behavior fork')
+        }
+
+        File createJar = createDevelopmentRuntime.get().asFile
+        JarFile jarFile = new JarFile(createJar)
+        try {
+            String entityClass = 'com/simibubi/create/content/contraptions/AbstractContraptionEntity.class'
+            def entry = jarFile.getJarEntry(entityClass)
+            if (entry == null) {
+                throw new GradleException("Create 6.0.8 jar is missing ${entityClass}")
+            }
+            String entityText = new String(jarFile.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+            [
+                    'handlePlayerInteraction',
+                    'MovingInteractionBehaviour',
+                    'handlePlayerStorageInteraction',
+                    'disassemble',
+                    'setBlock'
+            ].each { canary ->
+                if (!entityText.contains(canary)) {
+                    throw new GradleException("Create 6.0.8 assembled interaction semantics lost canary: ${canary}")
+                }
+            }
+            if (entityText.contains('BlockItem')) {
+                throw new GradleException('Unexpected BlockItem placement path appeared on Create AbstractContraptionEntity; re-audit assembled placement semantics')
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle('verifyM13AssembledInteractionBoundary PASS: assembled contraption blocks keep normal '
+                + 'Create entity interaction semantics; Sable does not add direct block mining/placement to blocks '
+                + 'that Create has removed from static world storage')
+    }
+}
+
+tasks.register('verifyM13ValidationTruthfulnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M13 validate separates server facts from unverified client rendering/targeting/edit observations.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M13TestCommands.java'))
+
+    doLast {
+        String m13Text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M13TestCommands.java').getText('UTF-8')
+        [
+                'SERVER_ASSEMBLY=',
+                'CONTROLLER=',
+                'SERVER_ROTATION=',
+                'CLIENT_RENDER=UNVERIFIED',
+                'CLIENT_TARGETING=UNVERIFIED',
+                'CLIENT_EDIT=UNVERIFIED'
+        ].each { canary ->
+            if (!m13Text.contains(canary)) {
+                throw new GradleException("M13 validation truthfulness lost domain canary: ${canary}")
+            }
+        }
+        [
+                'CLIENT_RENDER=PASS',
+                'CLIENT_TARGETING=PASS',
+                'CLIENT_EDIT=PASS',
+                'rendering=PASS'
+        ].each { forbidden ->
+            if (m13Text.contains(forbidden)) {
+                throw new GradleException("M13 server validator must not claim client-only PASS: ${forbidden}")
+            }
+        }
+
+        logger.lifecycle('verifyM13ValidationTruthfulnessBoundary PASS: /sable m13 validate reports server '
+                + 'assembly/controller/rotation separately and leaves client render/target/edit domains explicitly UNVERIFIED')
+    }
+}
+
+tasks.register('verifyCheapTasksDoNotResolveCompileClasspath') {
+    group = 'forge backport'
+    description = 'Guards source-only Forge tasks against configuration-time Minecraft/Companion resolution.'
+
+    inputs.file(rootProject.file('sable_companion_1_20/build.gradle'))
+    inputs.file(rootProject.file('settings.gradle'))
+    inputs.file(rootProject.file('forge/build.gradle'))
+
+    doLast {
+        String forgeText = rootProject.file('forge/build.gradle').getText('UTF-8')
+        String companionText = rootProject.file('sable_companion_1_20/build.gradle').getText('UTF-8')
+        String forgeConfigurationText = forgeText.substring(
+                0,
+                forgeText.indexOf("tasks.register('verifyCheapTasksDoNotResolveCompileClasspath')"))
+        if (forgeConfigurationText.contains("evaluationDependsOn(':sable_companion_1_20')")) {
+            throw new GradleException('Forge must not eagerly evaluate the Companion project for source-only tasks')
+        }
+        if (companionText.contains("id 'net.minecraftforge.gradle'")
+                || companionText.contains('minecraft "net.minecraftforge:forge')) {
+            throw new GradleException('Companion must remain a plain Java library; ForgeGradle/Minecraft must not configure it eagerly')
+        }
+        if (!companionText.contains("tasks.named('compileJava')")
+                || !companionText.contains('doFirst')
+                || !companionText.contains("classpath = project(':forge').configurations.minecraft")) {
+            throw new GradleException('Companion Minecraft classpath must be attached inside compileJava.doFirst')
+        }
+        if (!forgeConfigurationText.contains("project(':sable_companion_1_20').provider")) {
+            throw new GradleException('Forge cross-project Companion output wiring is not provider-backed')
+        }
+        logger.lifecycle('verifyCheapTasksDoNotResolveCompileClasspath PASS: Spotless/static task configuration '
+                + 'performed without expensive configuration resolution; compile classpaths remain execution-scoped')
+    }
+}
+
+tasks.register('verifyPackagedMixinImplementationClasses') {
+    group = 'forge backport'
+    description = 'Verifies every packaged Sable mixin config entry has its implementation class in the same runtime artifact.'
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+
+    inputs.file(standaloneProductionSableArtifact)
+
+    doLast {
+        File jar = standaloneProductionSableArtifact.get().asFile
+        if (!jar.isFile()) {
+            throw new GradleException("Missing final production artifact for packaged mixin verification: ${jar}")
+        }
+
+        JarFile jarFile = new JarFile(jar)
+        try {
+            def entries = jarFile.entries().toList()
+            def mixinConfigs = entries.findAll {
+                !it.directory && it.name.endsWith('.mixins.json')
+            }
+            if (mixinConfigs.isEmpty()) {
+                throw new GradleException("${jar.name} contains no mixin configs")
+            }
+
+            def missing = []
+            mixinConfigs.each { configEntry ->
+                def parsed = new JsonSlurper().parse(jarFile.getInputStream(configEntry))
+                String packagePrefix = parsed.package?.toString()
+                if (packagePrefix == null || packagePrefix.isBlank()) {
+                    throw new GradleException("${configEntry.name} has no package field")
+                }
+
+                ((parsed.mixins ?: []) + (parsed.client ?: []) + (parsed.server ?: [])).each { mixinName ->
+                    String fullName = packagePrefix + '.' + mixinName.toString()
+                    String classEntry = fullName.replace('.', '/') + '.class'
+                    if (jarFile.getJarEntry(classEntry) == null) {
+                        missing.add("${configEntry.name}:${mixinName} -> ${classEntry}")
+                    }
+                }
+            }
+
+            if (!missing.isEmpty()) {
+                throw new GradleException("Packaged mixin configs reference missing implementation classes: ${missing}")
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        logger.lifecycle("verifyPackagedMixinImplementationClasses PASS: all packaged mixin config entries in ${jar.name} have implementation classes")
+    }
+}
+
+tasks.register('verifyM13PackagedContraptionMixinBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the final production artifact contains the M13 Create contraption mixin and matching JSON entry.'
+    dependsOn tasks.named('verifyPackagedMixinImplementationClasses')
+
+    inputs.file(standaloneProductionSableArtifact)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/AbstractSableMixinPlugin.java'))
+
+    doLast {
+        File jar = standaloneProductionSableArtifact.get().asFile
+        JarFile jarFile = new JarFile(jar)
+        try {
+            String classEntry = 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.class'
+            String controlledClassEntry = 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityMixin.class'
+            String rendererClassEntry = 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.class'
+            String colliderClassEntry = 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionColliderMixin.class'
+            String matrixAccessorClassEntry = 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/Matrix3dAccessor.class'
+            String controllerAccessorClassEntry = 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ControlledContraptionEntityAccessor.class'
+            String helperClassEntry = 'dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionControllerLookup.class'
+            String staleRemovalClassEntry = 'dev/ryanhcode/sable/mixin/compatibility/create/contraptions/EntityContraptionRemovalMixin.class'
+            if (jarFile.getJarEntry(classEntry) == null) {
+                throw new GradleException("${jar.name} is missing ${classEntry}")
+            }
+            if (jarFile.getJarEntry(controlledClassEntry) == null) {
+                throw new GradleException("${jar.name} is missing ${controlledClassEntry}")
+            }
+            if (jarFile.getJarEntry(rendererClassEntry) == null) {
+                throw new GradleException("${jar.name} is missing ${rendererClassEntry}")
+            }
+            [colliderClassEntry, matrixAccessorClassEntry, controllerAccessorClassEntry].each { requiredEntry ->
+                if (jarFile.getJarEntry(requiredEntry) == null) {
+                    throw new GradleException("${jar.name} is missing required M13 contraption support ${requiredEntry}")
+                }
+            }
+            if (jarFile.getJarEntry(helperClassEntry) == null) {
+                throw new GradleException("${jar.name} is missing ${helperClassEntry}")
+            }
+            if (jarFile.getJarEntry(staleRemovalClassEntry) != null) {
+                throw new GradleException("${jar.name} still contains deleted stale M13 removal mixin ${staleRemovalClassEntry}")
+            }
+            def configEntry = jarFile.getJarEntry('sable-common-forge.mixins.json')
+            if (configEntry == null) {
+                throw new GradleException("${jar.name} is missing sable-common-forge.mixins.json")
+            }
+            String configText = jarFile.getInputStream(configEntry).getText('UTF-8')
+            if (!configText.contains('"compatibility.create.contraptions.AbstractContraptionEntityMixin"')) {
+                throw new GradleException("${jar.name} mixin config does not reference M13 AbstractContraptionEntityMixin")
+            }
+            if (!configText.contains('"compatibility.create.contraptions.ControlledContraptionEntityMixin"')) {
+                throw new GradleException("${jar.name} mixin config does not reference M13 ControlledContraptionEntityMixin")
+            }
+            if (!configText.contains('"compatibility.create.contraptions.ContraptionEntityRendererMixin"')) {
+                throw new GradleException("${jar.name} mixin config does not reference M13 ContraptionEntityRendererMixin")
+            }
+            [
+                    '"compatibility.create.contraptions.ContraptionColliderMixin"',
+                    '"compatibility.create.contraptions.Matrix3dAccessor"',
+                    '"compatibility.create.contraptions.ControlledContraptionEntityAccessor"'
+            ].each { requiredEntry ->
+                if (!configText.contains(requiredEntry)) {
+                    throw new GradleException("${jar.name} mixin config does not reference ${requiredEntry}")
+                }
+            }
+            def entries = jarFile.entries().toList()
+            def duplicates = entries.findAll {
+                it.name.endsWith('AbstractContraptionEntityMixin.class')
+                        || it.name.endsWith('ControlledContraptionEntityMixin.class')
+                        || it.name.endsWith('ContraptionEntityRendererMixin.class')
+                        || it.name.endsWith('ContraptionColliderMixin.class')
+                        || it.name.endsWith('Matrix3dAccessor.class')
+                        || it.name.endsWith('ControlledContraptionEntityAccessor.class')
+            }
+            def expected = [classEntry, controlledClassEntry, rendererClassEntry, colliderClassEntry,
+                            matrixAccessorClassEntry, controllerAccessorClassEntry] as Set
+            if (duplicates.size() != expected.size() || duplicates.any { !expected.contains(it.name) }) {
+                throw new GradleException("Unexpected duplicate/mispackaged M13 contraption mixin classes: ${duplicates*.name}")
+            }
+        } finally {
+            jarFile.close()
+        }
+
+        String pluginText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/AbstractSableMixinPlugin.java').getText('UTF-8')
+        if (!pluginText.contains('mixinClassName.startsWith("dev.ryanhcode.sable.mixin.compatibility.")')
+                || !pluginText.contains('final String modId = parts[3].equals("mixin") ? parts[5] : parts[6]')) {
+            throw new GradleException('M13 packaged mixin is not covered by the existing optional compatibility Create gating')
+        }
+
+        logger.lifecycle("verifyM13PackagedContraptionMixinBoundary PASS: ${jar.name} contains the M13 contraption adapter and matching Create-gated config entry")
     }
 }
 

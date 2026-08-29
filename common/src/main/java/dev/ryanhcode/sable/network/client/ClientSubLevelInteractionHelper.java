@@ -1,16 +1,13 @@
 package dev.ryanhcode.sable.network.client;
 
 import dev.ryanhcode.sable.Sable;
-import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.mixin.punching.ItemInvoker;
+import dev.ryanhcode.sable.network.client.ClientSubLevelTargetHelper.Target;
 import dev.ryanhcode.sable.network.packets.tcp.ServerboundUseItemOnSubLevelPacket;
 import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
-import dev.ryanhcode.sable.sublevel.ClientSubLevel;
-import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
@@ -20,12 +17,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.Event;
 import org.jetbrains.annotations.Nullable;
-import org.joml.Vector3d;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -41,8 +36,7 @@ public final class ClientSubLevelInteractionHelper {
                                                                     final Level level,
                                                                     final InteractionHand hand,
                                                                     @Nullable final HitResult currentHit) {
-        if (currentHit instanceof final BlockHitResult blockHitResult
-                && isSubLevelHit(level, blockHitResult)) {
+        if (ClientSubLevelTargetHelper.resolveFromHit(level, currentHit) != null) {
             return null;
         }
 
@@ -53,7 +47,7 @@ public final class ClientSubLevelInteractionHelper {
         final BlockHitResult povHitResult = ItemInvoker.sable$getPlayerPOVHitResult(level, player, ClipContext.Fluid.NONE);
         final InteractionResult result = sendIfSubLevelHit(player, level, hand, povHitResult, currentHit, "sable");
         if (result == null) {
-            logClientAttempt(player, hand, currentHit, false, null, null, null, null, null, "vanilla", InteractionResult.PASS);
+            logClientAttempt(player, hand, currentHit, false, null, "vanilla", InteractionResult.PASS);
         }
         return result;
     }
@@ -65,12 +59,12 @@ public final class ClientSubLevelInteractionHelper {
         if (!minecraft.options.keyUse.isDown()) {
             return;
         }
-        if (currentHit instanceof final BlockHitResult blockHitResult && isSubLevelHit(level, blockHitResult)) {
+        if (ClientSubLevelTargetHelper.resolveFromHit(level, currentHit) != null) {
             return;
         }
 
         final BlockHitResult povHitResult = ItemInvoker.sable$getPlayerPOVHitResult(level, player, ClipContext.Fluid.NONE);
-        if (isSubLevelHit(level, povHitResult)) {
+        if (ClientSubLevelTargetHelper.resolveFromHit(level, povHitResult) != null) {
             minecraft.hitResult = povHitResult;
         }
     }
@@ -88,43 +82,28 @@ public final class ClientSubLevelInteractionHelper {
                                                                  final BlockHitResult hitResult,
                                                                  @Nullable final HitResult vanillaHit,
                                                                  final String packetPath) {
-        if (hitResult.getType() != HitResult.Type.BLOCK) {
-            return null;
-        }
-        final SubLevel subLevel = Sable.HELPER.getContaining(level, hitResult.getBlockPos());
-        if (!(subLevel instanceof final ClientSubLevel clientSubLevel)) {
+        final Target target = ClientSubLevelTargetHelper.resolveFromHit(level, hitResult);
+        if (target == null) {
             return null;
         }
 
         final Minecraft minecraft = Minecraft.getInstance();
         minecraft.hitResult = hitResult;
 
-        final BlockPos center = clientSubLevel.getPlot().getCenterBlock();
-        final BlockPos localBlockPos = hitResult.getBlockPos().subtract(center);
-        final Vector3d localHit = JOMLConversion.toJOML(hitResult.getLocation())
-                .sub(center.getX(), center.getY(), center.getZ());
-        final Direction localFace = hitResult.getDirection();
         final ClientValueSettingsDiagnostics valueDiagnostics = inspectCreateValueSettings(level, hitResult);
         final InteractionResult result = runClientUsePath(player, level, hand, hitResult);
 
         SableTCPPackets.sendToServer(new ServerboundUseItemOnSubLevelPacket(
-                clientSubLevel.getUniqueId(),
-                localBlockPos.immutable(),
-                localHit,
-                localFace,
+                target.subLevel().getUniqueId(),
+                target.localBlockPos(),
+                target.localHit(),
+                target.localFace(),
                 hand));
 
-        final Vec3 visibleWorldHit = clientSubLevel.renderPose().transformPosition(hitResult.getLocation());
-        logClientAttempt(player, hand, vanillaHit, true, clientSubLevel, localBlockPos, localHit, localFace,
-                visibleWorldHit, packetPath, result);
-        logWrenchClient(player, hand, localBlockPos, result);
-        logMotorClient(player, localBlockPos, valueDiagnostics);
+        logClientAttempt(player, hand, vanillaHit, true, target, packetPath, result);
+        logWrenchClient(player, hand, target.localBlockPos(), result);
+        logMotorClient(player, target.localBlockPos(), valueDiagnostics);
         return result;
-    }
-
-    private static boolean isSubLevelHit(final Level level, final BlockHitResult hitResult) {
-        return hitResult.getType() == HitResult.Type.BLOCK
-                && Sable.HELPER.getContaining(level, hitResult.getBlockPos()) instanceof ClientSubLevel;
     }
 
     private static InteractionResult runClientUsePath(final LocalPlayer player,
@@ -182,22 +161,18 @@ public final class ClientSubLevelInteractionHelper {
                                          final InteractionHand hand,
                                          @Nullable final HitResult vanillaHit,
                                          final boolean sableHit,
-                                         @Nullable final ClientSubLevel subLevel,
-                                         @Nullable final BlockPos localBlockPos,
-                                         @Nullable final Vector3d localHit,
-                                         @Nullable final Direction localFace,
-                                         @Nullable final Vec3 visibleWorldHit,
+                                         @Nullable final Target target,
                                          final String packetPath,
                                          final InteractionResult result) {
         final Minecraft minecraft = Minecraft.getInstance();
         Sable.LOGGER.info("SABLE_M11_INTERACT_CLIENT vanillaHitType={} sableHit={} sublevel={} worldHit={} localBlockPos={} localHit={} localFace={} packetPath={} item={} hand={} result={}",
                 vanillaHit == null ? (minecraft.hitResult == null ? "null" : minecraft.hitResult.getType()) : vanillaHit.getType(),
                 sableHit,
-                subLevel == null ? "none" : subLevel.getUniqueId(),
-                visibleWorldHit == null ? "none" : visibleWorldHit,
-                localBlockPos == null ? "none" : localBlockPos,
-                localHit == null ? "none" : localHit,
-                localFace,
+                target == null ? "none" : target.subLevel().getUniqueId(),
+                target == null ? "none" : target.visibleWorldHit(),
+                target == null ? "none" : target.localBlockPos(),
+                target == null ? "none" : target.localHit(),
+                target == null ? null : target.localFace(),
                 packetPath,
                 player.getItemInHand(hand).getItem(),
                 hand,

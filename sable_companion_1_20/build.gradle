@@ -2,7 +2,27 @@ import java.util.jar.JarFile
 
 plugins {
     id 'java-library'
-    id 'net.minecraftforge.gradle'
+}
+
+def sableCheapTaskInvocation = gradle.startParameter.taskNames.any { taskName ->
+    taskName == 'spotlessApply'
+            || taskName.endsWith(':spotlessApply')
+            || taskName == 'verifyCheapTasksDoNotResolveCompileClasspath'
+            || taskName.endsWith(':verifyCheapTasksDoNotResolveCompileClasspath')
+}
+
+if (sableCheapTaskInvocation) {
+    // A source-only invocation must never cause the plain Companion project to resolve
+    // ForgeGradle's generated Minecraft compile configurations.
+    configurations.configureEach { configuration ->
+        if (configuration.name in ['_compileJava_1', 'compileClasspath', 'minecraft']) {
+            configuration.incoming.beforeResolve {
+                throw new GradleException(
+                        "Cheap task resolved ${project.path}:${configuration.name} during project configuration"
+                )
+            }
+        }
+    }
 }
 
 group = 'dev.ryanhcode.sable-companion'
@@ -17,21 +37,21 @@ java {
     withSourcesJar()
 }
 
-minecraft {
-    mappings channel: 'official', version: forge_minecraft_version
-}
-
 repositories {
     mavenCentral()
-    maven { url = 'https://maven.minecraftforge.net' }
-}
-
-dependencies {
-    minecraft "net.minecraftforge:forge:${forge_minecraft_version}-${forge_version}"
 }
 
 tasks.withType(JavaCompile).configureEach {
     options.release = forge_java_version as int
+}
+
+tasks.named('compileJava') {
+    // The Forge project owns the mapped Minecraft dependency. Attach it only when
+    // Companion javac actually runs; project evaluation and source-only tasks stay
+    // independent of the userdev resolution graph.
+    doFirst {
+        classpath = project(':forge').configurations.minecraft
+    }
 }
 
 jar {

@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.mixin.m11.interaction;
 
 import dev.ryanhcode.sable.network.client.ClientSubLevelInteractionHelper;
+import dev.ryanhcode.sable.network.client.ClientSubLevelTargetHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -61,6 +62,7 @@ public abstract class MinecraftMixin {
         if (this.player == null || this.level == null) {
             return;
         }
+        ClientSubLevelTargetHelper.refreshMinecraftHitResult(this.player, this.level, this.hitResult);
         ClientSubLevelInteractionHelper.refreshHeldUseTarget(this.player, this.level, this.hitResult);
     }
 }

@@ -42,6 +42,7 @@ public class SableCommand {
         M10TestCommands.register(sableBuilder, buildContext);
         M11TestCommands.register(sableBuilder, buildContext);
         M12TestCommands.register(sableBuilder, buildContext);
+        M13TestCommands.register(sableBuilder, buildContext);
         SableSubLevelCommands.register(sableBuilder, buildContext);
         SableAssembleCommands.register(sableBuilder, buildContext);
         SableStorageCommands.register(sableBuilder, buildContext);

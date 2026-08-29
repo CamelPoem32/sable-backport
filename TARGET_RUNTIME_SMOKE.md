@@ -2109,3 +2109,121 @@ spam, and acceptable manual render/collision behavior. Only if medium works:
 Expected: about 900 blocks with the same server invariants. M12 does not
 measure FPS automatically; stutter, missing rendered chunks, duplicate
 rendering, or Embeddium/Oculus regressions are manual observations.
+
+## M13 Runtime Smoke: Create Mechanical Bearing Contraption Baseline
+
+Do not continue past the first meaningful crash or coordinate leak. M13.1 is
+only the first Mechanical Bearing contraption boundary; trains, pistons,
+gantries, elevators, and full Flywheel moving-frame integration are out of
+scope.
+
+### Phase 1: Deterministic Bearing Fixture And Static Targeting
+
+```text
+/sable m13 spawn_bearing m13_bearing
+/sable m13 inspect @l
+/sable m13 validate @l
+```
+
+Expected fixture:
+
+```text
+create:creative_motor[facing=east] at local (-2,0,0)
+create:shaft[axis=x] at local (-1,0,0)
+create:mechanical_bearing[facing=east] at local (0,0,0)
+create:radial_chassis[axis=x,sticky_north=true] at local (1,0,0)
+stone off-axis marker at local (1,1,0)
+stone support under x=-2..0 at y=-1,z=0
+```
+
+Expected validation before activation: `UNASSEMBLED_VALID` or
+`ASSEMBLED_VALID`, depending on whether Create assembled after the first server
+ticks. `UNASSEMBLED_VALID` is not a failure.
+
+Before assembly, manually verify the visible static Sable blocks behave like
+ordinary world blocks:
+
+```text
+look at stone, shaft, bearing, chassis, and marker
+break and replace the off-axis marker block
+place an ordinary block on the fixture, then remove it
+use Create wrench/value interactions where applicable
+/sable m13 inspect @e[name=m13_bearing,limit=1]
+/sable m13 validate @e[name=m13_bearing,limit=1]
+```
+
+Expected: passive top-screen/Jade-style identification names the visible
+Sable block, breaking and placement are server-authoritative, edits resync
+render/collision, and validation still reports server domains without claiming
+client rendering/editing PASS.
+
+### Phase 2: Activate Through Normal Create Interaction
+
+Use normal Create interaction only. Empty the main hand or hold an item that
+lets the bearing receive a normal empty-hand activation, then right-click the
+visible Sable mechanical bearing.
+
+```text
+/sable m13 inspect @e[name=m13_bearing,limit=1]
+/sable m13 validate @e[name=m13_bearing,limit=1]
+```
+
+Expected after assembly: `ASSEMBLED_VALID`, captured block count at least 2,
+the radial chassis plus off-axis marker removed from static Sable storage, a
+real Create contraption entity reported, and no visible teleport to hidden plot
+coordinates. The `SABLE_M13_BEARING` line should show nonzero/changing bearing
+and entity angle fields while the bearing is running.
+
+Manual observations:
+
+```text
+radial chassis and marker disappear from the static Sable body
+a Create contraption appears visibly at the bearing face
+the off-axis marker rotates according to Create
+the contraption is visually attached to the Sable bearing
+hover/edit behavior matches normal Create assembled-contraption semantics
+the game does not crash
+```
+
+### Phase 3: Parent Sable Motion Composition
+
+Only after phases 1-2 pass, lightly move the containing Sable body while the
+Create contraption is assembled:
+
+```text
+/sable m10 set_velocity @e[name=m13_bearing,limit=1] 0 1 0 0 10 0
+/sable m10 stop @e[name=m13_bearing,limit=1]
+```
+
+Expected: the parent Sable rigid transform composes with the Create bearing
+rotation. The assembled contraption should not lag, double-transform, vanish,
+or teleport to hidden plot coordinates.
+
+### Phase 4: Disassemble
+
+Right-click the bearing again through normal Create interaction, then:
+
+```text
+/sable m13 inspect @e[name=m13_bearing,limit=1]
+/sable m13 validate @e[name=m13_bearing,limit=1]
+```
+
+Expected: `UNASSEMBLED_VALID`, no active moved contraption, and the radial
+chassis plus marker restored visibly in Sable storage.
+
+### Phase 5: Edit Static Structure And Reassemble
+
+After disassembly, repeat the static edit checks on the restored attachment:
+
+```text
+break or replace the off-axis marker
+place one additional ordinary marker block on the radial chassis
+/sable m13 inspect @e[name=m13_bearing,limit=1]
+/sable m13 validate @e[name=m13_bearing,limit=1]
+```
+
+Then reassemble through the normal bearing interaction.
+
+Expected: Create captures the edited attachment according to normal Create
+rules, the edited shape is visible as a rotating contraption, and no duplicate
+static/moved blocks remain.

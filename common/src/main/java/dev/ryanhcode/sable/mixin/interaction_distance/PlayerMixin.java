@@ -5,30 +5,54 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /** Extends Forge's 1.20 reach checks into Sable sub-level coordinates. */
 @Mixin(ServerGamePacketListenerImpl.class)
 public class PlayerMixin {
-    @WrapOperation(method = "handleUseItemOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;canReach(Lnet/minecraft/core/BlockPos;D)Z", remap = false))
+    @Shadow
+    public ServerPlayer player;
+
+    @WrapOperation(method = "handleUseItemOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;canReach(Lnet/minecraft/core/BlockPos;D)Z"))
     private boolean sable$canReachBlock(final ServerPlayer player, final BlockPos pos, final double slop,
                                         final Operation<Boolean> original) {
         return original.call(player, pos, slop) || sable$canReachBlockInSubLevel(player, pos, slop);
     }
 
-    @WrapOperation(method = "handleUseItemOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;canReachRaw(Lnet/minecraft/core/BlockPos;D)Z", remap = false))
+    @Inject(method = "handlePlayerAction", at = @At("HEAD"))
+    private void sable$logSubLevelPlayerAction(final ServerboundPlayerActionPacket packet, final CallbackInfo ci) {
+        final SubLevel subLevel = Sable.HELPER.getContaining(this.player.level(), packet.getPos());
+        if (subLevel == null) {
+            return;
+        }
+        final BlockState state = this.player.level().getBlockState(packet.getPos());
+        Sable.LOGGER.info("SABLE_M13_EDIT action=break phase=packet sublevel={} localPos={} state={} "
+                        + "serverResolved=true result=pending_vanilla_destroy actionType={} face={}",
+                subLevel.getUniqueId(),
+                packet.getPos().subtract(subLevel.getPlot().getCenterBlock()),
+                state,
+                packet.getAction(),
+                packet.getDirection());
+    }
+
+    @WrapOperation(method = "handleUseItemOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;canReachRaw(Lnet/minecraft/core/BlockPos;D)Z"))
     private boolean sable$canReachBlockRaw(final ServerPlayer player, final BlockPos pos, final double slop,
                                            final Operation<Boolean> original) {
         return original.call(player, pos, slop) || sable$canReachBlockInSubLevel(player, pos, slop);
     }
 
-    @WrapOperation(method = "handleInteract", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;canReachRaw(Lnet/minecraft/world/entity/Entity;D)Z", remap = false))
+    @WrapOperation(method = "handleInteract", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;canReachRaw(Lnet/minecraft/world/entity/Entity;D)Z"))
     private boolean sable$canReachEntity(final ServerPlayer player, final Entity entity, final double slop,
                                          final Operation<Boolean> original) {
         if (original.call(player, entity, slop)) {
