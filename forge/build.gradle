@@ -4998,6 +4998,10 @@ tasks.named('build') {
     dependsOn tasks.named('verifyM17SpecializedKineticRenderAuditBoundary')
     dependsOn tasks.named('verifyM17SpecializedKineticRenderImplementationBoundary')
     dependsOn tasks.named('verifyM17SplitShaftLayerAndControlBoundary')
+    dependsOn tasks.named('verifyM18DeployerWorldInteractionBoundary')
+    dependsOn tasks.named('verifyM18CommandHarnessBoundary')
+    dependsOn tasks.named('verifyM18RegressionBoundary')
+    dependsOn tasks.named('verifyM18DeployerCrashAndRenderingBoundary')
 }
 
 tasks.named('checkstyleMain') {
@@ -12578,6 +12582,474 @@ tasks.register('verifyM17SplitShaftLayerAndControlBoundary') {
         }
 
         logger.lifecycle('verifyM17SplitShaftLayerAndControlBoundary PASS: cutout-mipped Sable static rendering, redstone-driven SplitShaft controls, startup-safe M17 mixins, and hidden-coordinate invariant are guarded')
+    }
+}
+
+tasks.register('verifyM18DeployerWorldInteractionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the narrow M18 moving Deployer Sable target-selection boundary.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/deployer/DeployerMovementBehaviourMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/SubLevelDeployerInteractionUtility.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M18 Deployer verification: ${targetCreateJar}")
+        }
+
+        String mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/deployer/DeployerMovementBehaviourMixin.java').getText('UTF-8')
+        String utility = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/SubLevelDeployerInteractionUtility.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.deployer.DeployerMovementBehaviour", remap = false)',
+                '@WrapMethod(method = "visitNewPosition")',
+                'Sable.HELPER.getContaining(context.world, context.contraption.anchor)',
+                'original.call(context, pos)',
+                'SubLevelDeployerInteractionUtility.findInteractionPos',
+                'original.call(context, selectedPos)',
+                'sable$isUseMode'
+        ].each { canary ->
+            if (!mixin.contains(canary)) {
+                throw new GradleException("M18 Deployer movement mixin lost required canary: ${canary}")
+            }
+        }
+        [
+                '"compatibility.create.deployer.DeployerMovementBehaviourMixin"',
+                '"compatibility.create.behaviour_compatibility.block_breaking_behaviour.BlockBreakingMovementBehaviourMixin"'
+        ].each { canary ->
+            if (!config.contains(canary)) {
+                throw new GradleException("M18 mixin config missing required Create compatibility entry: ${canary}")
+            }
+        }
+        [
+                'SubLevelDeployerInteractionUtility',
+                'M18 coordinate contract',
+                'findInteractionPos',
+                'actorStorageCenter',
+                'actorSubLevelLocalCenter',
+                'ownerStorageInteractionBox',
+                'visibleInteractionCenter',
+                'candidate_selected',
+                'candidate_fallback_original',
+                'validInteractionTarget',
+                'safeBlockState',
+                'level.hasChunkAt(pos)',
+                'wouldGenerateChunk=false',
+                'Sable.HELPER.getAllIntersecting',
+                'selectedFixtureLocal'
+        ].each { canary ->
+            if (!utility.contains(canary)) {
+                throw new GradleException("M18 Deployer target utility lost required canary: ${canary}")
+            }
+        }
+        [
+                'setBlock(',
+                'destroyBlock(',
+                'DeployerHandler.activate',
+                'ItemStack.useOn',
+                'tryHarvestBlock',
+                '@Overwrite',
+                'getPlot().getCenterBlock().offset(mutableLocal)',
+                'Harvester',
+                'Saw',
+                'DeployerBlockEntityMixin'
+        ].each { forbidden ->
+            if ((mixin + utility).contains(forbidden)) {
+                throw new GradleException("M18 production compatibility must not perform or broaden the tested interaction directly: ${forbidden}")
+            }
+        }
+
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            [
+                    'com/simibubi/create/content/kinetics/deployer/DeployerMovementBehaviour.class',
+                    'com/simibubi/create/content/kinetics/deployer/DeployerHandler.class',
+                    'com/simibubi/create/content/kinetics/deployer/DeployerFakePlayer.class',
+                    'com/simibubi/create/content/kinetics/deployer/DeployerBlockEntity.class'
+            ].each { entryName ->
+                if (jar.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 M18 Deployer class missing: ${entryName}")
+                }
+            }
+            String behaviour = new String(jar.getInputStream(jar.getJarEntry('com/simibubi/create/content/kinetics/deployer/DeployerMovementBehaviour.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            [
+                    'visitNewPosition',
+                    'getPlayer',
+                    'getMode',
+                    'shouldActivate',
+                    'activate',
+                    'blockBreakingProgress',
+                    'disableBlockEntityRendering'
+            ].each { canary ->
+                if (!behaviour.contains(canary)) {
+                    throw new GradleException("Create 6.0.8 DeployerMovementBehaviour lost M18 call-path canary: ${canary}")
+                }
+            }
+            String handler = new String(jar.getInputStream(jar.getJarEntry('com/simibubi/create/content/kinetics/deployer/DeployerHandler.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            [
+                    'activate',
+                    'UseOnContext',
+                    'tryHarvestBlock'
+            ].each { canary ->
+                if (!handler.contains(canary)) {
+                    throw new GradleException("Create 6.0.8 DeployerHandler lost fake-player semantics canary: ${canary}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        logger.lifecycle('verifyM18DeployerWorldInteractionBoundary PASS: moving Deployer target adaptation is Sable-only and leaves Create fake-player semantics authoritative')
+    }
+}
+
+tasks.register('verifyM18CommandHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the complete M18 command tree, fixture-local target truth, and read-only command boundaries.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M18TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('BACKPORT_STATUS.md'))
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M18TestCommands.java').getText('UTF-8')
+        String rootCommand = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+
+        if (!rootCommand.contains('M18TestCommands.register(sableBuilder, buildContext)')) {
+            throw new GradleException('SableCommand must register the M18 harness')
+        }
+        [
+                'spawn_deployer',
+                'validate',
+                'dump_layout',
+                'inspect',
+                'prepare_use',
+                'prepare_punch',
+                'extend',
+                'retract',
+                'snapshot',
+                'targets',
+                'inventory',
+                'test_translate_parent',
+                'test_rotate_parent',
+                'prepare_airborne',
+                'airborne_acceptance',
+                'save_reload_check',
+                'acceptance'
+        ].each { command ->
+            if (!commands.contains('"' + command + '"')) {
+                throw new GradleException("M18 command tree missing command: ${command}")
+            }
+        }
+        [
+                'STICKY_MECHANICAL_PISTON_ID',
+                'DEPLOYER_ID',
+                'USE_SUPPORT_LOCAL = new BlockPos(6, 0, 0)',
+                'USE_TARGET_LOCAL = new BlockPos(6, 1, 0)',
+                'PUNCH_TARGET_LOCAL = new BlockPos(7, 1, 0)',
+                'fixture-local coordinates are the test truth',
+                'visitSequence',
+                'expectedUseClicked',
+                'expectedUseResult',
+                'expectedPunchAttack',
+                'addChangeIfDifferent',
+                'performsTestedInteraction=false',
+                'inventoryListForSelectedMainHand',
+                'deferredInventoryList',
+                'blockEntityInventory',
+                'fakePlayerMainHand',
+                'Items.IRON_PICKAXE',
+                'use_support_blocks_punch_target_path',
+                'useComplete',
+                'useHeldCountConsumed',
+                'punchComplete',
+                'punchProgressOrCompletion',
+                'Create_ScrollValueBehaviour_setValue_no_manual_deployer_interaction',
+                'APPLIED_M10_PHYSICS_VELOCITY',
+                'USER_OBSERVED_RUNTIME_REQUIRED'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M18 harness lost required canary: ${canary}")
+            }
+        }
+        [
+                'AllBlocks',
+                'AllItems',
+                'AllBlockEntityTypes',
+                'private static final BlockState',
+                'private static final Block '
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M18 command harness must remain startup-lazy: ${forbidden}")
+            }
+        }
+        if (commands.contains('import com.simibubi.create.')
+                || commands.contains('static final com.simibubi.create.')
+                || commands.contains('static com.simibubi.create.')) {
+            throw new GradleException('M18 command harness must not eagerly import or statically resolve Create classes')
+        }
+        if (!commands.contains('Class.forName("com.simibubi.create.content.kinetics.deployer.DeployerBlockEntity$Mode")')) {
+            throw new GradleException('M18 command harness should resolve the Create Deployer mode enum lazily at command execution time')
+        }
+        if (commands.contains('blocks.put(USE_TARGET_LOCAL, Blocks.AIR.defaultBlockState())')) {
+            throw new GradleException('M18 spawn must not write an already-air USE target into a fresh plot chunk')
+        }
+        if (commands.contains('destroyBlock(')
+                || commands.contains('setBlock(toPlot(subLevel, USE_TARGET_LOCAL)')
+                || commands.contains('setBlock(toPlot(subLevel, PUNCH_TARGET_LOCAL)')) {
+            throw new GradleException('M18 harness must not fake tested USE/PUNCH interactions with direct block mutation')
+        }
+        [
+                'MOTOR_LOCAL = new BlockPos(0, -2, 0)',
+                'SHAFT_LOCAL = new BlockPos(0, -1, 0)',
+                'PAYLOAD_CHASSIS_RETRACTED = new BlockPos(1, 0, 0)',
+                'DEPLOYER_RETRACTED = new BlockPos(1, 1, 0)',
+                'USE_SUPPORT_LOCAL = new BlockPos(6, 0, 0)',
+                'USE_TARGET_LOCAL = new BlockPos(6, 1, 0)',
+                'PUNCH_TARGET_LOCAL = new BlockPos(7, 1, 0)'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M18 canonical fixture coordinate changed or disappeared: ${canary}")
+            }
+        }
+        if (commands.contains('GUARD_TARGET_LOCAL')
+                || commands.contains('blocks.put(GUARD_TARGET_LOCAL')
+                || commands.contains('line of three stones')) {
+            throw new GradleException('M18.3 harness must remain a minimal one-target USE/PUNCH canary, not the old three-target lane')
+        }
+        ['validate', 'dumpLayout', 'inspect', 'snapshot', 'targets', 'inventory', 'saveReloadCheck', 'acceptance'].each { method ->
+            int start = commands.indexOf('private static int ' + method)
+            if (start < 0) {
+                throw new GradleException("M18 read-only command missing: ${method}")
+            }
+            int next = commands.indexOf('\n    private static int ', start + 1)
+            if (next < 0) {
+                next = commands.indexOf('\n    private static ', start + 1)
+            }
+            String body = commands.substring(start, next < 0 ? commands.length() : next)
+            ['setLocalBlock(', 'finalizeBlockChanges(', 'setFixtureMotorSpeed(', 'setLinearAndAngularVelocity(', 'teleport('].each { forbidden ->
+                if (body.contains(forbidden)) {
+                    throw new GradleException("M18 read-only command ${method} must not mutate state via ${forbidden}")
+                }
+            }
+        }
+        if (!status.contains('M17 Runtime Acceptance Closed')
+                || !status.contains('M18 Deployer World Interaction Implementation')) {
+            throw new GradleException('BACKPORT_STATUS.md must close M17 and record M18 implementation status')
+        }
+        if (!smoke.contains('M18 Deployer World Interaction Harness')
+                || !smoke.contains('/sable m18 spawn_deployer m18_deployer')
+                || !smoke.contains('/sable m18 prepare_use @e[name=m18_deployer,limit=1]')
+                || !smoke.contains('/sable m18 prepare_punch @e[name=m18_deployer,limit=1]')) {
+            throw new GradleException('TARGET_RUNTIME_SMOKE.md must include the M18 one-session runtime sequence')
+        }
+
+        logger.lifecycle('verifyM18CommandHarnessBoundary PASS: complete M18 command tree, fixture-local targets, setup-only prepares, and read-only inspectors are guarded')
+    }
+}
+
+tasks.register('verifyM18RegressionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M18 does not broaden closed milestones or rendering/collision boundaries.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M18TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/deployer/DeployerMovementBehaviourMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/SubLevelDeployerInteractionUtility.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerMovementBehaviourRenderMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SubLevelBlockBreakingUtility.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        String allM18 = (rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M18TestCommands.java').getText('UTF-8')
+                + rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/deployer/DeployerMovementBehaviourMixin.java').getText('UTF-8')
+                + rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/SubLevelDeployerInteractionUtility.java').getText('UTF-8')
+                + rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerRendererMixin.java').getText('UTF-8')
+                + rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerMovementBehaviourRenderMixin.java').getText('UTF-8'))
+        String renderBridge = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+        String blockBreaking = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SubLevelBlockBreakingUtility.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'Harvester',
+                'TreeCutter',
+                'SawMovementBehaviour',
+                'DeployerBlockEntityMixin',
+                'Belt',
+                'Train',
+                'FanProcessing',
+                'Rapier',
+                'Jade'
+        ].each { forbidden ->
+            if (allM18.contains(forbidden)) {
+                throw new GradleException("M18 must not broaden beyond moving Deployer use/punch scope: ${forbidden}")
+            }
+        }
+        [
+                'hiddenPlotPoseTranslation=false',
+                'visiblePosition.x - cameraPosition.x'
+        ].each { canary ->
+            if (!renderBridge.contains(canary) && !allM18.contains(canary)) {
+                throw new GradleException("M18 must preserve visible-space render invariant: ${canary}")
+            }
+        }
+        if (!blockBreaking.contains('M16 coordinate contract')) {
+            throw new GradleException('M18 must preserve the closed M16 block-breaking utility boundary')
+        }
+        ['GearboxRendererMixin', 'SplitShaftRendererMixin', 'GantryContraptionUpdatePacketMixin', 'BlockBreakingMovementBehaviourMixin', 'DeployerRendererMixin', 'DeployerMovementBehaviourRenderMixin'].each { canary ->
+            if (!config.contains(canary)) {
+                throw new GradleException("M18 regression guard lost closed milestone mixin entry: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifyM18RegressionBoundary PASS: M18 stays Deployer-only and preserves M13-M17 render/collision/block-breaking boundaries')
+    }
+}
+
+tasks.register('verifyM18DeployerCrashAndRenderingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M18.1 Deployer coordinate crash fix and Sable-only Deployer arm renderer fallback.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/SubLevelDeployerInteractionUtility.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerMovementBehaviourRenderMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(rootProject.file('BACKPORT_STATUS.md'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M18.1 Deployer rendering verification: ${targetCreateJar}")
+        }
+
+        String utility = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/SubLevelDeployerInteractionUtility.java').getText('UTF-8')
+        String rendererMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerRendererMixin.java').getText('UTF-8')
+        String actorMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerMovementBehaviourRenderMixin.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+
+        [
+                'actorStorageCenter',
+                'actorSubLevelLocalCenter',
+                'interactionStorageCenter',
+                'ownerStorageInteractionBox',
+                'visibleCenter(storage, raw)',
+                'level.hasChunkAt(pos)',
+                'safeBlockState',
+                'wouldGenerateChunk=false'
+        ].each { canary ->
+            if (!utility.contains(canary)) {
+                throw new GradleException("M18.1 coordinate crash utility lost canary: ${canary}")
+            }
+        }
+        [
+                'getPlot().getCenterBlock().offset(mutable',
+                'level.getBlockState(raw);',
+                'level.getBlockState(proposed);'
+        ].each { forbidden ->
+            if (utility.contains(forbidden)) {
+                throw new GradleException("M18.1 must not reintroduce double-offset or generating block-state probes: ${forbidden}")
+            }
+        }
+
+        [
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.deployer.DeployerRenderer", remap = false)',
+                'method = "renderSafe(Lcom/simibubi/create/content/kinetics/deployer/DeployerBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V"',
+                'VisualizationManager;supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
+                'Sable.HELPER.getContainingClient(blockEntity) != null',
+                'sableSubLevel ? false : originalVisualizationSupported',
+                'SABLE_M18_DEPLOYER_RENDER',
+                'Create_DeployerRenderer_renderComponents',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!rendererMixin.contains(canary)) {
+                throw new GradleException("M18.1 static Deployer renderer mixin lost canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.deployer.DeployerMovementBehaviour", remap = false)',
+                'method = "renderInContraption(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lcom/simibubi/create/foundation/virtualWorld/VirtualRenderWorld;Lcom/simibubi/create/content/contraptions/render/ContraptionMatrices;Lnet/minecraft/client/renderer/MultiBufferSource;)V"',
+                'VisualizationManager;supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
+                'SableCreateContraptionContext.getContainingSubLevel(entity)',
+                'sableContraption ? false : originalVisualizationSupported',
+                'Create_DeployerRenderer_renderInContraption',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!actorMixin.contains(canary)) {
+                throw new GradleException("M18.1 moving Deployer actor renderer mixin lost canary: ${canary}")
+            }
+        }
+        [
+                '@Overwrite',
+                'AllPartialModels',
+                'DEPLOYER_POLE',
+                'DEPLOYER_HAND',
+                'renderInto(',
+                'new DeployerVisual',
+                'new DeployerActorVisual',
+                'supportsVisualization = false'
+        ].each { forbidden ->
+            if ((rendererMixin + actorMixin).contains(forbidden)) {
+                throw new GradleException("M18.1 must not fake Deployer arm rendering or globally disable Flywheel: ${forbidden}")
+            }
+        }
+        [
+                '"m18.create.DeployerRendererMixin"',
+                '"m18.create.DeployerMovementBehaviourRenderMixin"'
+        ].each { canary ->
+            if (!config.contains(canary)) {
+                throw new GradleException("M18.1 client mixin config missing: ${canary}")
+            }
+            if (config.indexOf(canary) > config.indexOf('"mixins"')) {
+                throw new GradleException("M18.1 Deployer render mixin must remain client-only: ${canary}")
+            }
+        }
+        if (!status.contains('M18.1 Deployer Crash And Arm Rendering Repair')) {
+            throw new GradleException('BACKPORT_STATUS.md must record the M18.1 crash/rendering repair')
+        }
+
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            Map<String, List<String>> targetCanaries = [
+                    'com/simibubi/create/content/kinetics/deployer/DeployerRenderer.class': [
+                            'renderSafe',
+                            'VisualizationManager',
+                            'supportsVisualization',
+                            'renderComponents',
+                            'DEPLOYER_POLE',
+                            'getHandPose'
+                    ],
+                    'com/simibubi/create/content/kinetics/deployer/DeployerMovementBehaviour.class': [
+                            'renderInContraption',
+                            'VisualizationManager',
+                            'supportsVisualization',
+                            'DeployerRenderer'
+                    ]
+            ]
+            targetCanaries.each { entryName, canaries ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 M18.1 target class missing: ${entryName}")
+                }
+                String classText = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                canaries.each { canary ->
+                    if (!classText.contains(canary)) {
+                        throw new GradleException("Create 6.0.8 ${entryName} lost M18.1 renderer canary: ${canary}")
+                    }
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        logger.lifecycle('verifyM18DeployerCrashAndRenderingBoundary PASS: no double plot offset/generating probes, Sable-only Deployer arm BER/actor fallback, and hidden-coordinate invariant are guarded')
     }
 }
 

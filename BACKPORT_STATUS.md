@@ -1524,3 +1524,110 @@ level accessor. Create's own `neighborChanged`, `detachKinetics`, and scheduled
 kinetic re-add semantics therefore control the split-shaft behavior; the
 harness reports downstream speed and mechanical response instead of treating a
 direct `POWERED` mutation as functional proof.
+
+## M17 Runtime Acceptance Closed
+
+M17 is closed by real runtime acceptance. Gearbox specialized shaft partials
+render correctly, Clutch and Gearshift casing/shaft visuals render correctly,
+real Create clutch disconnect and gearshift reversal semantics work, parent
+Sable transforms compose correctly, and the M17 rendering architecture remains
+on transformed camera-relative BER rendering rather than a Flywheel visual
+bridge. The M17 production compatibility boundary is frozen unless a concrete
+regression appears.
+
+## M18 Deployer World Interaction Implementation
+
+M18 implements the narrow moving Deployer world-interaction boundary for a
+Create contraption contained inside Sable. The production mixin wraps only
+`DeployerMovementBehaviour.visitNewPosition(...)`; ordinary Create contraptions
+call through unchanged, while Sable-contained Deployers receive an adapted
+interaction `BlockPos` selected by `SubLevelDeployerInteractionUtility`.
+
+The utility keeps the coordinate contract explicit: fixture-local and Sable
+logical-local positions are the acceptance truth, hidden plot coordinates are
+storage coordinates only, and the parent visible pose is used only to compare
+geometric candidates across sublevels. The patch does not place or destroy
+blocks directly. Create's own `DeployerFakePlayer`, `DeployerHandler`,
+`shouldActivate`, `ItemStack.useOn`, punch progress, drops, inventory, mode, and
+stall semantics remain authoritative.
+
+The `/sable m18` harness reuses the M14/M16 sticky piston carrier and exposes
+commands for spawning, validating, preparing USE/PUNCH cases, moving the
+carrier, inspecting actor state, checking target identity, checking inventory,
+parent transform tests, save/reload checks, and airborne acceptance. The
+prepare commands reset fixture state and Deployer held state only; the tested
+placement or breaking can occur only during normal Create contraption motion.
+
+M18 harness closeout: the USE target at fixture-local `(6,1,0)` is intentionally
+air at fresh spawn. The harness must not write an already-air block into a
+fresh empty plot chunk because `LevelChunk.setBlockState` reports no-op writes
+with `null`, which Sable's local edit helper treats as an invalid write. Spawn
+therefore omits the air target and setup commands skip no-op block writes while
+preserving the canonical target coordinates.
+
+Deferred client rendering regression: inside Sable, Create placement-assist
+ghost previews are missing when extending shaft/cogwheel chains. Actual
+placement still works, and ordinary-world Create still shows the translucent
+preview. This is recorded for a later client-side Create placement-assist
+rendering milestone and is intentionally not fixed in M18.
+
+## M18.1 Deployer Crash And Arm Rendering Repair
+
+M18.1 fixes two runtime-proven Deployer boundaries without broadening M18.
+
+The server crash during `/sable m18 extend` was caused by a coordinate-space
+error in `SubLevelDeployerInteractionUtility`: the Deployer actor center from
+Create's contraption entity was already in hidden plot/storage coordinates, but
+the candidate scan treated it as Sable-local and added the plot center again.
+That double-applied the hidden plot offset and produced bogus chunk requests
+near twice the real plot coordinates. The utility now keeps separate storage
+and Sable-local centers, scans the owning plot in storage coordinates, uses
+visible-space distances only for cross-sublevel candidate comparison, and
+checks `Level.hasChunkAt(...)` before every candidate block-state probe.
+
+The missing Deployer arm/hand rendering matched the M17 specialized-renderer
+boundary. Create 6.0.8 `DeployerRenderer.renderSafe(...)` returns before
+`renderComponents(...)` when Flywheel visualization is reported supported, and
+`DeployerMovementBehaviour.renderInContraption(...)` similarly skips
+`DeployerRenderer.renderInContraption(...)`. Sable now wraps only those exact
+visualization checks: for Sable-contained static Deployer block entities and
+moving Deployer actors the wrapper returns `false`, so Create's own BER/actor
+renderer emits the pole, hand, held item, animation, and facing transforms.
+Normal-world Create rendering remains unchanged, no fake arm model is drawn,
+and the hidden plot PoseStack invariant remains frozen.
+
+## M18.2 Deployer Harness USE/PUNCH Repair
+
+M18.2 keeps the accepted M18.1 production interaction and rendering paths
+frozen, and repairs only the runtime harness preparation. Exact Create 6.0.8
+bytecode shows moving Deployers restore fake-player `Inventory` from
+`MovementContext.blockEntityData`, restore `HeldItem` from
+`MovementContext.data`, and write the current main-hand stack back through
+`writeExtraData(...)`. The harness now seeds the static Deployer through those
+same persisted channels instead of relying on the visible `heldItem` field
+alone.
+
+`prepare_use` equips a real cobblestone stack, keeps fixture-local `(6,1,0)` as
+air, and provides a support block at `(6,0,0)` so the normal fake-player
+BlockItem path can place into the intended air target. `prepare_punch` equips a
+real iron pickaxe, clears the earlier `(6,1,0)` / `(6,0,0)` USE cells, and
+leaves stone at `(7,1,0)` so the first solid PUNCH target is deterministic.
+Validation remains setup/coherence oriented, while `acceptance` now requires the
+actual server-observable USE placement or PUNCH break result before reporting
+PASS.
+
+## M18.3 Minimal Deployer Canary Harness
+
+M18.3 simplifies the runtime proof rather than adding more compatibility code.
+The previous harness still presented a three-target lane, which made it
+unclear whether the moving Deployer should interact with the USE cell, PUNCH
+cell, or guard cell at each piston offset. Exact Create 6.0.8 bytecode shows
+the moving Deployer active area is always `facing * 2`; with the canonical
+east-facing piston payload, the visited target cells are fixture-local
+`(3,1,0)` through `(7,1,0)`.
+
+The M18 harness now reports that visit sequence directly. USE mode has one
+deterministic clicked/result target at `(6,1,0)` plus an explicit support block
+at `(6,0,0)`. PUNCH mode clears those USE cells and leaves a single stone block
+at `(7,1,0)`, making it the first solid attacked target. No production Deployer
+mixins or coordinate utilities changed in this pass.

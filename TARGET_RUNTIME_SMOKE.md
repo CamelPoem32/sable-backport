@@ -2600,3 +2600,110 @@ After manual Save & Quit and reload:
 Expected: the same fixture state is recovered, normal Create speed/angle
 semantics remain the source of rotation, and visual PASS is still based on
 runtime observation.
+
+## M18 Deployer World Interaction Harness
+
+M18 begins after M17 is closed. This sequence tests moving Deployer fake-player
+USE and PUNCH interactions from the proven sticky-piston carrier. Command PASS
+is based on fixture-local target state; visual PASS remains user-observed.
+
+### Phase A: Fixture
+
+```text
+/sable m18 spawn_deployer m18_deployer
+/sable m18 validate @e[name=m18_deployer,limit=1]
+/sable m18 dump_layout @e[name=m18_deployer,limit=1]
+/sable m18 inspect @e[name=m18_deployer,limit=1]
+/sable m18 targets @e[name=m18_deployer,limit=1]
+/sable m18 inventory @e[name=m18_deployer,limit=1]
+```
+
+Expected: the fixture has a stopped sticky Mechanical Piston carrier, a
+capturable Deployer payload facing east, a USE result target `(6,1,0)`, a USE
+support block `(6,0,0)`, and one PUNCH target `(7,1,0)`.
+
+### Phase B: USE Placement
+
+```text
+/sable m18 prepare_use @e[name=m18_deployer,limit=1]
+/sable m18 extend @e[name=m18_deployer,limit=1]
+```
+
+After the real Deployer activation completes:
+
+```text
+/sable m18 snapshot @e[name=m18_deployer,limit=1]
+/sable m18 targets @e[name=m18_deployer,limit=1]
+/sable m18 inventory @e[name=m18_deployer,limit=1]
+```
+
+Expected: `inspect` reports the Create visit sequence `(3,1,0)` through
+`(7,1,0)`, the clicked/result USE target is `(6,1,0)`, that target changes
+from air to cobblestone through Create's normal fake-player use path, the held
+stack decreases from 4 to 3, and the PUNCH target remains stone. The support
+block at fixture-local `(6,0,0)` exists only to make `(6,1,0)` deterministic.
+
+### Phase C: PUNCH Breaking
+
+```text
+/sable m18 retract @e[name=m18_deployer,limit=1]
+/sable m18 prepare_punch @e[name=m18_deployer,limit=1]
+/sable m18 extend @e[name=m18_deployer,limit=1]
+```
+
+After the real Deployer punch completes:
+
+```text
+/sable m18 snapshot @e[name=m18_deployer,limit=1]
+/sable m18 targets @e[name=m18_deployer,limit=1]
+/sable m18 inspect @e[name=m18_deployer,limit=1]
+```
+
+Expected: `inspect` reports the same Create visit sequence and expected PUNCH
+attack target `(7,1,0)`. The PUNCH target changes from stone to air through
+Create's normal fake-player punch/progress path, `(6,1,0)` remains air, the
+`(6,0,0)` USE support remains air during PUNCH setup, and the payload stays
+owned by the piston contraption/static endpoint as appropriate.
+
+### Phase D: Parent Translation And Rotation
+
+```text
+/sable m18 retract @e[name=m18_deployer,limit=1]
+/sable m18 prepare_use @e[name=m18_deployer,limit=1]
+/sable m18 test_translate_parent @e[name=m18_deployer,limit=1]
+/sable m18 extend @e[name=m18_deployer,limit=1]
+/sable m18 snapshot @e[name=m18_deployer,limit=1]
+/sable m18 targets @e[name=m18_deployer,limit=1]
+/sable m18 retract @e[name=m18_deployer,limit=1]
+/sable m18 prepare_punch @e[name=m18_deployer,limit=1]
+/sable m18 test_rotate_parent @e[name=m18_deployer,limit=1]
+/sable m18 extend @e[name=m18_deployer,limit=1]
+/sable m18 snapshot @e[name=m18_deployer,limit=1]
+/sable m18 targets @e[name=m18_deployer,limit=1]
+```
+
+Expected: parent transform changes visible/world interaction direction, while
+fixture-local target identity remains correct.
+
+### Phase E: Save/Reload And Airborne
+
+```text
+/sable m18 save_reload_check @e[name=m18_deployer,limit=1]
+```
+
+After manual Save & Quit and reload:
+
+```text
+/sable m18 validate @e[name=m18_deployer,limit=1]
+/sable m18 inspect @e[name=m18_deployer,limit=1]
+/sable m18 targets @e[name=m18_deployer,limit=1]
+/sable m18 save_reload_check @e[name=m18_deployer,limit=1]
+/sable m18 prepare_punch @e[name=m18_deployer,limit=1]
+/sable m18 airborne_acceptance @e[name=m18_deployer,limit=1]
+/sable m18 acceptance @e[name=m18_deployer,limit=1]
+```
+
+Expected: the fixture, held item/mode, target states, and interaction
+capability remain coherent across reload. Airborne acceptance uses one-shot
+Sable pose/velocity helpers and normal piston motor control; it does not anchor
+the body or fake the Deployer interaction.
