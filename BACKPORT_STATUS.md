@@ -1460,3 +1460,67 @@ The `/sable m16` runtime harness now provides a sticky mechanical piston drill
 fixture, fixture-local target inspection, parent-transform helpers,
 airborne acceptance setup, and save/reload comparison output for one complete
 future Minecraft session.
+
+## M16 Mechanical Drill Runtime Acceptance Closed
+
+M16 is closed by real runtime acceptance. Moving Mechanical Drill actors render
+correctly, spin while extending, break encountered fixture-local targets,
+survive repeated extend/retract cycles, preserve parent-motion behaviour, and
+survive save/reload. The static powered Drill control case was also tested with
+an actual shaft connection and rotates correctly; the earlier stationary Drill
+fixture was unpowered rather than blocked by a renderer defect.
+
+The M16 production block-breaking compatibility boundary is frozen unless a
+concrete regression appears.
+
+## M17.0 Specialized Kinetic Visual Static Audit
+
+M17 starts with specialized Create kinetic partial-model rendering inside Sable.
+The primary canary is `create:gearbox`, whose casing is visible and whose
+kinetic network mechanically works, while its specialized internal shaft
+partials are missing in Sable.
+
+The static audit is recorded in `M17_STATIC_AUDIT.md`. It identifies Gearbox,
+Encased Shaft, Clutch, and Gearshift render paths in exact Create 6.0.8
+bytecode/resources, compares them with the existing M11 forced-BER strategy,
+and classifies the Gearbox defect as a specialized renderer Flywheel gate
+boundary. No Minecraft runtime was launched and no M17 production rendering
+patch was enabled in this gate.
+
+## M17.1 Specialized Kinetic Visual Implementation
+
+M17.1 enables the narrow specialized kinetic renderer boundary identified by
+the static audit. `GearboxRendererMixin` and `SplitShaftRendererMixin` wrap only
+the exact Create 6.0.8 `VisualizationManager.supportsVisualization(...)` calls
+inside their specialized `renderSafe(...)` methods. For Sable-contained client
+block entities they return `false` so Create's own BER emits the shaft partials
+inside the already transformed Sable render frame; normal-world Create
+continues to delegate to Flywheel unchanged.
+
+The `/sable m17` harness now provides the static kinetic fixture, structural
+validation, layout dumping, kinetic inspection, motor speed control, Clutch and
+Gearshift toggles, parent-motion helpers, save/reload state output, and a
+truthful visual acceptance command that does not claim visual PASS from server
+state alone.
+
+Startup-order correction: the M17 renderer mixins use string `@Mixin(targets =
+...)` declarations for the Create renderer targets. This avoids resolving the
+Create renderer classes while Mixin is parsing the config during mod startup;
+the Sable fallback still applies only at the exact `supportsVisualization(...)`
+call inside the renderer methods.
+
+## M17.2 Split-Shaft Layer And Control Repair
+
+M17.2 keeps the working Gearbox/SplitShaft BER fallback and fixes the two
+remaining shared boundaries for Clutch and Gearshift. Sable now schedules the
+same transformed static block renderer for `RenderType.cutoutMipped()` in
+addition to `RenderType.solid()`, allowing Create 6.0.8 blocks registered with
+`cutoutMipped` layers to emit their baked casing geometry without fake models
+or block-id-specific rendering.
+
+The `/sable m17 toggle_clutch` and `/sable m17 toggle_gearshift` commands now
+place/remove fixture-local redstone source blocks through the embedded plot
+level accessor. Create's own `neighborChanged`, `detachKinetics`, and scheduled
+kinetic re-add semantics therefore control the split-shaft behavior; the
+harness reports downstream speed and mechanical response instead of treating a
+direct `POWERED` mutation as functional proof.

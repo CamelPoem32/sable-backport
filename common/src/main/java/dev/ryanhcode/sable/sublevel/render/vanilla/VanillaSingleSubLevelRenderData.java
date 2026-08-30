@@ -63,9 +63,9 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
      */
     private final List<RenderBlock> renderBlocks = new ArrayList<>();
     private final List<BlockEntity> renderBlockEntities = new ArrayList<>();
+    private final Set<RenderType> loggedM10RenderLayers = new HashSet<>();
     private boolean loggedState = false;
     private boolean loggedDraw = false;
-    private boolean loggedM10Render = false;
     private int visibleSectionCount = 0;
 
     /**
@@ -187,8 +187,7 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
             renderedBlocks++;
         }
 
-        if (!this.loggedM10Render && this.renderBlocks.size() > 1 && renderedBlocks > 0) {
-            this.loggedM10Render = true;
+        if (this.renderBlocks.size() > 1 && renderedBlocks > 0 && this.loggedM10RenderLayers.add(layer)) {
             Sable.LOGGER.info("SABLE_M10_RENDER id={} storedBlocks={} renderedBlocks={} layer={}",
                     this.subLevel.getUniqueId(), this.renderBlocks.size(), renderedBlocks, layer);
         }
@@ -253,6 +252,7 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
     public void rebuild() {
         this.renderBlocks.clear();
         this.renderBlockEntities.clear();
+        this.loggedM10RenderLayers.clear();
         this.visibleSectionCount = 0;
 
         final BoundingBox3ic bounds = this.subLevel.getPlot().getBoundingBox();

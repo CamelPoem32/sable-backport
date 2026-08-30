@@ -15,11 +15,14 @@ import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.ModList;
 
+import java.util.List;
 import java.util.SortedSet;
 
 final class SableForgeClientRenderEvents {
 
-    private static final RenderType BASIC_SINGLE_BLOCK_LAYER = RenderType.solid();
+    private static final List<RenderType> BASIC_SINGLE_BLOCK_LAYERS = List.of(
+            RenderType.solid(),
+            RenderType.cutoutMipped());
     private static final Long2ObjectMap<SortedSet<BlockDestructionProgress>> NO_DESTRUCTION_PROGRESS = Long2ObjectMaps.emptyMap();
 
     private SableForgeClientRenderEvents() {
@@ -49,15 +52,17 @@ final class SableForgeClientRenderEvents {
 
         final Vec3 cameraPosition = event.getCamera().getPosition();
         if (renderBasicBlocks) {
-            SubLevelRenderDispatcher.get().renderBasicSingleBlockLayer(
-                    container.getAllSubLevels(),
-                    BASIC_SINGLE_BLOCK_LAYER,
-                    cameraPosition.x,
-                    cameraPosition.y,
-                    cameraPosition.z,
-                    event.getPoseStack().last().pose(),
-                    event.getProjectionMatrix(),
-                    event.getPartialTick());
+            for (final RenderType layer : BASIC_SINGLE_BLOCK_LAYERS) {
+                SubLevelRenderDispatcher.get().renderBasicSingleBlockLayer(
+                        container.getAllSubLevels(),
+                        layer,
+                        cameraPosition.x,
+                        cameraPosition.y,
+                        cameraPosition.z,
+                        event.getPoseStack().last().pose(),
+                        event.getProjectionMatrix(),
+                        event.getPartialTick());
+            }
             return;
         }
 

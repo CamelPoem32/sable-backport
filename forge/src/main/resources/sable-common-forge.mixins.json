@@ -51,6 +51,8 @@
         "m11.interaction.MultiPlayerGameModeMixin",
         "m11.create.ValueSettingsClientMixin",
         "m11.create.ValueSettingsScreenMixin",
+        "m17.create.GearboxRendererMixin",
+        "m17.create.SplitShaftRendererMixin",
         "respawn_point.sleeping.LivingEntityRendererMixin",
         "stop_rain.LevelRenderMixin",
         "sublevel_render.BlockEntityRenderDispatcherMixin",

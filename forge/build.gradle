@@ -4995,6 +4995,9 @@ tasks.named('build') {
     dependsOn tasks.named('verifyM16DrillFixtureDesignBoundary')
     dependsOn tasks.named('verifyM16CreateDrillBytecodeBoundary')
     dependsOn tasks.named('verifyM16DrillDynamicRenderingBoundary')
+    dependsOn tasks.named('verifyM17SpecializedKineticRenderAuditBoundary')
+    dependsOn tasks.named('verifyM17SpecializedKineticRenderImplementationBoundary')
+    dependsOn tasks.named('verifyM17SplitShaftLayerAndControlBoundary')
 }
 
 tasks.named('checkstyleMain') {
@@ -12007,6 +12010,574 @@ tasks.register('verifyM16DrillDynamicRenderingBoundary') {
         }
 
         logger.lifecycle('verifyM16DrillDynamicRenderingBoundary PASS: moving Drill actors use Create vanilla actor rendering for Sable-contained contraptions, static Drill diagnostics preserve Create kinetic speed/angle, and visible-space rendering remains intact')
+    }
+}
+
+tasks.register('verifyM17SpecializedKineticRenderAuditBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M17.0 specialized kinetic visual static audit against exact Create 6.0.8 renderer/resources.'
+
+    inputs.file(rootProject.file('M17_STATIC_AUDIT.md'))
+    inputs.file(rootProject.file('BACKPORT_STATUS.md'))
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/BracketedKineticBlockEntityRendererMixin.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M17 specialized kinetic render audit: ${targetCreateJar}")
+        }
+
+        File auditFile = rootProject.file('M17_STATIC_AUDIT.md')
+        if (!auditFile.isFile()) {
+            throw new GradleException('Missing M17_STATIC_AUDIT.md')
+        }
+
+        String audit = auditFile.getText('UTF-8')
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        String forgeConfig = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String kineticMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java').getText('UTF-8')
+        String bracketedMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/BracketedKineticBlockEntityRendererMixin.java').getText('UTF-8')
+
+        [
+                'M17 Static Audit: Specialized Create Kinetic Visuals',
+                'M17.0_SPECIALIZED_KINETIC_RENDER_AUDIT=PASS_STATIC_AUDIT',
+                'GearboxRenderer.renderSafe',
+                'SplitShaftRenderer.renderSafe',
+                'ShaftRenderer -> KineticBlockEntityRenderer.renderSafe',
+                'VisualizationManager.supportsVisualization',
+                'AllPartialModels.SHAFT_HALF',
+                'GearboxVisual',
+                'SplitShaftVisual',
+                'KineticBlockEntityRendererMixin',
+                'BracketedKineticBlockEntityRendererMixin',
+                'hidden plot coordinates',
+                'spawn_kinetics',
+                'visual_acceptance',
+                'Recommended First Implementation Step'
+        ].each { canary ->
+            if (!audit.contains(canary)) {
+                throw new GradleException("M17 static audit lost required canary: ${canary}")
+            }
+        }
+
+        if (!status.contains('M16 Mechanical Drill Runtime Acceptance Closed')
+                || !status.contains('M17.0 Specialized Kinetic Visual Static Audit')) {
+            throw new GradleException('Backport status must close M16 and introduce the M17.0 specialized kinetic visual audit')
+        }
+        if (!smoke.contains('M17 Specialized Kinetic Visual Harness')
+                || !smoke.contains('/sable m17 spawn_kinetics m17_gearbox')
+                || !smoke.contains('/sable m17 visual_acceptance @e[name=m17_gearbox,limit=1]')) {
+            throw new GradleException('TARGET_RUNTIME_SMOKE.md must include the M17 specialized kinetic visual runtime outline')
+        }
+        if (!kineticMixin.contains('VisualizationManager;supportsVisualization')
+                || !kineticMixin.contains('Sable.HELPER.getContainingClient(blockEntity) != null')
+                || !bracketedMixin.contains('VisualizationManager;supportsVisualization')
+                || !bracketedMixin.contains('Sable.HELPER.getContainingClient(blockEntity) != null')) {
+            throw new GradleException('M17 audit requires the accepted M11 forced-BER strategy to remain documented in source')
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            [
+                    'assets/create/blockstates/gearbox.json',
+                    'assets/create/blockstates/andesite_encased_shaft.json',
+                    'assets/create/blockstates/clutch.json',
+                    'assets/create/blockstates/gearshift.json',
+                    'assets/create/blockstates/shaft.json',
+                    'assets/create/blockstates/creative_motor.json',
+                    'assets/create/models/block/gearbox/block.json',
+                    'assets/create/models/block/encased_shaft/block_andesite.json',
+                    'assets/create/models/block/clutch/block.json',
+                    'assets/create/models/block/clutch/block_powered.json',
+                    'assets/create/models/block/gearshift/block.json',
+                    'assets/create/models/block/gearshift/block_powered.json',
+                    'com/simibubi/create/content/kinetics/gearbox/GearboxBlockEntity.class',
+                    'com/simibubi/create/content/kinetics/gearbox/GearboxRenderer.class',
+                    'com/simibubi/create/content/kinetics/gearbox/GearboxVisual.class',
+                    'com/simibubi/create/content/kinetics/base/ShaftRenderer.class',
+                    'com/simibubi/create/content/kinetics/base/ShaftVisual.class',
+                    'com/simibubi/create/content/kinetics/transmission/SplitShaftRenderer.class',
+                    'com/simibubi/create/content/kinetics/transmission/SplitShaftVisual.class',
+                    'com/simibubi/create/content/kinetics/transmission/ClutchBlockEntity.class',
+                    'com/simibubi/create/content/kinetics/transmission/GearshiftBlockEntity.class'
+            ].each { entryName ->
+                if (jar.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 M17 renderer/resource boundary missing: ${entryName}")
+                }
+            }
+
+            Map<String, List<String>> classCanaries = [
+                    'com/simibubi/create/content/kinetics/gearbox/GearboxRenderer.class': [
+                            'renderSafe',
+                            'VisualizationManager',
+                            'supportsVisualization',
+                            'SHAFT_HALF',
+                            'partialFacing',
+                            'getRotationOffsetForPosition',
+                            'renderInto'
+                    ],
+                    'com/simibubi/create/content/kinetics/gearbox/GearboxVisual.class': [
+                            'SHAFT_HALF',
+                            'RotatingInstance',
+                            'updateSourceFacing',
+                            'getSpeed'
+                    ],
+                    'com/simibubi/create/content/kinetics/base/ShaftRenderer.class': [
+                            'getRenderedBlockState',
+                            'KineticBlockEntityRenderer'
+                    ],
+                    'com/simibubi/create/content/kinetics/base/ShaftVisual.class': [
+                            'ShaftVisual',
+                            'SHAFT'
+                    ],
+                    'com/simibubi/create/content/kinetics/transmission/SplitShaftRenderer.class': [
+                            'renderSafe',
+                            'VisualizationManager',
+                            'supportsVisualization',
+                            'SHAFT_HALF',
+                            'getRotationSpeedModifier',
+                            'Iterate',
+                            'renderInto'
+                    ],
+                    'com/simibubi/create/content/kinetics/transmission/SplitShaftVisual.class': [
+                            'SHAFT_HALF',
+                            'RotatingInstance',
+                            'getRotationSpeedModifier'
+                    ],
+                    'com/simibubi/create/content/kinetics/transmission/ClutchBlockEntity.class': [
+                            'getRotationSpeedModifier'
+                    ],
+                    'com/simibubi/create/content/kinetics/transmission/GearshiftBlockEntity.class': [
+                            'getRotationSpeedModifier'
+                    ]
+            ]
+            classCanaries.each { entryName, canaries ->
+                def entry = jar.getJarEntry(entryName)
+                String classText = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                canaries.each { canary ->
+                    if (!classText.contains(canary)) {
+                        throw new GradleException("Create 6.0.8 ${entryName} lost M17 specialized renderer canary: ${canary}")
+                    }
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        logger.lifecycle('verifyM17SpecializedKineticRenderAuditBoundary PASS: exact Create 6.0.8 Gearbox/SplitShaft specialized renderers, controls, and M11 relationship are recorded')
+    }
+}
+
+tasks.register('verifyM17SpecializedKineticRenderImplementationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M17.1 Sable-only specialized kinetic renderer fallback and command harness.'
+
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m17/create/GearboxRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m17/create/SplitShaftRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M17TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('BACKPORT_STATUS.md'))
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+    inputs.file(rootProject.file('M17_STATIC_AUDIT.md'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/BracketedKineticBlockEntityRendererMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M17.1 specialized kinetic render verification: ${targetCreateJar}")
+        }
+
+        String forgeConfig = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String gearboxMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m17/create/GearboxRendererMixin.java').getText('UTF-8')
+        String splitShaftMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m17/create/SplitShaftRendererMixin.java').getText('UTF-8')
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M17TestCommands.java').getText('UTF-8')
+        String commandRoot = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        String audit = rootProject.file('M17_STATIC_AUDIT.md').getText('UTF-8')
+        String kineticMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java').getText('UTF-8')
+        String bracketedMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/BracketedKineticBlockEntityRendererMixin.java').getText('UTF-8')
+        String renderBridge = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+
+        [
+                '"m17.create.GearboxRendererMixin"',
+                '"m17.create.SplitShaftRendererMixin"'
+        ].each { canary ->
+            if (!forgeConfig.contains(canary)) {
+                throw new GradleException("M17.1 client mixin config missing: ${canary}")
+            }
+            if (forgeConfig.indexOf(canary) > forgeConfig.indexOf('"mixins"')) {
+                throw new GradleException("M17.1 renderer mixin must remain client-only: ${canary}")
+            }
+        }
+        if (!commandRoot.contains('M17TestCommands.register(sableBuilder, buildContext)')) {
+            throw new GradleException('SableCommand must register the M17 harness')
+        }
+
+        [
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.gearbox.GearboxRenderer", remap = false)',
+                'method = "renderSafe(Lcom/simibubi/create/content/kinetics/gearbox/GearboxBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V"',
+                'VisualizationManager;supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
+                'Sable.HELPER.getContainingClient(blockEntity) != null',
+                'sableSubLevel ? false : originalVisualizationSupported',
+                'SABLE_M17_SPECIALIZED_BER',
+                'hiddenPlotPoseTranslation=false',
+                'Create_GearboxRenderer'
+        ].each { canary ->
+            if (!gearboxMixin.contains(canary)) {
+                throw new GradleException("M17.1 GearboxRendererMixin lost canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.transmission.SplitShaftRenderer", remap = false)',
+                'method = "renderSafe(Lcom/simibubi/create/content/kinetics/transmission/SplitShaftBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V"',
+                'VisualizationManager;supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
+                'Sable.HELPER.getContainingClient(blockEntity) != null',
+                'sableSubLevel ? false : originalVisualizationSupported',
+                'SABLE_M17_SPECIALIZED_BER',
+                'hiddenPlotPoseTranslation=false',
+                'Create_SplitShaftRenderer'
+        ].each { canary ->
+            if (!splitShaftMixin.contains(canary)) {
+                throw new GradleException("M17.1 SplitShaftRendererMixin lost canary: ${canary}")
+            }
+        }
+        [
+                'import com.simibubi.create.content.kinetics.gearbox.GearboxRenderer',
+                'import com.simibubi.create.content.kinetics.transmission.SplitShaftRenderer'
+        ].each { forbidden ->
+            if (gearboxMixin.contains(forbidden) || splitShaftMixin.contains(forbidden)) {
+                throw new GradleException("M17.1 renderer mixins must use string targets to avoid startup target class initialization: ${forbidden}")
+            }
+        }
+        [
+                '@Mixin(value = GearboxRenderer.class',
+                '@Mixin(value = SplitShaftRenderer.class',
+                '@Overwrite',
+                'AllPartialModels',
+                'SHAFT_HALF',
+                'renderInto(',
+                'new GearboxVisual',
+                'new SplitShaftVisual',
+                'supportsVisualization = false',
+                'VisualizationManager.supportsVisualization'
+        ].each { forbidden ->
+            if (gearboxMixin.contains(forbidden) || splitShaftMixin.contains(forbidden)) {
+                throw new GradleException("M17.1 must not fake specialized kinetic rendering or globally disable Flywheel: ${forbidden}")
+            }
+        }
+
+        [
+                'spawn_kinetics',
+                'validate',
+                'dump_layout',
+                'inspect',
+                'set_speed',
+                'toggle_clutch',
+                'toggle_gearshift',
+                'snapshot',
+                'test_translate_parent',
+                'test_rotate_parent',
+                'save_reload_check',
+                'visual_acceptance'
+        ].each { command ->
+            if (!commands.contains('"' + command + '"')) {
+                throw new GradleException("M17 command tree missing command: ${command}")
+            }
+        }
+        [
+                'CREATIVE_MOTOR_ID',
+                'SHAFT_ID',
+                'GEARBOX_ID',
+                'ENCASED_SHAFT_ID',
+                'CLUTCH_ID',
+                'GEARSHIFT_ID',
+                'COGWHEEL_ID',
+                'GEARBOX_LOCAL = new BlockPos(2, 0, 0)',
+                'CLUTCH_LOCAL = new BlockPos(5, 0, 0)',
+                'GEARSHIFT_LOCAL = new BlockPos(6, 0, 0)',
+                'expectedPartialCount',
+                'VISUAL_RUNTIME=UNVERIFIED_USER_OBSERVATION_REQUIRED',
+                'visualPass=USER_OBSERVED_REQUIRED',
+                'hiddenPlotPoseTranslation=false',
+                'Create_ScrollValueBehaviour_setValue',
+                'APPLIED_M10_PHYSICS_VELOCITY'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M17 command harness lost canary: ${canary}")
+            }
+        }
+        [
+                'com.simibubi.create.',
+                'AllBlocks',
+                'AllItems',
+                'AllBlockEntityTypes',
+                'private static final BlockState',
+                'private static final Block ',
+                'RegistryEntry'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M17 command harness must not eagerly resolve Create registration objects during class initialization: ${forbidden}")
+            }
+        }
+        [
+                'teleport(',
+                'setPos(',
+                'manualGearbox',
+                'fakeShaft',
+                'AllPartialModels.SHAFT_HALF'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M17 command harness must not fake visual or physics state: ${forbidden}")
+            }
+        }
+        ['validate', 'dumpLayout', 'inspect', 'snapshot', 'saveReloadCheck', 'visualAcceptance'].each { method ->
+            int start = commands.indexOf('private static int ' + method)
+            if (start < 0) {
+                throw new GradleException("M17 read-only method missing: ${method}")
+            }
+            int next = commands.indexOf('\n    private static int ', start + 1)
+            if (next < 0) {
+                next = commands.indexOf('\n    private static ', start + 1)
+            }
+            String body = commands.substring(start, next < 0 ? commands.length() : next)
+            ['setFixtureMotorSpeed(', 'setLocalBlock(', 'finalizeBlockChanges(', 'setLinearAndAngularVelocity('].each { forbidden ->
+                if (body.contains(forbidden)) {
+                    throw new GradleException("M17 read-only command ${method} must not mutate state via ${forbidden}")
+                }
+            }
+        }
+
+        if (!status.contains('M17.1 Specialized Kinetic Visual Implementation')
+                || !audit.contains('M17.1_SPECIALIZED_KINETIC_RENDER=IMPLEMENTED_STATIC_VERIFIED')
+                || !smoke.contains('/sable m17 set_speed @e[name=m17_gearbox,limit=1] 32')) {
+            throw new GradleException('M17 docs must record implementation status and the complete runtime command sequence')
+        }
+        if (!kineticMixin.contains('Sable.HELPER.getContainingClient(blockEntity) != null')
+                || !bracketedMixin.contains('Sable.HELPER.getContainingClient(blockEntity) != null')) {
+            throw new GradleException('M17.1 must preserve existing M11 generic renderer fallback gates')
+        }
+        [
+                'visiblePosition.x - cameraPosition.x',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!renderBridge.contains(canary) && !(gearboxMixin + splitShaftMixin + commands).contains(canary)) {
+                throw new GradleException("M17.1 must preserve hidden-coordinate render invariant: ${canary}")
+            }
+        }
+
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            Map<String, List<String>> targetCanaries = [
+                    'com/simibubi/create/content/kinetics/gearbox/GearboxRenderer.class': [
+                            'VisualizationManager',
+                            'supportsVisualization',
+                            'SHAFT_HALF',
+                            'renderInto'
+                    ],
+                    'com/simibubi/create/content/kinetics/transmission/SplitShaftRenderer.class': [
+                            'VisualizationManager',
+                            'supportsVisualization',
+                            'SHAFT_HALF',
+                            'getRotationSpeedModifier',
+                            'renderInto'
+                    ]
+            ]
+            targetCanaries.each { entryName, canaries ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 M17.1 target class missing: ${entryName}")
+                }
+                String classText = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                canaries.each { canary ->
+                    if (!classText.contains(canary)) {
+                        throw new GradleException("Create 6.0.8 ${entryName} lost M17.1 target canary: ${canary}")
+                    }
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        logger.lifecycle('verifyM17SpecializedKineticRenderImplementationBoundary PASS: Sable-only Gearbox/SplitShaft BER gates, complete M17 command tree, normal-world pass-through, and hidden-coordinate invariant are guarded')
+    }
+}
+
+tasks.register('verifyM17SplitShaftLayerAndControlBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M17.2 cutout-mipped static render pass and redstone-driven SplitShaft controls.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M17TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m17/create/GearboxRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m17/create/SplitShaftRendererMixin.java'))
+    inputs.file(rootProject.file('BACKPORT_STATUS.md'))
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+    inputs.file(rootProject.file('M17_STATIC_AUDIT.md'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M17.2 split-shaft verification: ${targetCreateJar}")
+        }
+
+        String renderEvents = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java').getText('UTF-8')
+        String renderData = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java').getText('UTF-8')
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M17TestCommands.java').getText('UTF-8')
+        String gearboxMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m17/create/GearboxRendererMixin.java').getText('UTF-8')
+        String splitShaftMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m17/create/SplitShaftRendererMixin.java').getText('UTF-8')
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        String audit = rootProject.file('M17_STATIC_AUDIT.md').getText('UTF-8')
+
+        [
+                'BASIC_SINGLE_BLOCK_LAYERS',
+                'RenderType.solid()',
+                'RenderType.cutoutMipped()',
+                'renderBasicSingleBlockLayer('
+        ].each { canary ->
+            if (!renderEvents.contains(canary)) {
+                throw new GradleException("M17.2 static render layer scheduler missing canary: ${canary}")
+            }
+        }
+        [
+                'SableSubLevelRenderPlatform.INSTANCE.getRenderLayers',
+                'renderLayers.contains(layer)',
+                'SKIPPED_RENDER_LAYER',
+                'loggedM10RenderLayers',
+                'VanillaSubLevelRenderTransforms.applyBlockTransform'
+        ].each { canary ->
+            if (!renderData.contains(canary)) {
+                throw new GradleException("M17.2 static render data lost model-layer canary: ${canary}")
+            }
+        }
+        [
+                'clutch',
+                'gearshift'
+        ].each { forbidden ->
+            if (renderData.toLowerCase(Locale.ROOT).contains(forbidden)) {
+                throw new GradleException("M17.2 static renderer must stay layer-driven, not block-id-specific: ${forbidden}")
+            }
+        }
+
+        [
+                'CLUTCH_REDSTONE_LOCAL = new BlockPos(5, 1, 0)',
+                'GEARSHIFT_REDSTONE_LOCAL = new BlockPos(6, 1, 0)',
+                'Blocks.REDSTONE_BLOCK.defaultBlockState()',
+                'getEmbeddedLevelAccessor().setBlock(redstoneLocal, newSignalState, 3)',
+                'Create_redstone_neighborChanged_detachKinetics_scheduledTick',
+                'downstreamShaftSpeed',
+                'downstreamMechanicalResponse',
+                'OBSERVED_CLUTCH_DISCONNECTED',
+                'OBSERVED_GEARSHIFT_REVERSED'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M17.2 command harness missing redstone/mechanical response canary: ${canary}")
+            }
+        }
+        int toggleStart = commands.indexOf('private static int togglePoweredBlock')
+        int toggleEnd = commands.indexOf('\n    private static int setBodyVelocity', toggleStart)
+        if (toggleStart < 0 || toggleEnd < 0) {
+            throw new GradleException('M17.2 togglePoweredBlock body not found')
+        }
+        String toggleBody = commands.substring(toggleStart, toggleEnd)
+        [
+                'setProperty(oldState, "powered"',
+                'setProperty(oldTargetState, "powered"',
+                'setFixtureMotorSpeed(',
+                'source =',
+                'setSpeed('
+        ].each { forbidden ->
+            if (toggleBody.contains(forbidden)) {
+                throw new GradleException("M17.2 toggles must use redstone/neighbor semantics, not direct kinetic or POWERED edits: ${forbidden}")
+            }
+        }
+        [
+                'final BlockState oldTargetState = getLocalBlockState(subLevel, local)',
+                'previousPowered',
+                'afterPowered(subLevel, local)',
+                'previousDownstreamShaftSpeed',
+                'splitShaftMechanicalResponse(after)'
+        ].each { canary ->
+            if (!toggleBody.contains(canary)) {
+                throw new GradleException("M17.2 toggle output missing truthful-control canary: ${canary}")
+            }
+        }
+
+        [
+                'private static final BlockState',
+                'private static final Block ',
+                'AllBlocks',
+                'AllBlockEntityTypes',
+                'com.simibubi.create.'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M17.2 command harness must remain startup-lazy: ${forbidden}")
+            }
+        }
+        [
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.gearbox.GearboxRenderer", remap = false)',
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.transmission.SplitShaftRenderer", remap = false)',
+                'sableSubLevel ? false : originalVisualizationSupported'
+        ].each { canary ->
+            if (!(gearboxMixin + splitShaftMixin).contains(canary)) {
+                throw new GradleException("M17.2 must preserve M17.1 Sable-only specialized BER fallback: ${canary}")
+            }
+        }
+        if (!renderEvents.contains('RenderType.cutoutMipped()')
+                || renderEvents.contains('RenderType.translucent()')) {
+            throw new GradleException('M17.2 must add the required cutout-mipped pass without broad translucent rendering')
+        }
+        if (!status.contains('M17.2 Split-Shaft Layer And Control Repair')
+                || !audit.contains('M17.2_SPLIT_SHAFT_LAYER_AND_CONTROL=IMPLEMENTED_STATIC_VERIFIED')
+                || !smoke.contains('/sable m17 toggle_clutch @e[name=m17_gearbox,limit=1]')) {
+            throw new GradleException('M17.2 docs must record the split-shaft layer/control runtime procedure')
+        }
+        [
+                'hiddenPlotPoseTranslation=false',
+                'VanillaSubLevelRenderTransforms.applyBlockTransform'
+        ].each { canary ->
+            if (!(renderData + commands + audit).contains(canary)) {
+                throw new GradleException("M17.2 hidden-coordinate render invariant missing: ${canary}")
+            }
+        }
+
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            String allBlocksText = new String(jar.getInputStream(jar.getJarEntry('com/simibubi/create/AllBlocks.class')).readAllBytes(), StandardCharsets.ISO_8859_1)
+            [
+                    'clutch',
+                    'gearshift'
+            ].each { canary ->
+                if (!allBlocksText.contains(canary)) {
+                    throw new GradleException("Create 6.0.8 AllBlocks missing M17.2 render-layer canary: ${canary}")
+                }
+            }
+            [
+                    'com/simibubi/create/content/kinetics/transmission/ClutchBlock.class',
+                    'com/simibubi/create/content/kinetics/transmission/GearshiftBlock.class',
+                    'com/simibubi/create/content/kinetics/transmission/SplitShaftBlockEntity.class',
+                    'assets/create/blockstates/clutch.json',
+                    'assets/create/blockstates/gearshift.json',
+                    'assets/create/models/block/clutch/block.json',
+                    'assets/create/models/block/gearshift/block.json'
+            ].each { entryName ->
+                if (jar.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 M17.2 target/resource missing: ${entryName}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        logger.lifecycle('verifyM17SplitShaftLayerAndControlBoundary PASS: cutout-mipped Sable static rendering, redstone-driven SplitShaft controls, startup-safe M17 mixins, and hidden-coordinate invariant are guarded')
     }
 }
 

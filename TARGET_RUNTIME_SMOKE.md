@@ -2536,3 +2536,67 @@ Expected: the final acceptance command reports PASS only when the parent Sable
 is prepared through existing physics controls, the drill/piston payload remains
 coherent, target identity remains fixture-local correct, and no obvious
 wrong-world mutation is detected.
+
+## M17 Specialized Kinetic Visual Harness
+
+M17 begins after M16 is closed. This first sequence is for the Gearbox canary
+and adjacent specialized kinetic renderers; machine state can be validated by
+commands, but visual PASS remains user-observed runtime evidence.
+
+### Phase A: Static Kinetic Fixture
+
+```text
+/sable m17 spawn_kinetics m17_gearbox
+/sable m17 validate @e[name=m17_gearbox,limit=1]
+/sable m17 dump_layout @e[name=m17_gearbox,limit=1]
+/sable m17 inspect @e[name=m17_gearbox,limit=1]
+/sable m17 set_speed @e[name=m17_gearbox,limit=1] 32
+/sable m17 snapshot @e[name=m17_gearbox,limit=1]
+```
+
+Expected: the fixture contains a powered Creative Motor, reference Shaft and
+Cogwheel controls, a `create:gearbox[axis=y]`, an Encased Shaft, a Clutch, and
+a Gearshift. The Gearbox, Clutch, and Gearshift casings should be visible; the
+canary visual check is whether the internal shaft halves are visible and
+rotating.
+
+### Phase B: Specialized Controls
+
+```text
+/sable m17 toggle_clutch @e[name=m17_gearbox,limit=1]
+/sable m17 toggle_gearshift @e[name=m17_gearbox,limit=1]
+/sable m17 snapshot @e[name=m17_gearbox,limit=1]
+/sable m17 set_speed @e[name=m17_gearbox,limit=1] -32
+/sable m17 snapshot @e[name=m17_gearbox,limit=1]
+/sable m17 set_speed @e[name=m17_gearbox,limit=1] 32
+```
+
+Expected: the toggles place/remove fixture-local redstone sources, Create
+updates `POWERED` via normal neighbor semantics, and the snapshot reports
+downstream speed/mechanical response for Clutch disconnect and Gearshift
+reversal. Command output may verify block state and kinetic state, but must
+not claim visual PASS without observation.
+
+### Phase C: Parent Transform
+
+```text
+/sable m17 test_rotate_parent @e[name=m17_gearbox,limit=1]
+/sable m17 visual_acceptance @e[name=m17_gearbox,limit=1]
+/sable m17 save_reload_check @e[name=m17_gearbox,limit=1]
+```
+
+Expected: specialized partials remain attached to the Sable-visible block
+entity frame, use Create's real kinetic angle source, and do not introduce raw
+hidden plot translations into the render PoseStack.
+
+After manual Save & Quit and reload:
+
+```text
+/sable m17 validate @e[name=m17_gearbox,limit=1]
+/sable m17 inspect @e[name=m17_gearbox,limit=1]
+/sable m17 visual_acceptance @e[name=m17_gearbox,limit=1]
+```
+
+Expected: the same fixture state is recovered, normal Create speed/angle
+semantics remain the source of rotation, and visual PASS is still based on
+runtime observation.
