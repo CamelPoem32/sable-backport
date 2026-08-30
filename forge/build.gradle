@@ -4986,6 +4986,15 @@ tasks.named('build') {
     dependsOn tasks.named('verifyM15HiddenPlotRenderBoundary')
     dependsOn tasks.named('verifyM15ValidationTruthfulnessBoundary')
     dependsOn tasks.named('verifyM15DiagnosticCoordinateBoundary')
+    dependsOn tasks.named('verifyM16DrillStaticAuditBoundary')
+    dependsOn tasks.named('verifyM16BlockBreakingMixinDeferredBoundary')
+    dependsOn tasks.named('verifyM16SubLevelBlockBreakingUtilityBoundary')
+    dependsOn tasks.named('verifyM16CommandHarnessBoundary')
+    dependsOn tasks.named('verifyM16DrillFixtureBoundary')
+    dependsOn tasks.named('verifyM16ParentAirborneBoundary')
+    dependsOn tasks.named('verifyM16DrillFixtureDesignBoundary')
+    dependsOn tasks.named('verifyM16CreateDrillBytecodeBoundary')
+    dependsOn tasks.named('verifyM16DrillDynamicRenderingBoundary')
 }
 
 tasks.named('checkstyleMain') {
@@ -11518,6 +11527,486 @@ tasks.register('verifyM15DiagnosticCoordinateBoundary') {
             }
         }
         logger.lifecycle('verifyM15DiagnosticCoordinateBoundary PASS: M15 diagnostics keep raw plot, local, and visible coordinates distinct and retain visible-space render scheduling')
+    }
+}
+
+tasks.register('verifyM16DrillStaticAuditBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M16.0 Mechanical Drill/block-breaking audit document covers the required static boundaries.'
+
+    inputs.file(rootProject.file('M16_STATIC_AUDIT.md'))
+    inputs.file(rootProject.file('BACKPORT_STATUS.md'))
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+
+    doLast {
+        File auditFile = rootProject.file('M16_STATIC_AUDIT.md')
+        if (!auditFile.isFile()) {
+            throw new GradleException('Missing M16_STATIC_AUDIT.md')
+        }
+        String audit = auditFile.getText('UTF-8')
+        [
+                'M16 Static Audit: Create Block-Breaking Actors',
+                'b7226222caf4eace63a708bdcd73ef36c971137d',
+                'BlockBreakingMovementBehaviourMixin.java',
+                'SubLevelBlockBreakingUtility.java',
+                'BlockBreakingMovementBehaviour.visitNewPosition',
+                'BlockBreakingMovementBehaviour.tickBreaker',
+                'Coordinate-Space Ledger',
+                'contraption-local',
+                'hidden plot',
+                'outer visible/world',
+                'BlockHelper.destroyBlock',
+                'Upstream To Create 6.0.8 Classification',
+                'DIRECT_PORT',
+                'SEMANTIC_ADAPTATION',
+                'NOT_REQUIRED_ON_CREATE_6_0_8',
+                'Proposed M16 Fixture',
+                'create:mechanical_drill',
+                '(6,1,0)',
+                'First Implementation Recommendation'
+        ].each { canary ->
+            if (!audit.contains(canary)) {
+                throw new GradleException("M16 static audit lost required canary: ${canary}")
+            }
+        }
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        if (!status.contains('M15 is closed by real runtime acceptance')
+                || !status.contains('M16.0 Drill Block-Breaking Static Audit')) {
+            throw new GradleException('Backport status must close M15 and introduce the M16.0 static audit')
+        }
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        if (!smoke.contains('M16 Mechanical Drill Block-Breaking Harness')
+                || !smoke.contains('/sable m16 spawn_drill m16_drill')
+                || !smoke.contains('/sable m16 targets')) {
+            throw new GradleException('TARGET_RUNTIME_SMOKE.md must include the M16 drill runtime harness outline')
+        }
+        logger.lifecycle('verifyM16DrillStaticAuditBoundary PASS: M15 is closed and M16.0 records the drill/block-breaking audit, coordinate ledger, fixture, and acceptance gates')
+    }
+}
+
+tasks.register('verifyM16BlockBreakingMixinDeferredBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M16 enables only the narrow moving block-breaking actor mixin and no broader Create actor mixins.'
+
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(rootProject.file('MIXIN_BACKPORT_MATRIX.md'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java'))
+
+    doLast {
+        String forgeConfig = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String mixinText = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java').getText('UTF-8')
+        if (!forgeConfig.contains('compatibility.create.behaviour_compatibility.block_breaking_behaviour.BlockBreakingMovementBehaviourMixin')) {
+            throw new GradleException('M16 must enable the narrow moving BlockBreakingMovementBehaviour mixin')
+        }
+        [
+                '@Mixin(value = BlockBreakingMovementBehaviour.class, remap = false)',
+                '@WrapMethod(method = "visitNewPosition")',
+                '@Inject(method = "tick", at = @At("HEAD"), cancellable = true)',
+                'containingSubLevel == null',
+                'original.call(context, pos)',
+                'SubLevelBlockBreakingUtility.findBreakingPos',
+                'context.world.destroyBlockProgress',
+                'data.remove("BreakingPos")',
+                'SABLE_M16_BREAK'
+        ].each { canary ->
+            if (!mixinText.contains(canary)) {
+                throw new GradleException("M16 BlockBreakingMovementBehaviour mixin lost required canary: ${canary}")
+            }
+        }
+        [
+                'block_breakers.BlockBreakingKineticBlockEntityMixin',
+                'block_breakers.BlockBreakingKineticBlockEntityDamageMixin',
+                'behaviour_compatibility.harvester_behaviour.HarvesterMovementBehaviourMixin',
+                'behaviour_compatibility.harvester_block_entity.HarvesterBlockEntityUsageMixin',
+                'behaviour_compatibility.block_breaking_behaviour.SawMovementBehaviourMixin'
+        ].each { forbidden ->
+            if (forgeConfig.contains(forbidden)) {
+                throw new GradleException("M16.0 must not enable deferred broad Create actor mixin yet: ${forbidden}")
+            }
+        }
+        String matrix = rootProject.file('MIXIN_BACKPORT_MATRIX.md').getText('UTF-8')
+        [
+                'BlockBreakingMovementBehaviourMixin | BlockBreakingMovementBehaviour | visitNewPosition<br>tick',
+                'BlockBreakingKineticBlockEntityDamageMixin | SawBlock<br>DrillBlock | entityInside',
+                'BlockBreakingKineticBlockEntityMixin | BlockBreakingKineticBlockEntity | tick',
+                'HarvesterMovementBehaviourMixin | HarvesterMovementBehaviour | visitNewPosition'
+        ].each { canary ->
+            if (!matrix.contains(canary) || !matrix.contains(canary + ' | sable-neoforge.mixins.json:mixins')) {
+                throw new GradleException("Mixin backport matrix lost deferred Create actor row: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM16BlockBreakingMixinDeferredBoundary PASS: Forge config enables only moving BlockBreakingMovementBehaviour for M16 and keeps Harvester/Saw/static damage actors out')
+    }
+}
+
+tasks.register('verifyM16SubLevelBlockBreakingUtilityBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M16 block-breaking helper keeps the explicit Sable coordinate-space contract.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SubLevelBlockBreakingUtility.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SubLevelBlockBreakingUtility.java').getText('UTF-8')
+        [
+                'M16 coordinate contract',
+                'final BoundingBox3d localMiningBox',
+                'visibleMiningBox.transform(subLevel.logicalPose(), visibleMiningBox)',
+                'Sable.HELPER.getAllIntersecting',
+                'visibleMiningBox.transformInverse(otherSubLevel.logicalPose(), otherLocalMiningBox)',
+                'Sable.HELPER.distanceSquaredWithSubLevels',
+                'Sable.HELPER.getContaining(level, candidate) == subLevel',
+                'return closestPosition',
+                'SABLE_M16_BREAK'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M16 SubLevelBlockBreakingUtility lost coordinate-contract canary: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM16SubLevelBlockBreakingUtilityBoundary PASS: helper selects real storage targets through explicit local/visible/sublevel transforms')
+    }
+}
+
+tasks.register('verifyM16CommandHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the complete M16 command tree and read-only inspection command contract.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M16TestCommands.java'))
+
+    doLast {
+        String commandRoot = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M16TestCommands.java').getText('UTF-8')
+        if (!commandRoot.contains('M16TestCommands.register(sableBuilder, buildContext)')) {
+            throw new GradleException('SableCommand must register the M16 harness')
+        }
+        [
+                'Commands.literal("m16")',
+                'Commands.literal("spawn_drill")',
+                'Commands.literal("validate")',
+                'Commands.literal("dump_layout")',
+                'Commands.literal("inspect")',
+                'Commands.literal("extend")',
+                'Commands.literal("retract")',
+                'Commands.literal("snapshot")',
+                'Commands.literal("targets")',
+                'Commands.literal("test_translate_parent")',
+                'Commands.literal("test_rotate_parent")',
+                'Commands.literal("prepare_airborne")',
+                'Commands.literal("airborne_acceptance")',
+                'Commands.literal("save_reload_check")'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M16 command tree missing required command: ${canary}")
+            }
+        }
+        ['validate', 'dumpLayout', 'inspect', 'snapshot', 'targets', 'saveReloadCheck'].each { method ->
+            int methodStart = text.indexOf("private static int ${method}(")
+            if (methodStart < 0) {
+                throw new GradleException("M16 read-only command method missing: ${method}")
+            }
+            int nextMethod = text.indexOf('\n    private static int ', methodStart + 1)
+            String body = text.substring(methodStart, nextMethod < 0 ? text.length() : nextMethod)
+            ['setLocalBlock', 'setFixtureMotorSpeed', 'handle.teleport', 'setLinearAndAngularVelocity'].each { forbidden ->
+                if (body.contains(forbidden)) {
+                    throw new GradleException("M16 read-only command ${method} must not mutate state via ${forbidden}")
+                }
+            }
+        }
+        logger.lifecycle('verifyM16CommandHarnessBoundary PASS: M16 command tree is complete and read-only diagnostics stay side-effect free')
+    }
+}
+
+tasks.register('verifyM16DrillFixtureBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the deterministic M16 drill fixture uses the accepted M14 sticky piston carrier and canonical target coordinates.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M16TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M16TestCommands.java').getText('UTF-8')
+        [
+                'STICKY_MECHANICAL_PISTON_ID',
+                'PISTON_EXTENSION_POLE_ID',
+                'RADIAL_CHASSIS_ID',
+                'MECHANICAL_DRILL_ID',
+                'new BlockPos(1, 1, 0)',
+                'new BlockPos(6, 1, 0)',
+                'new BlockPos(7, 1, 0)',
+                'new BlockPos(8, 1, 0)',
+                'setProperty(requireBlockState(MECHANICAL_DRILL_ID), "facing", "east")',
+                'Blocks.STONE.defaultBlockState()',
+                'constructionOrdering=',
+                'fixture-local'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M16 fixture lost required canary: ${canary}")
+            }
+        }
+        ['teleport', 'setPos(', 'axisMotion', 'clientOffsetDiff'].each { forbidden ->
+            if (text.contains(forbidden) && forbidden != 'teleport') {
+                throw new GradleException("M16 fixture/control must not manually animate contraption state: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM16DrillFixtureBoundary PASS: M16 fixture uses real Create sticky piston, drill actor, and deterministic local targets')
+    }
+}
+
+tasks.register('verifyM16ParentAirborneBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M16 parent-motion helpers use existing Sable physics controls without anchoring or fake child motion.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M16TestCommands.java'))
+
+    doLast {
+        String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M16TestCommands.java').getText('UTF-8')
+        [
+                'result=APPLIED_M10_PHYSICS_VELOCITY',
+                'handle.setLinearAndAngularVelocity(linearVelocity, angularVelocityRad)',
+                'handle.teleport(after, subLevel.logicalPose().orientation())',
+                'gravityStillActive=true',
+                'anchored=false',
+                'hiddenStorageUnchanged=true',
+                'pistonControl=normal_create_motor_speed'
+        ].each { canary ->
+            if (!text.contains(canary)) {
+                throw new GradleException("M16 parent/airborne harness lost canary: ${canary}")
+            }
+        }
+        ['disableGravity', 'setNoGravity', 'kinematic', 'setKinematic', 'manualContraptionMotion=true'].each { forbidden ->
+            if (text.contains(forbidden)) {
+                throw new GradleException("M16 parent/airborne harness must not anchor/fake motion: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM16ParentAirborneBoundary PASS: M16 parent presets delegate to existing physics and airborne remains one-shot with gravity active')
+    }
+}
+
+tasks.register('verifyM16DrillFixtureDesignBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M16 drill fixture design reuses the accepted M14 carrier and expresses targets in local coordinates.'
+
+    inputs.file(rootProject.file('M16_STATIC_AUDIT.md'))
+
+    doLast {
+        String audit = rootProject.file('M16_STATIC_AUDIT.md').getText('UTF-8')
+        [
+                'create:sticky_mechanical_piston',
+                'create:piston_extension_pole',
+                'create:radial_chassis',
+                'create:mechanical_drill',
+                'minecraft:stone',
+                'fixture-local acceptance truth',
+                'Hidden plot coordinates are never the acceptance source',
+                'Do not port static block-entity drill/saw damage',
+                'Harvester',
+                'Deployer',
+                'fan processing',
+                'inventories',
+                'trains'
+        ].each { canary ->
+            if (!audit.contains(canary)) {
+                throw new GradleException("M16 fixture/audit contract lost canary: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM16DrillFixtureDesignBoundary PASS: M16 fixture design uses a proven piston carrier, a real Mechanical Drill actor, and local-coordinate targets')
+    }
+}
+
+tasks.register('verifyM16CreateDrillBytecodeBoundary') {
+    group = 'forge backport'
+    description = 'Verifies exact Create 6.0.8 drill/block-breaking actor bytecode canaries without launching Minecraft.'
+
+    inputs.file(targetCreateJar)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M16 drill verification: ${targetCreateJar}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            Map<String, List<String>> entries = [
+                    'com/simibubi/create/content/kinetics/base/BlockBreakingMovementBehaviour.class': [
+                            'visitNewPosition',
+                            'tickBreaker',
+                            'destroyBlock',
+                            'canBreak',
+                            'BreakingPos',
+                            'BreakerId',
+                            'Progress',
+                            'TicksUntilNextProgress',
+                            'WaitingTicks',
+                            'LastPos',
+                            'BlockHelper'
+                    ],
+                    'com/simibubi/create/content/kinetics/drill/DrillMovementBehaviour.class': [
+                            'getActiveAreaOffset',
+                            'DrillBlock',
+                            'DrillRenderer',
+                            'canBreak',
+                            'CreateDamageSources',
+                            'TRACKS'
+                    ],
+                    'com/simibubi/create/content/contraptions/behaviour/MovementContext.class': [
+                            'localPos',
+                            'relativeMotion',
+                            'rotation',
+                            'position',
+                            'contraption',
+                            'readNBT',
+                            'writeToNBT'
+                    ],
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.class': [
+                            'tickActors',
+                            'MovementBehaviour',
+                            'getActiveAreaOffset',
+                            'visitNewPosition',
+                            'shouldActorTrigger',
+                            'relativeMotion',
+                            'toGlobalVector'
+                    ]
+            ]
+            entries.each { entryName, canaries ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 drill boundary class missing: ${entryName}")
+                }
+                String classText = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                canaries.each { canary ->
+                    if (!classText.contains(canary)) {
+                        throw new GradleException("Create 6.0.8 ${entryName} lost drill/block-breaking canary: ${canary}")
+                    }
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyM16CreateDrillBytecodeBoundary PASS: Create 6.0.8 exposes the Mechanical Drill actor, BlockBreakingMovementBehaviour, MovementContext, and tickActors boundaries')
+    }
+}
+
+tasks.register('verifyM16DrillDynamicRenderingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M16.2 Mechanical Drill static and moving dynamic rendering compatibility boundary.'
+
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/drill_rendering/DrillMovementBehaviourMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M16.2 drill rendering verification: ${targetCreateJar}")
+        }
+
+        String forgeConfig = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String drillMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/drill_rendering/DrillMovementBehaviourMixin.java').getText('UTF-8')
+        String kineticMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m11/create/KineticBlockEntityRendererMixin.java').getText('UTF-8')
+        String contraptionMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java').getText('UTF-8')
+        String renderBridge = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
+
+        if (!forgeConfig.contains('"compatibility.create.behaviour_compatibility.drill_rendering.DrillMovementBehaviourMixin"')) {
+            throw new GradleException('M16.2 moving Drill actor renderer mixin must be registered client-side')
+        }
+        if (forgeConfig.indexOf('"compatibility.create.behaviour_compatibility.drill_rendering.DrillMovementBehaviourMixin"')
+                > forgeConfig.indexOf('"mixins"')) {
+            throw new GradleException('M16.2 DrillMovementBehaviourMixin must remain in the client mixin section')
+        }
+
+        [
+                '@Mixin(value = DrillMovementBehaviour.class, remap = false)',
+                'method = "renderInContraption(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lcom/simibubi/create/foundation/virtualWorld/VirtualRenderWorld;Lcom/simibubi/create/content/contraptions/render/ContraptionMatrices;Lnet/minecraft/client/renderer/MultiBufferSource;)V"',
+                'VisualizationManager;supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
+                'SableCreateContraptionContext.getContainingSubLevel(entity)',
+                'sableContraption ? false : originalVisualizationSupported',
+                'renderPath={}',
+                'DrillRenderer.renderInContraption',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!drillMixin.contains(canary)) {
+                throw new GradleException("M16.2 DrillMovementBehaviour mixin lost canary: ${canary}")
+            }
+        }
+        [
+                'KineticBlockEntityRenderer.getAngleForBe',
+                'blockEntity.getSpeed()',
+                'rotationAxis',
+                'renderAngle',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!kineticMixin.contains(canary)) {
+                throw new GradleException("M16.2 static Drill diagnostic boundary lost canary: ${canary}")
+            }
+        }
+        [
+                'visiblePosition.x - cameraPosition.x',
+                'dispatcher.render(contraptionEntity, x, y, z',
+                'poseStack.mulPose(new Quaternionf(renderPose.orientation()))'
+        ].each { canary ->
+            if (!(renderBridge + contraptionMixin).contains(canary)) {
+                throw new GradleException("M16.2 must retain visible-space contraption render invariant: ${canary}")
+            }
+        }
+        [
+                '@Overwrite',
+                'disableBlockEntityRendering()',
+                'new DrillActorVisual',
+                'setPos(',
+                'teleportTo(',
+                'manualDrillHead',
+                'fakeDrill',
+                'BlockBreakingMovementBehaviourMixin'
+        ].each { forbidden ->
+            if (drillMixin.contains(forbidden)) {
+                throw new GradleException("M16.2 Drill actor render fix must not fake motion/rendering or touch block breaking: ${forbidden}")
+            }
+        }
+
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            Map<String, List<String>> entries = [
+                    'com/simibubi/create/content/kinetics/drill/DrillMovementBehaviour.class': [
+                            'renderInContraption',
+                            'VisualizationManager',
+                            'supportsVisualization',
+                            'DrillRenderer',
+                            'renderInContraption',
+                            'DrillActorVisual',
+                            'disableBlockEntityRendering'
+                    ],
+                    'com/simibubi/create/content/kinetics/drill/DrillRenderer.class': [
+                            'DRILL_HEAD',
+                            'getAnimationSpeed',
+                            'rotateZDegrees',
+                            'getViewProjection',
+                            'renderInto'
+                    ],
+                    'com/simibubi/create/content/kinetics/base/KineticBlockEntityRenderer.class': [
+                            'renderSafe',
+                            'VisualizationManager',
+                            'renderRotatingBuffer',
+                            'getAngleForBe',
+                            'getSpeed'
+                    ]
+            ]
+            entries.each { entryName, canaries ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 Drill rendering boundary class missing: ${entryName}")
+                }
+                String classText = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                canaries.each { canary ->
+                    if (!classText.contains(canary)) {
+                        throw new GradleException("Create 6.0.8 ${entryName} lost Drill rendering canary: ${canary}")
+                    }
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        logger.lifecycle('verifyM16DrillDynamicRenderingBoundary PASS: moving Drill actors use Create vanilla actor rendering for Sable-contained contraptions, static Drill diagnostics preserve Create kinetic speed/angle, and visible-space rendering remains intact')
     }
 }
 

@@ -5,7 +5,10 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.ryanhcode.sable.Sable;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.LevelAccessor;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -33,9 +36,19 @@ public class KineticBlockEntityRendererMixin {
         final String key = blockEntity.getClass().getName() + ":" + blockEntity.getBlockPos().asLong() + ":"
                 + sableSubLevel + ":" + originalVisualizationSupported + ":" + returnedVisualizationSupported;
         if (LOGGED_CREATE_BER.add(key)) {
-            Sable.LOGGER.info("SABLE_M11_CREATE_BER renderer={} blockEntityClass={} pos={} sableSubLevel={} originalVisualizationSupported={} returnedVisualizationSupported={}",
-                    "KineticBlockEntityRenderer", blockEntity.getClass().getName(), blockEntity.getBlockPos(),
-                    sableSubLevel, originalVisualizationSupported, returnedVisualizationSupported);
+            Direction.Axis rotationAxis = null;
+            float renderAngle = Float.NaN;
+            try {
+                rotationAxis = KineticBlockEntityRenderer.getRotationAxisOf(blockEntity);
+                renderAngle = KineticBlockEntityRenderer.getAngleForBe(blockEntity, blockEntity.getBlockPos(), rotationAxis);
+            } catch (final RuntimeException ignored) {
+                // Diagnostics only; non-standard kinetic renderers should keep their normal render path.
+            }
+            Sable.LOGGER.info("SABLE_M11_CREATE_BER renderer={} blockEntityClass={} blockId={} pos={} sableSubLevel={} originalVisualizationSupported={} returnedVisualizationSupported={} kineticSpeed={} rotationAxis={} renderAngle={} hiddenPlotPoseTranslation=false",
+                    "KineticBlockEntityRenderer", blockEntity.getClass().getName(),
+                    BuiltInRegistries.BLOCK.getKey(blockEntity.getBlockState().getBlock()), blockEntity.getBlockPos(),
+                    sableSubLevel, originalVisualizationSupported, returnedVisualizationSupported,
+                    blockEntity.getSpeed(), rotationAxis, renderAngle);
         }
         return returnedVisualizationSupported;
     }

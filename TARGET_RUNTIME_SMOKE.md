@@ -2428,3 +2428,111 @@ the rail, and motor control remains functional after reload.
 
 Expected transform: `T_world_block = T_world_sable(t) * T_create_gantry_motion(t) * T_create_local`.
 This phase should run only after endpoint/reload control is accepted.
+
+## M16 Mechanical Drill Block-Breaking Harness
+
+M16 is not another movement-mechanism milestone. M13-M15 are closed; this
+sequence should verify that a Create block-breaking actor inside a Sable
+contraption identifies and mutates the correct transformed target block.
+
+### Phase A: Static Fixture
+
+```text
+/sable m16 spawn_drill m16_drill
+/sable m16 validate @e[name=m16_drill,limit=1]
+/sable m16 dump_layout @e[name=m16_drill,limit=1]
+/sable m16 inspect @e[name=m16_drill,limit=1]
+```
+
+Expected: the fixture is a proven sticky-piston carrier with a
+`create:mechanical_drill[facing=east]` on the moving payload and deterministic
+fixture-local stone targets at `(6,1,0)`, `(7,1,0)`, and `(8,1,0)`. Client
+runtime domains remain `UNVERIFIED` until observed.
+
+### Phase B: First Break
+
+```text
+/sable m16 extend @e[name=m16_drill,limit=1]
+/sable m16 snapshot @e[name=m16_drill,limit=1]
+/sable m16 targets @e[name=m16_drill,limit=1]
+```
+
+Expected: the drill actor breaks only the first expected fixture-local target
+block and reports the selected storage coordinate, target owner, progress, and
+breaker id. No hidden plot controller, piston, pole, payload, or unrelated
+parent-world block should be mutated.
+
+### Phase C: Repeat
+
+```text
+/sable m16 retract @e[name=m16_drill,limit=1]
+/sable m16 extend @e[name=m16_drill,limit=1]
+/sable m16 snapshot @e[name=m16_drill,limit=1]
+/sable m16 targets @e[name=m16_drill,limit=1]
+```
+
+Expected: the second target is selected from fixture-local geometry and the
+drill/payload survives the cycle using normal Create piston mechanics.
+
+### Phase D: Parent Motion
+
+```text
+/sable m16 retract @e[name=m16_drill,limit=1]
+/sable m16 test_translate_parent @e[name=m16_drill,limit=1]
+/sable m16 extend @e[name=m16_drill,limit=1]
+/sable m16 snapshot @e[name=m16_drill,limit=1]
+/sable m16 targets @e[name=m16_drill,limit=1]
+```
+
+Expected: parent translation uses existing Sable physics controls, fixture-local
+target identity remains the acceptance truth, and no hidden storage block is
+mutated merely to fake the test.
+
+### Phase E: Parent Rotation
+
+```text
+/sable m16 retract @e[name=m16_drill,limit=1]
+/sable m16 prepare_airborne @e[name=m16_drill,limit=1]
+/sable m16 test_rotate_parent @e[name=m16_drill,limit=1]
+/sable m16 extend @e[name=m16_drill,limit=1]
+/sable m16 snapshot @e[name=m16_drill,limit=1]
+/sable m16 targets @e[name=m16_drill,limit=1]
+```
+
+Expected: the drill mining direction follows Sable-local drill facing after
+outer Sable rotation. Hidden plot coordinates must not be used as acceptance
+truth.
+
+### Phase F: Save/Reload
+
+```text
+/sable m16 retract @e[name=m16_drill,limit=1]
+/sable m16 save_reload_check @e[name=m16_drill,limit=1]
+```
+
+Save & Quit manually, reload the world, then run:
+
+```text
+/sable m16 validate @e[name=m16_drill,limit=1]
+/sable m16 inspect @e[name=m16_drill,limit=1]
+/sable m16 targets @e[name=m16_drill,limit=1]
+/sable m16 save_reload_check @e[name=m16_drill,limit=1]
+```
+
+Expected: fixture state, payload ownership, and target states remain coherent
+after reload. The helper reports persistence as unverified until the after-reload
+commands are actually run.
+
+### Phase G: Airborne Acceptance
+
+```text
+/sable m16 retract @e[name=m16_drill,limit=1]
+/sable m16 prepare_airborne @e[name=m16_drill,limit=1]
+/sable m16 extend @e[name=m16_drill,limit=1]
+/sable m16 airborne_acceptance @e[name=m16_drill,limit=1]
+```
+
+Expected: the final acceptance command reports PASS only when the parent Sable
+is prepared through existing physics controls, the drill/piston payload remains
+coherent, target identity remains fixture-local correct, and no obvious
+wrong-world mutation is detected.

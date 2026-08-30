@@ -1421,3 +1421,42 @@ Aeronautics, and Companion JarJar remain outside this milestone.
 ## Known Target Modpack Issue
 
 Create's pre-existing goggle overlay `IndexOutOfBoundsException` remains out of scope; this backport must not modify Create to address it.
+
+## M15 Gantry Runtime Acceptance Closed
+
+M15 is closed by real runtime acceptance. Gantry assembly, forward and reverse
+full trips, repeated commands, dynamic carriage discovery, payload validation
+relative to the current carriage, collision, parent Sable translation, parent
+Sable rotation composition, save/reload, smooth client motion, and
+`airborne_acceptance` all passed.
+
+The final Gantry jerk root cause was Create 6.0.8 packet precision:
+`GantryContraptionUpdatePacket` retained coordinates as doubles internally but
+serialized them through float precision. At Sable hidden plot coordinates near
+20,000,000, that quantized the server coordinate enough to create large client
+correction offsets and visible reverse-sign bursts. The Sable compatibility
+repair preserves double packet precision for Sable-contained Gantries; the
+earlier upstream Create #9481 half-block threshold repair in
+`checkPinionShaft` remains required.
+
+Do not reopen M13 Mechanical Bearing, M14 Mechanical Piston, or M15 Gantry
+unless a concrete regression is discovered.
+
+## M16.0 Drill Block-Breaking Static Audit
+
+M16 starts Create contraption actor mutation coverage with Mechanical Drill as
+the block-breaking canary. The static audit is recorded in
+`M16_STATIC_AUDIT.md`. No Minecraft runtime was launched and no M16 behavior
+compatibility mixin was enabled in this gate.
+
+## M16.1 Drill Block-Breaking Implementation
+
+M16 now enables only the moving Create block-breaking actor boundary:
+`BlockBreakingMovementBehaviourMixin` plus `SubLevelBlockBreakingUtility`.
+Harvester, Deployer, Saw tree behavior, static drill/saw block entities,
+inventories, fan processing, and trains remain out of scope.
+
+The `/sable m16` runtime harness now provides a sticky mechanical piston drill
+fixture, fixture-local target inspection, parent-transform helpers,
+airborne acceptance setup, and save/reload comparison output for one complete
+future Minecraft session.
