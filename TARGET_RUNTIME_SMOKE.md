@@ -2707,3 +2707,150 @@ Expected: the fixture, held item/mode, target states, and interaction
 capability remain coherent across reload. Airborne acceptance uses one-shot
 Sable pose/velocity helpers and normal piston motor control; it does not anchor
 the body or fake the Deployer interaction.
+
+## M19 Create Placement-Helper Ghost Preview Harness
+
+M19 is client placement-assist preview only. Actual placement was already
+working; this sequence verifies that Create's translucent ghost preview renders
+at the correct visible Sable-local candidate before clicking.
+
+### Phase A: Shaft Preview
+
+```text
+/sable m19 spawn_placement m19_preview
+/sable m19 validate @e[name=m19_preview,limit=1]
+/sable m19 inspect @e[name=m19_preview,limit=1]
+/sable m19 give_shaft
+```
+
+Aim at the exposed shaft at fixture-local `(0,1,0)`, especially along its
+east/west axis.
+
+Expected: before clicking, Create's translucent shaft preview appears at the
+next valid shaft-chain position, with the primary expected candidate at
+fixture-local `(1,1,0)`. Right click places the real shaft where the preview
+appeared. The client log should include `SABLE_M19_GHOST` for the Sable
+ghost path.
+
+### Phase B: Cogwheel Previews
+
+```text
+/sable m19 give_cogwheel
+```
+
+Aim at the small cogwheel canary at fixture-local `(0,1,3)`.
+
+Expected: Create's normal cogwheel placement-helper preview appears on a valid
+adjacent empty space, and right click places the real cogwheel at that preview.
+
+```text
+/sable m19 give_large_cogwheel
+```
+
+Aim at the large cogwheel canary at fixture-local `(0,1,6)`.
+
+Expected: if Create 6.0.8's large-cog helper accepts the aimed face, the large
+cogwheel preview appears and right click places the real large cogwheel there.
+
+### Phase C: Parent Transform
+
+```text
+/sable m19 test_translate_parent @e[name=m19_preview,limit=1]
+/sable m19 give_shaft
+```
+
+Aim at the Sable shaft again.
+
+Expected: the ghost preview remains attached to the translated Sable-local
+candidate, not the hidden plot coordinate.
+
+## M20 Create-on-Sable Parity Harness
+
+M20 does not claim runtime closure. It groups remaining ordinary Create
+compatibility checks into compact fixtures. Run each fixture only far enough to
+answer the stated family question.
+
+### Session 1: Logistics
+
+```text
+/sable m20 audit
+/sable m20 spawn_logistics m20_logistics
+/sable m20 inspect_logistics @e[name=m20_logistics,limit=1]
+/sable m20 test_translate_parent @e[name=m20_logistics,limit=1]
+/sable m20 test_rotate_parent @e[name=m20_logistics,limit=1]
+/sable m20 save_reload_check @e[name=m20_logistics,limit=1]
+```
+
+PASS: chest/depot/funnel/belt canaries exist in one Sable, visible transforms
+remain coherent, and manual item-transfer observations can be tied to fixture
+local positions. FAIL: item transfer targets hidden parent-world coordinates,
+visuals detach from the Sable, or fixture state is missing after reload.
+
+### Session 2: Fluids
+
+```text
+/sable m20 spawn_fluids m20_fluids
+/sable m20 inspect_fluids @e[name=m20_fluids,limit=1]
+/sable m20 test_translate_parent @e[name=m20_fluids,limit=1]
+/sable m20 save_reload_check @e[name=m20_fluids,limit=1]
+```
+
+PASS: tank/pipe/pump canaries persist and any manual fluid transfer stays in
+fixture-local pipe/tank geometry. FAIL: pump/pipe state probes parent-world
+hidden chunks or fluid contents duplicate/disappear across reload.
+
+### Session 3: Redstone/Kinetics
+
+```text
+/sable m20 spawn_redstone m20_redstone
+/sable m20 inspect_redstone @e[name=m20_redstone,limit=1]
+/sable m20 toggle_redstone @e[name=m20_redstone,limit=1]
+/sable m20 inspect_redstone @e[name=m20_redstone,limit=1]
+```
+
+PASS: clutch/gearshift powered-state and kinetic response match the accepted
+M17 behavior. FAIL: neighbor updates leave the owning Sable or the downstream
+Create network ignores the redstone source.
+
+### Session 4: Arm
+
+```text
+/sable m20 spawn_arm m20_arm
+/sable m20 inspect_arm @e[name=m20_arm,limit=1]
+/sable m20 test_rotate_parent @e[name=m20_arm,limit=1]
+/sable m20 inspect_arm @e[name=m20_arm,limit=1]
+```
+
+PASS: arm/depot canaries remain local and visible after parent rotation. Full
+automatic arm logistics remain explicitly deferred unless this canary provides a
+concrete ordinary-Create failure to port.
+
+### Session 5: Controller
+
+```text
+/sable m20 spawn_controller m20_controller
+/sable m20 inspect_controller @e[name=m20_controller,limit=1]
+/sable m20 stabilize @e[name=m20_controller,limit=1]
+/sable m20 acceptance @e[name=m20_controller,limit=1]
+```
+
+PASS: Rope Pulley/controller canary is structurally present and ready for a
+future controller-specific milestone. FAIL: controller lookup/render/collision
+regresses the accepted M13-M15 contraption architecture.
+
+```text
+/sable m19 test_rotate_parent @e[name=m19_preview,limit=1]
+/sable m19 give_shaft
+```
+
+Aim at the Sable shaft again.
+
+Expected: the ghost preview composes with the parent Sable rotation and remains
+at the transformed visible candidate. No hidden-space ghost should appear.
+
+```text
+/sable m19 acceptance @e[name=m19_preview,limit=1]
+```
+
+Expected: command output confirms fixture state only; visual PASS remains the
+user-observed presence and correct placement of the Create ghost preview.

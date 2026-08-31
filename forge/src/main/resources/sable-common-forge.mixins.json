@@ -55,6 +55,7 @@
         "m17.create.SplitShaftRendererMixin",
         "m18.create.DeployerRendererMixin",
         "m18.create.DeployerMovementBehaviourRenderMixin",
+        "m19.create.GhostBlockRendererMixin",
         "respawn_point.sleeping.LivingEntityRendererMixin",
         "stop_rain.LevelRenderMixin",
         "sublevel_render.BlockEntityRenderDispatcherMixin",

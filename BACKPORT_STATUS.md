@@ -1631,3 +1631,57 @@ deterministic clicked/result target at `(6,1,0)` plus an explicit support block
 at `(6,0,0)`. PUNCH mode clears those USE cells and leaves a single stone block
 at `(7,1,0)`, making it the first solid attacked target. No production Deployer
 mixins or coordinate utilities changed in this pass.
+
+## M18 Closed
+
+M18 is closed by runtime acceptance. Moving Deployers inside Sable render their
+arm/hand, carry normal held-item state, place and punch through Create's
+fake-player path, preserve repeated piston cycles, parent motion, and
+save/reload behavior. The M18 production compatibility boundary is frozen unless
+a concrete regression appears.
+
+## M19 Create Placement-Helper Ghost Preview
+
+M19 fixes the client-only Create placement-assist ghost preview for static
+Sable blocks. Exact Create 6.0.8/Ponder 1.0.91 bytecode shows
+`PlacementClient.tick()` reads `Minecraft.hitResult`, filters
+`PlacementHelpers.getHelpersView()`, calls the matching
+`IPlacementHelper.getOffset(...)`, and the default helper path calls
+`GhostBlocks.showGhostState(...).at(PlacementOffset.getBlockPos())`.
+`GhostBlockRenderer$TransparentGhostBlockRenderer.render(...)` then translates
+directly by `ghostPos - camera`.
+
+Inside Sable, M11/M13 already refresh `Minecraft.hitResult` to the raw plot
+block hit so shaft/cog placement helpers can evaluate normal Create rules
+against the owning client level. The missing preview was therefore a render
+space defect: the ghost position was a hidden plot/storage coordinate, but the
+Catnip ghost renderer treated it as ordinary visible world space. M19 adds only
+a client Sable-gated transform around that ghost renderer translation. Normal
+world ghost rendering and server placement semantics remain unchanged, no shaft
+or cog placement rules are duplicated, and no fake ghost model is drawn.
+
+M19.1 corrects the exact Forge runtime injector boundary: Ponder 1.0.91 invokes
+`PoseStack.m_85837_(DDD)V` in the packaged bytecode, so the client mixin targets
+that obfuscated method descriptor directly instead of the named
+`PoseStack.translate(DDD)` symbol that failed at startup.
+
+## M20 Create-on-Sable Compatibility Parity
+
+M20 creates the finite parity record for ordinary Create-on-Sable compatibility
+before Simulated/Aeronautics work begins. `M20_CREATE_PARITY_MATRIX.md` inventories
+42 exact-upstream Create/Flywheel compatibility concerns from Sable
+`b7226222caf4eace63a708bdcd73ef36c971137d` and maps them to the Forge
+1.20.1/Create 6.0.8 backport.
+
+No new broad production Create compatibility patch is enabled in M20. The
+closed runtime-proven foundations remain frozen: M13 contraptions, M14 pistons,
+M15 gantries, M16 block breaking, M17 specialized kinetic rendering, and M18
+Deployers. M19 remains isolated as placement-helper ghost-preview work pending
+runtime acceptance. M20 adds a family-level `/sable m20` harness for logistics,
+fluids, redstone/kinetics, Mechanical Arm, and Rope Pulley/controller canaries
+so the remaining deferred rows can be tested without hidden-coordinate guesses.
+
+Matrix summary: `PORTED_RUNTIME_PROVEN=6`, `PORTED_STATIC_PROVEN=2`,
+`COVERED_BY_GENERALIZED_BACKPORT=7`, `NOT_APPLICABLE_1_20_1=1`,
+`UPSTREAM_FEATURE_ABSENT_IN_TARGET_CREATE=0`, `DEFERRED_EXPLICITLY=26`,
+`MISSING_APPLICABLE=0`.

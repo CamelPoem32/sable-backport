@@ -5002,6 +5002,13 @@ tasks.named('build') {
     dependsOn tasks.named('verifyM18CommandHarnessBoundary')
     dependsOn tasks.named('verifyM18RegressionBoundary')
     dependsOn tasks.named('verifyM18DeployerCrashAndRenderingBoundary')
+    dependsOn tasks.named('verifyM19PlacementPreviewBoundary')
+    dependsOn tasks.named('verifyM19CommandHarnessBoundary')
+    dependsOn tasks.named('verifyM19RegressionBoundary')
+    dependsOn tasks.named('verifyM20CreateParityMatrixBoundary')
+    dependsOn tasks.named('verifyM20CreateTargetFamiliesBoundary')
+    dependsOn tasks.named('verifyM20CommandHarnessBoundary')
+    dependsOn tasks.named('verifyM20RegressionBoundary')
 }
 
 tasks.named('checkstyleMain') {
@@ -13050,6 +13057,500 @@ tasks.register('verifyM18DeployerCrashAndRenderingBoundary') {
         }
 
         logger.lifecycle('verifyM18DeployerCrashAndRenderingBoundary PASS: no double plot offset/generating probes, Sable-only Deployer arm BER/actor fallback, and hidden-coordinate invariant are guarded')
+    }
+}
+
+tasks.register('verifyM19PlacementPreviewBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M19 Catnip placement-helper ghost preview render transform boundary.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m19/create/GhostBlockRendererMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M19 placement preview verification: ${targetCreateJar}")
+        }
+
+        String mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m19/create/GhostBlockRendererMixin.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                '@Mixin(targets = "net.createmod.catnip.ghostblock.GhostBlockRenderer$TransparentGhostBlockRenderer", remap = false)',
+                'method = "render"',
+                'PoseStack;m_85837_(DDD)V',
+                'remap = false',
+                'ordinal = 0',
+                'Sable.HELPER.getContainingClient(rawGhostPosition)',
+                'SublevelRenderOffsetHelper.posePlotToProjected(subLevel, poseStack)',
+                'SublevelRenderOffsetHelper.translation(rawGhostPosition)',
+                'cameraRelativeVisible',
+                'poseStack.translate(cameraRelativeVisible.x, cameraRelativeVisible.y, cameraRelativeVisible.z)',
+                'SABLE_M19_GHOST',
+                'targetLocal=',
+                'targetRaw=',
+                'visibleWorldPosition=',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!mixin.contains(canary)) {
+                throw new GradleException("M19 ghost renderer mixin lost required canary: ${canary}")
+            }
+        }
+        [
+                'PlacementOffset.success',
+                'IPlacementHelper.getOffset',
+                'PlacementHelpers.getHelpersView',
+                'setBlock(',
+                'destroyBlock(',
+                'new ShaftBlock',
+                'new CogWheelBlock',
+                'AllBlocks',
+                '@Overwrite',
+                'render fake',
+                'manual shaft'
+        ].each { forbidden ->
+            if (mixin.contains(forbidden)) {
+                throw new GradleException("M19 must not duplicate placement rules, mutate placement state, or fake ghost models: ${forbidden}")
+            }
+        }
+        if (mixin.contains('PoseStack;translate(DDD)V')) {
+            throw new GradleException('M19 must not target the named PoseStack.translate symbol in the runtime Ponder jar; Forge runtime bytecode uses m_85837_(DDD)V')
+        }
+        if (!config.contains('"m19.create.GhostBlockRendererMixin"')) {
+            throw new GradleException('M19 client mixin config missing GhostBlockRendererMixin')
+        }
+        if (config.indexOf('"m19.create.GhostBlockRendererMixin"') > config.indexOf('"mixins"')) {
+            throw new GradleException('M19 GhostBlockRendererMixin must remain client-only')
+        }
+
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            def ponderEntry = createJar.getJarEntry("META-INF/jarjar/Ponder-Forge-${forge_minecraft_version}-${forge_ponder_version}.jar")
+            if (ponderEntry == null) {
+                throw new GradleException('Create 6.0.8 jar is missing nested Ponder/Catnip jar for M19 verification')
+            }
+            byte[] nestedBytes = createJar.getInputStream(ponderEntry).readAllBytes()
+            def nestedEntries = [:]
+            new java.util.jar.JarInputStream(new ByteArrayInputStream(nestedBytes)).withCloseable { nested ->
+                def entry
+                while ((entry = nested.nextJarEntry) != null) {
+                    if (!entry.directory) {
+                        nestedEntries[entry.name] = nested.readAllBytes()
+                    }
+                }
+            }
+            [
+                    'net/createmod/catnip/placement/PlacementClient.class',
+                    'net/createmod/catnip/placement/IPlacementHelper.class',
+                    'net/createmod/catnip/placement/PlacementOffset.class',
+                    'net/createmod/catnip/placement/PlacementHelpers.class',
+                    'net/createmod/catnip/ghostblock/GhostBlocks.class',
+                    'net/createmod/catnip/ghostblock/GhostBlockRenderer$TransparentGhostBlockRenderer.class'
+            ].each { entryName ->
+                if (!nestedEntries.containsKey(entryName)) {
+                    throw new GradleException("Nested Catnip class missing for M19: ${entryName}")
+                }
+            }
+            String placementClient = new String(nestedEntries['net/createmod/catnip/placement/PlacementClient.class'], StandardCharsets.ISO_8859_1)
+            ['getHelpersView', 'Minecraft', 'ClientLevel', 'BlockHitResult', 'getBlockPos', 'getOffset', 'renderAt', 'setTarget'].each { canary ->
+                if (!placementClient.contains(canary)) {
+                    throw new GradleException("Catnip PlacementClient lost M19 call-path canary: ${canary}")
+                }
+            }
+            String helper = new String(nestedEntries['net/createmod/catnip/placement/IPlacementHelper.class'], StandardCharsets.ISO_8859_1)
+            ['displayGhost', 'GhostBlocks', 'showGhostState', 'getBlockPos', 'getGhostState'].each { canary ->
+                if (!helper.contains(canary)) {
+                    throw new GradleException("Catnip IPlacementHelper lost M19 ghost-display canary: ${canary}")
+                }
+            }
+            String ghost = new String(nestedEntries['net/createmod/catnip/ghostblock/GhostBlockRenderer$TransparentGhostBlockRenderer.class'], StandardCharsets.ISO_8859_1)
+            ['render', 'GhostBlockParams', 'BakedModelBufferer', 'PoseStack', 'BlockPos', 'PlacementClient', 'm_85837_'].each { canary ->
+                if (!ghost.contains(canary)) {
+                    throw new GradleException("Catnip TransparentGhostBlockRenderer lost M19 render canary: ${canary}")
+                }
+            }
+            [
+                    'com/simibubi/create/content/kinetics/simpleRelays/ShaftBlock.class',
+                    'com/simibubi/create/content/kinetics/simpleRelays/ShaftBlock$PlacementHelper.class',
+                    'com/simibubi/create/content/kinetics/simpleRelays/CogwheelBlockItem.class',
+                    'com/simibubi/create/content/kinetics/simpleRelays/CogwheelBlockItem$SmallCogHelper.class',
+                    'com/simibubi/create/content/kinetics/simpleRelays/CogwheelBlockItem$LargeCogHelper.class'
+            ].each { entryName ->
+                if (createJar.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 placement helper class missing for M19: ${entryName}")
+                }
+            }
+        } finally {
+            createJar.close()
+        }
+
+        logger.lifecycle('verifyM19PlacementPreviewBoundary PASS: Catnip placement helpers remain authoritative and Sable only transforms ghost rendering into visible space')
+    }
+}
+
+tasks.register('verifyM19CommandHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M19 static placement-preview command harness and fixture coordinates.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M19TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('BACKPORT_STATUS.md'))
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M19TestCommands.java').getText('UTF-8')
+        String rootCommand = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+
+        if (!rootCommand.contains('M19TestCommands.register(sableBuilder, buildContext)')) {
+            throw new GradleException('SableCommand must register the M19 harness')
+        }
+        [
+                'spawn_placement',
+                'validate',
+                'inspect',
+                'give_shaft',
+                'give_cogwheel',
+                'give_large_cogwheel',
+                'test_translate_parent',
+                'test_rotate_parent',
+                'acceptance'
+        ].each { command ->
+            if (!commands.contains('"' + command + '"')) {
+                throw new GradleException("M19 command tree missing command: ${command}")
+            }
+        }
+        [
+                'SHAFT_CANARY_LOCAL = new BlockPos(0, 1, 0)',
+                'SHAFT_EXPECTED_PREVIEW_LOCAL = new BlockPos(1, 1, 0)',
+                'COG_CANARY_LOCAL = new BlockPos(0, 1, 3)',
+                'LARGE_COG_CANARY_LOCAL = new BlockPos(0, 1, 6)',
+                'previewPath=PlacementClient->IPlacementHelper->GhostBlocks->TransparentGhostBlockRenderer',
+                'currentClientTarget=CLIENT_RUNTIME_ONLY',
+                'previewRenderPathReached=CLIENT_LOG_SABLE_M19_GHOST',
+                'visualPass=USER_OBSERVED_REQUIRED',
+                'APPLIED_M10_PHYSICS_VELOCITY',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M19 harness lost required canary: ${canary}")
+            }
+        }
+        [
+                'import net.createmod.catnip.placement',
+                'import net.createmod.catnip.ghostblock',
+                'AllBlocks',
+                'AllItems',
+                'private static final BlockState',
+                'destroyBlock(',
+                'setBlock(toPlot(',
+                'Mechanical Piston',
+                'Deployer',
+                'Harvester',
+                'Saw',
+                'Train'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M19 harness must stay startup-lazy and placement-preview-only: ${forbidden}")
+            }
+        }
+        if (!status.contains('M19 Create Placement-Helper Ghost Preview')
+                || !status.contains('M18 Closed')) {
+            throw new GradleException('BACKPORT_STATUS.md must close M18 and record M19 implementation status')
+        }
+        if (!smoke.contains('M19 Create Placement-Helper Ghost Preview Harness')
+                || !smoke.contains('/sable m19 spawn_placement m19_preview')
+                || !smoke.contains('/sable m19 give_shaft')
+                || !smoke.contains('/sable m19 give_cogwheel')) {
+            throw new GradleException('TARGET_RUNTIME_SMOKE.md must include the M19 one-session runtime sequence')
+        }
+
+        logger.lifecycle('verifyM19CommandHarnessBoundary PASS: M19 static placement-preview fixture and commands are registered without server placement changes')
+    }
+}
+
+tasks.register('verifyM19RegressionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M19 stays client placement-preview only and preserves closed M11/M13-M18 boundaries.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m19/create/GhostBlockRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M19TestCommands.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java'))
+
+    doLast {
+        String m19 = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m19/create/GhostBlockRendererMixin.java').getText('UTF-8') +
+                rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M19TestCommands.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String targetHelper = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java').getText('UTF-8')
+        String interactionHelper = rootProject.file('common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java').getText('UTF-8')
+
+        if (!targetHelper.contains('STATIC_SABLE_BLOCK')
+                || !targetHelper.contains('refreshMinecraftHitResult')
+                || !interactionHelper.contains('tryUseOnCurrentTarget')) {
+            throw new GradleException('M19 must preserve the established M11/M13 static Sable target and placement bridge')
+        }
+        [
+                'block_breaking_behaviour.BlockBreakingMovementBehaviourMixin',
+                'compatibility.create.deployer.DeployerMovementBehaviourMixin',
+                'm18.create.DeployerRendererMixin',
+                'm17.create.GearboxRendererMixin',
+                'm17.create.SplitShaftRendererMixin',
+                'compatibility.create.contraptions.ContraptionEntityRendererMixin'
+        ].each { canary ->
+            if (!config.contains(canary)) {
+                throw new GradleException("M19 regression guard lost closed milestone config entry: ${canary}")
+            }
+        }
+        [
+                'ServerboundUseItemOnSubLevelPacket',
+                'server placement',
+                'direct placement',
+                'Schematic',
+                'TrackPlacement',
+                'Ponder',
+                'Flywheel global',
+                'VisualizationManager.supportsVisualization',
+                'render fake',
+                'manual model'
+        ].each { forbidden ->
+            if (m19.contains(forbidden)) {
+                throw new GradleException("M19 must not broaden beyond client placement-helper ghost previews: ${forbidden}")
+            }
+        }
+
+        logger.lifecycle('verifyM19RegressionBoundary PASS: M19 is client ghost-preview only and preserves M11/M13-M18 boundaries')
+    }
+}
+
+tasks.register('verifyM20CreateParityMatrixBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M20 upstream Create compatibility parity matrix is finite and has no missing applicable rows.'
+
+    inputs.file(rootProject.file('M20_CREATE_PARITY_MATRIX.md'))
+    inputs.file(rootProject.file('BACKPORT_STATUS.md'))
+
+    doLast {
+        String matrix = rootProject.file('M20_CREATE_PARITY_MATRIX.md').getText('UTF-8')
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        List<String> rows = matrix.readLines().findAll { it ==~ /\| [0-9]+ .*/ }
+        if (rows.size() != 42) {
+            throw new GradleException("M20 parity matrix must contain exactly 42 concern rows, found ${rows.size()}")
+        }
+        Map<String, Integer> expectedCounts = [
+                'PORTED_RUNTIME_PROVEN'              : 6,
+                'PORTED_STATIC_PROVEN'               : 2,
+                'COVERED_BY_GENERALIZED_BACKPORT'    : 7,
+                'NOT_APPLICABLE_1_20_1'              : 1,
+                'UPSTREAM_FEATURE_ABSENT_IN_TARGET_CREATE': 0,
+                'DEFERRED_EXPLICITLY'                : 26,
+                'MISSING_APPLICABLE'                 : 0
+        ]
+        expectedCounts.each { key, expected ->
+            int actual = rows.count { it.contains("`${key}`") }
+            if (actual != expected) {
+                throw new GradleException("M20 parity matrix status ${key} expected ${expected}, found ${actual}")
+            }
+            if (!matrix.contains("| `${key}` | ${expected} |")) {
+                throw new GradleException("M20 parity matrix summary count is stale for ${key}")
+            }
+        }
+        [
+                'b7226222caf4eace63a708bdcd73ef36c971137d',
+                'MechanicalArmBlockEntity',
+                'PulleyBlockEntity',
+                'BeltBlockEntityMixin',
+                'PipeConnectionMixin',
+                'TrackPlacement',
+                'GhostBlockRendererMixin',
+                'MISSING_APPLICABLE` | 0'
+        ].each { canary ->
+            if (!matrix.contains(canary)) {
+                throw new GradleException("M20 parity matrix lost required upstream/parity canary: ${canary}")
+            }
+        }
+        if (!status.contains('M20 Create-on-Sable Compatibility Parity')
+                || !status.contains('M20_CREATE_PARITY_MATRIX.md')
+                || !status.contains('MISSING_APPLICABLE=0')) {
+            throw new GradleException('BACKPORT_STATUS.md must record M20 matrix summary and zero missing applicable rows')
+        }
+        logger.lifecycle('verifyM20CreateParityMatrixBoundary PASS: M20 parity matrix has 42 finite rows, explicit deferrals, and zero missing applicable concerns')
+    }
+}
+
+tasks.register('verifyM20CreateTargetFamiliesBoundary') {
+    group = 'forge backport'
+    description = 'Verifies exact Create 6.0.8 target artifact exposes the M20 audited families.'
+
+    inputs.file(targetCreateJar)
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M20 verification: ${targetCreateJar}")
+        }
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            [
+                    'com/simibubi/create/content/kinetics/belt/BeltBlock.class',
+                    'com/simibubi/create/content/kinetics/belt/BeltBlockEntity.class',
+                    'com/simibubi/create/content/logistics/depot/DepotBlockEntity.class',
+                    'com/simibubi/create/content/logistics/chute/ChuteBlockEntity.class',
+                    'com/simibubi/create/content/kinetics/mechanicalArm/ArmBlockEntity.class',
+                    'com/simibubi/create/content/fluids/PipeConnection.class',
+                    'com/simibubi/create/content/fluids/pipes/FluidPipeBlock.class',
+                    'com/simibubi/create/content/fluids/pump/PumpBlockEntity.class',
+                    'com/simibubi/create/content/contraptions/pulley/PulleyBlockEntity.class',
+                    'com/simibubi/create/content/contraptions/elevator/ElevatorPulleyBlockEntity.class',
+                    'com/simibubi/create/content/contraptions/actors/harvester/HarvesterMovementBehaviour.class',
+                    'com/simibubi/create/content/kinetics/base/BlockBreakingMovementBehaviour.class',
+                    'com/simibubi/create/content/kinetics/deployer/DeployerMovementBehaviour.class',
+                    'com/simibubi/create/content/trains/track/TrackPlacement.class',
+                    'com/simibubi/create/content/trains/graph/TrackGraphVisualizer.class',
+                    'com/simibubi/create/content/schematics/client/SchematicRenderer.class',
+                    'com/simibubi/create/content/equipment/toolbox/ToolboxHandler.class'
+            ].each { entryName ->
+                if (createJar.getJarEntry(entryName) == null) {
+                    throw new GradleException("Create 6.0.8 audited M20 family class missing: ${entryName}")
+                }
+            }
+        } finally {
+            createJar.close()
+        }
+        logger.lifecycle('verifyM20CreateTargetFamiliesBoundary PASS: exact Create 6.0.8 jar exposes the audited M20 logistics/fluid/arm/controller/overlay families')
+    }
+}
+
+tasks.register('verifyM20CommandHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M20 family-level runtime harness and docs are registered.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java'))
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String rootCommand = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/SableCommand.java').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        if (!rootCommand.contains('M20TestCommands.register(sableBuilder, buildContext)')) {
+            throw new GradleException('SableCommand must register the M20 harness')
+        }
+        [
+                'audit',
+                'status',
+                'spawn_logistics',
+                'inspect_logistics',
+                'reset_logistics',
+                'spawn_fluids',
+                'inspect_fluids',
+                'reset_fluids',
+                'spawn_redstone',
+                'inspect_redstone',
+                'toggle_redstone',
+                'spawn_arm',
+                'inspect_arm',
+                'spawn_controller',
+                'inspect_controller',
+                'stabilize',
+                'test_translate_parent',
+                'test_rotate_parent',
+                'save_reload_check',
+                'acceptance'
+        ].each { command ->
+            if (!commands.contains('"' + command + '"')) {
+                throw new GradleException("M20 command tree missing command: ${command}")
+            }
+        }
+        [
+                'M20_CREATE_PARITY_MATRIX.md',
+                'upstreamConcernRows=42',
+                'missingApplicable=0',
+                'logisticsSpec()',
+                'fluidsSpec()',
+                'redstoneSpec()',
+                'armSpec()',
+                'controllerSpec()',
+                'APPLIED_EXISTING_PHYSICS_HANDLE',
+                'USER_OBSERVED_REQUIRED',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20 harness lost required canary: ${canary}")
+            }
+        }
+        [
+                'import com.simibubi.create',
+                'import net.createmod.catnip',
+                'setBlock(toPlot(',
+                'destroyBlock(',
+                'new DeployerFakePlayer',
+                'manual transfer',
+                'manual fluid'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M20 harness must remain lazy and must not fake Create semantics: ${forbidden}")
+            }
+        }
+        if (!smoke.contains('M20 Create-on-Sable Parity Harness')
+                || !smoke.contains('/sable m20 spawn_logistics m20_logistics')
+                || !smoke.contains('/sable m20 spawn_fluids m20_fluids')
+                || !smoke.contains('/sable m20 spawn_redstone m20_redstone')
+                || !smoke.contains('/sable m20 spawn_arm m20_arm')
+                || !smoke.contains('/sable m20 spawn_controller m20_controller')) {
+            throw new GradleException('TARGET_RUNTIME_SMOKE.md must contain the M20 family runtime plan')
+        }
+        logger.lifecycle('verifyM20CommandHarnessBoundary PASS: M20 family harness is complete, lazy, and runtime-truthful')
+    }
+}
+
+tasks.register('verifyM20RegressionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20 does not broaden production Create compatibility or reopen M13-M19.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(rootProject.file('M20_CREATE_PARITY_MATRIX.md'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String matrix = rootProject.file('M20_CREATE_PARITY_MATRIX.md').getText('UTF-8')
+        if (config.contains('m20.')) {
+            throw new GradleException('M20 must not register new production mixins without a proven runtime root cause')
+        }
+        [
+                'm11.create.KineticBlockEntityRendererMixin',
+                'm17.create.GearboxRendererMixin',
+                'm18.create.DeployerRendererMixin',
+                'm19.create.GhostBlockRendererMixin',
+                'compatibility.create.contraptions.ContraptionEntityRendererMixin',
+                'compatibility.create.behaviour_compatibility.block_breaking_behaviour.BlockBreakingMovementBehaviourMixin',
+                'compatibility.create.deployer.DeployerMovementBehaviourMixin'
+        ].each { canary ->
+            if (!config.contains(canary)) {
+                throw new GradleException("M20 regression guard lost closed milestone mixin config entry: ${canary}")
+            }
+        }
+        [
+                'M13',
+                'M14',
+                'M15',
+                'M16',
+                'M17',
+                'M18',
+                'M19'
+        ].each { milestone ->
+            if (!matrix.contains(milestone)) {
+                throw new GradleException("M20 matrix must name closed/pending milestone coverage: ${milestone}")
+            }
+        }
+        if (commands.contains('hidden plot') && commands.contains('PoseStack')) {
+            throw new GradleException('M20 harness must not introduce hidden-coordinate render logic')
+        }
+        logger.lifecycle('verifyM20RegressionBoundary PASS: M20 adds parity docs and runtime harness only, preserving M13-M19 production boundaries')
     }
 }
 
