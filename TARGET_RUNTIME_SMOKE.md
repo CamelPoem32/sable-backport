@@ -2766,77 +2766,347 @@ candidate, not the hidden plot coordinate.
 
 ## M20 Create-on-Sable Parity Harness
 
-M20 does not claim runtime closure. It groups remaining ordinary Create
-compatibility checks into compact fixtures. Run each fixture only far enough to
-answer the stated family question.
+M20.7 does not claim runtime closure. Fluids, Belt structure/kinetics/rendering,
+Belt transported-item rendering, Mechanical Arm kinetics, Arm TAKE/DEPOSIT
+points, Arm articulated rendering, Arm selection outlines, Rope Pulley, Elevator
+assembly, and Redstone Link are already runtime-accepted. This pass adds a
+complete ordinary Create functional gauntlet so the remaining ordinary families
+have concrete fixtures instead of false deferred status.
 
 ### Session 1: Logistics
 
 ```text
-/sable m20 audit
 /sable m20 spawn_logistics m20_logistics
+/sable m20 inspect_logistics @e[name=m20_logistics,limit=1]
+/sable m20 seed_logistics @e[name=m20_logistics,limit=1]
 /sable m20 inspect_logistics @e[name=m20_logistics,limit=1]
 /sable m20 test_translate_parent @e[name=m20_logistics,limit=1]
 /sable m20 test_rotate_parent @e[name=m20_logistics,limit=1]
 /sable m20 save_reload_check @e[name=m20_logistics,limit=1]
 ```
 
-PASS: chest/depot/funnel/belt canaries exist in one Sable, visible transforms
-remain coherent, and manual item-transfer observations can be tied to fixture
-local positions. FAIL: item transfer targets hidden parent-world coordinates,
-visuals detach from the Sable, or fixture state is missing after reload.
+Expected: the scaffold-connected belt survives settling as
+`START/MIDDLE/MIDDLE/MIDDLE/END`, has a controller, nonzero kinetic speed, and
+the seeded iron ingot appears as a transported belt item whose belt position
+changes over time. Belt casing/dynamic belt rendering should be visible through
+the M20 Sable-only BeltRenderer BER fallback, and the iron ingot item itself
+should remain visibly attached to the moving belt path. Diagnostics should log
+`SABLE_M20_BELT_ITEM_RENDER` with `hiddenPlotPoseTranslation=false`.
 
 ### Session 2: Fluids
 
 ```text
 /sable m20 spawn_fluids m20_fluids
 /sable m20 inspect_fluids @e[name=m20_fluids,limit=1]
+/sable m20 inspect_fluids @e[name=m20_fluids,limit=1]
 /sable m20 test_translate_parent @e[name=m20_fluids,limit=1]
 /sable m20 save_reload_check @e[name=m20_fluids,limit=1]
 ```
 
-PASS: tank/pipe/pump canaries persist and any manual fluid transfer stays in
-fixture-local pipe/tank geometry. FAIL: pump/pipe state probes parent-world
-hidden chunks or fluid contents duplicate/disappear across reload.
+Expected: the west source tank starts with 4000 mB water, the east destination
+tank starts empty, the pump is `facing=east`, the side cog and pump report
+nonzero speed, and later inspect output shows water decreasing in the source and
+increasing in the destination.
 
-### Session 3: Redstone/Kinetics
-
-```text
-/sable m20 spawn_redstone m20_redstone
-/sable m20 inspect_redstone @e[name=m20_redstone,limit=1]
-/sable m20 toggle_redstone @e[name=m20_redstone,limit=1]
-/sable m20 inspect_redstone @e[name=m20_redstone,limit=1]
-```
-
-PASS: clutch/gearshift powered-state and kinetic response match the accepted
-M17 behavior. FAIL: neighbor updates leave the owning Sable or the downstream
-Create network ignores the redstone source.
-
-### Session 4: Arm
+### Session 3: Mechanical Arm
 
 ```text
 /sable m20 spawn_arm m20_arm
 /sable m20 inspect_arm @e[name=m20_arm,limit=1]
+/sable m20 inspect_arm @e[name=m20_arm,limit=1]
+/sable m20 give_arm_selector
 /sable m20 test_rotate_parent @e[name=m20_arm,limit=1]
 /sable m20 inspect_arm @e[name=m20_arm,limit=1]
 ```
 
-PASS: arm/depot canaries remain local and visible after parent rotation. Full
-automatic arm logistics remain explicitly deferred unless this canary provides a
-concrete ordinary-Create failure to port.
+Expected: the side-cog-powered arm and both depots survive settling as one Sable,
+the arm reports nonzero speed, the input depot starts with one iron ingot,
+interaction-point fields show exactly one TAKE input and one DEPOSIT output, and
+the ingot moves from input to output through normal arm behaviour. The
+articulated arm should render through Create's own `ArmRenderer`; holding the
+Mechanical Arm item from `give_arm_selector` and selecting the depots should
+show visible blue/yellow selection outlines inside Sable.
 
-### Session 5: Controller
+### Session 4: Rope Pulley
 
 ```text
 /sable m20 spawn_controller m20_controller
 /sable m20 inspect_controller @e[name=m20_controller,limit=1]
-/sable m20 stabilize @e[name=m20_controller,limit=1]
+/sable m20 controller_extend @e[name=m20_controller,limit=1]
+/sable m20 inspect_controller @e[name=m20_controller,limit=1]
+/sable m20 controller_retract @e[name=m20_controller,limit=1]
+/sable m20 inspect_controller @e[name=m20_controller,limit=1]
+/sable m20 controller_stop @e[name=m20_controller,limit=1]
 /sable m20 acceptance @e[name=m20_controller,limit=1]
 ```
 
-PASS: Rope Pulley/controller canary is structurally present and ready for a
-future controller-specific milestone. FAIL: controller lookup/render/collision
-regresses the accepted M13-M15 contraption architecture.
+Expected: the rope path under the pulley is clear, the pulley is powered from
+its horizontal side axis, `controller_extend` requests the Creative Motor value
+that produces observed pulley speed `+32` and extends from offset 0,
+`controller_retract` requests the value that produces observed pulley speed
+`-32` and retracts, and the inspect output reports offset/running changes
+without any direct pulley-offset writes. Active pulley rendering should show
+Create's own rope/magnet path through `SABLE_M20_PULLEY_RENDER` with
+`hiddenPlotPoseTranslation=false`.
+
+### Session 5: Rope Pulley Payload
+
+```text
+/sable m20 spawn_controller m20_controller_payload
+/sable m20 prepare_controller_payload @e[name=m20_controller_payload,limit=1]
+/sable m20 controller_extend @e[name=m20_controller_payload,limit=1]
+/sable m20 inspect_controller @e[name=m20_controller_payload,limit=1]
+/sable m20 controller_retract @e[name=m20_controller_payload,limit=1]
+/sable m20 inspect_controller @e[name=m20_controller_payload,limit=1]
+/sable m20 controller_extend @e[name=m20_controller_payload,limit=1]
+/sable m20 inspect_controller @e[name=m20_controller_payload,limit=1]
+```
+
+Expected: a small two-block smooth-stone payload is prepared at local
+`(0,0,0)` and `(1,0,0)` while the pulley is stopped at offset `0`, then
+extension advances Create's own assembly
+probe down the clear rope column until it reaches the payload. Retraction/extension should exercise
+Create's normal Rope Pulley contraption lifecycle without direct contraption
+creation, direct block teleport, or pulley-offset writes.
+
+### Session 6: Elevator Pulley
+
+```text
+/sable m20 spawn_elevator m20_elevator
+/sable m20 inspect_elevator @e[name=m20_elevator,limit=1]
+/sable m20 elevator_assemble @e[name=m20_elevator,limit=1]
+/sable m20 inspect_elevator @e[name=m20_elevator,limit=1]
+/sable m20 elevator_floor @e[name=m20_elevator,limit=1] 1
+/sable m20 inspect_elevator @e[name=m20_elevator,limit=1]
+/sable m20 elevator_floor @e[name=m20_elevator,limit=1] 0
+/sable m20 inspect_elevator @e[name=m20_elevator,limit=1]
+/sable m20 elevator_disassemble @e[name=m20_elevator,limit=1]
+/sable m20 inspect_elevator @e[name=m20_elevator,limit=1]
+```
+
+Expected: the fixture contains an Elevator Pulley at local `(0,6,0)`, a side
+Creative Motor at `(1,6,0)`, exactly one cabin `create:redstone_contact` at
+`(0,2,0)`, one visible cabin reference block at `(-1,2,0)`, and two floor
+contacts at `(1,1,0)` and `(1,4,0)`. This places the horizontal cabin contact
+at Create 6.0.8's first assembly scan position and derives the shared
+`ColumnCoords{x=1,z=0,facing=WEST}` used by the floor contacts. Assembly should
+create a normal Create Elevator contraption, floor
+commands should call the contacts through redstone rather than direct target-Y
+writes, and disassembly should restore the cabin without duplicates or missing
+blocks. Empty-cabin rider/UI polish remains deferred.
+
+### M20.7a Usable Ordinary Create Gauntlet Gallery
+
+```text
+/sable m20 gauntlet status
+/sable m20 gauntlet kinetic m20_g_kinetic
+/sable m20 gauntlet focus @e[name=m20_g_kinetic_kinetic,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_g_kinetic_kinetic,limit=1]
+/sable m20 gauntlet focus @e[name=m20_g_kinetic_chain_drive,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_g_kinetic_chain_drive,limit=1]
+/sable m20 gauntlet redstone m20_g_redstone
+/sable m20 gauntlet focus @e[name=m20_g_redstone_redstone_link,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_g_redstone_redstone_link,limit=1]
+/sable m20 gauntlet logistics m20_g_logistics
+/sable m20 gauntlet focus @e[name=m20_g_logistics_funnels_tunnels,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_g_logistics_funnels_tunnels,limit=1]
+/sable m20 gauntlet fluids m20_g_fluids
+/sable m20 gauntlet focus @e[name=m20_g_fluids_fluid_valve,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_g_fluids_fluid_valve,limit=1]
+/sable m20 gauntlet actors m20_g_actors
+/sable m20 gauntlet focus @e[name=m20_g_actors_saw_static,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_g_actors_saw_static,limit=1]
+/sable m20 gauntlet controls m20_g_controls
+/sable m20 gauntlet focus @e[name=m20_g_controls_gauges,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_g_controls_gauges,limit=1]
+/sable m20 gauntlet interfaces m20_g_interfaces
+/sable m20 gauntlet focus @e[name=m20_g_interfaces_portable_storage_interface,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_g_interfaces_portable_storage_interface,limit=1]
+/sable m20 gauntlet processing m20_g_processing
+/sable m20 gauntlet focus @e[name=m20_g_processing_press,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_g_processing_press,limit=1]
+```
+
+Expected: every grouped gauntlet command prints a gallery map and spawns one
+semantic canary per Sable in a deterministic 28x28 visible-world slot grid
+relative to the command executor. Each fixture has an intentionally sized
+smooth-stone platform and colored edge markers: blue WEST/input, yellow
+machine, red EAST/target, and green output. Use
+`/sable m20 gauntlet focus <selector>` to move between isolated fixtures, and
+`/sable m20 gauntlet cleanup <baseName>` to remove only the Sables spawned for
+that base name. Runtime PASS still requires inspecting after the settle window
+and observing family-specific behavior.
+
+Individual one-fixture spawn commands are also available:
+
+```text
+/sable m20 gauntlet kinetic basic <name>
+/sable m20 gauntlet kinetic chain <name>
+/sable m20 gauntlet redstone basic <name>
+/sable m20 gauntlet redstone link <name>
+/sable m20 gauntlet redstone contact <name>
+/sable m20 gauntlet redstone threshold <name>
+/sable m20 gauntlet redstone observer <name>
+/sable m20 gauntlet logistics belt <name>
+/sable m20 gauntlet logistics arm <name>
+/sable m20 gauntlet logistics funnels_tunnels <name>
+/sable m20 gauntlet logistics chute <name>
+/sable m20 gauntlet logistics ejector <name>
+/sable m20 gauntlet logistics vault <name>
+/sable m20 gauntlet fluids closed <name>
+/sable m20 gauntlet fluids valve <name>
+/sable m20 gauntlet fluids smart_pipe <name>
+/sable m20 gauntlet fluids hose_pulley <name>
+/sable m20 gauntlet actors drill <name>
+/sable m20 gauntlet actors saw_static <name>
+/sable m20 gauntlet actors saw_tree <name>
+/sable m20 gauntlet actors harvester <name>
+/sable m20 gauntlet actors plough <name>
+/sable m20 gauntlet actors roller <name>
+/sable m20 gauntlet actors rope_pulley <name>
+/sable m20 gauntlet controls elevator <name>
+/sable m20 gauntlet controls gauges <name>
+/sable m20 gauntlet controls rsc <name>
+/sable m20 gauntlet controls display <name>
+/sable m20 gauntlet controls cart <name>
+/sable m20 gauntlet interfaces psi_item <name>
+/sable m20 gauntlet interfaces pfi_fluid <name>
+/sable m20 gauntlet processing press <name>
+/sable m20 gauntlet processing mixer <name>
+/sable m20 gauntlet processing heated_mixer <name>
+/sable m20 gauntlet processing millstone <name>
+/sable m20 gauntlet processing crushing <name>
+/sable m20 gauntlet processing crafter <name>
+/sable m20 gauntlet processing fan <name>
+```
+
+### Session 8: M20.8 Specialized Rendering And Processing Diagnostics
+
+```text
+/sable m20 gauntlet processing mixer m20_mixer
+/sable m20 gauntlet focus @e[name=m20_mixer,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_mixer,limit=1]
+/sable m20 gauntlet processing heated_mixer m20_heated_mixer
+/sable m20 gauntlet focus @e[name=m20_heated_mixer,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_heated_mixer,limit=1]
+/sable m20 gauntlet processing crafter m20_crafter
+/sable m20 gauntlet focus @e[name=m20_crafter,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_crafter,limit=1]
+/sable m20 gauntlet fluids valve m20_valve
+/sable m20 gauntlet focus @e[name=m20_valve,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_valve,limit=1]
+/sable m20 gauntlet fluids smart_pipe m20_smart_pipe
+/sable m20 gauntlet focus @e[name=m20_smart_pipe,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_smart_pipe,limit=1]
+/sable m20 gauntlet interfaces pfi_fluid m20_pfi
+/sable m20 gauntlet focus @e[name=m20_pfi,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_pfi,limit=1]
+/sable m20 gauntlet redstone link m20_link_visual
+/sable m20 gauntlet focus @e[name=m20_link_visual,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_link_visual,limit=1]
+/sable m20 gauntlet controls rsc m20_rsc
+/sable m20 gauntlet focus @e[name=m20_rsc,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_rsc,limit=1]
+/sable m20 gauntlet processing crushing m20_crushing
+/sable m20 gauntlet focus @e[name=m20_crushing,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_crushing,limit=1]
+/sable m20 gauntlet redstone threshold m20_threshold
+/sable m20 gauntlet focus @e[name=m20_threshold,limit=1]
+/sable m20 gauntlet inspect @e[name=m20_threshold,limit=1]
+```
+
+Expected: Mixer whisk/head, Crafter internal gears, Fluid Valve shaft/pointer,
+Portable Fluid Interface moving parts, Redstone Link frequency items, Smart
+Fluid Pipe/Basin filters, and Rotation Speed Controller Create value-box/partial
+rendering appear through Sable-visible Create-owned paths. Mixer and Crushing
+inspect output should identify the first semantic processing prerequisite that
+fails, if processing still does not start. Threshold Switch should spawn as
+`create:stockpile_switch`.
+
+### M20.8b Radium World-Load Recovery
+
+```text
+Start the existing world with Radium still installed.
+Load the save that previously crashed while loading saved Sable sublevels.
+```
+
+Expected: Radium reports Sable-provided `lithium:options` overrides from the
+Forge `[[mods]]` entry and force-disables `mixin.world.tick_scheduler`; the
+world reaches normal play, old Sables remain intact, and the crash stack no
+longer includes
+`lithium.mixins.json:world.tick_scheduler.ChunkTickSchedulerMixin` on
+`LevelChunkTicks`.
+
+Temporary diagnostic control only: if automatic Forge metadata consumption must
+be isolated, add these exact lines to `config/radium.properties` and retry with
+the same world:
+
+```properties
+mixin.entity.collisions.unpushable_cramming=false
+mixin.world.chunk_access=false
+mixin.world.chunk_ticking=false
+mixin.world.tick_scheduler=false
+```
+
+Expected for the manual control: Radium reports the same four options as
+user-configured disables, `world.tick_scheduler.ChunkTickSchedulerMixin` is not
+applied, and the saved Sable sublevels load without the
+`LevelChunkTicks.sable$copy` null field crash.
+
+### M20 Final Runtime Acceptance Summary
+
+M20 is closed as `CLOSED_WITH_DEFERRED_KNOWN_ISSUE`.
+
+Runtime-accepted M20 foundation coverage:
+
+- Mechanical Bearing
+- Mechanical/Sticky Piston
+- Gantry
+- Mechanical Drill
+- Deployer
+- specialized kinetic BER paths
+- Create placement-helper previews
+- Belt structure, kinetics, geometry rendering, and transported item rendering
+- Mechanical Arm kinetics, TAKE/DEPOSIT points, articulated rendering, and selection outlines
+- closed fluid tank/pipe/pump network
+- Rope Pulley actuator motion and dynamic rope/magnet rendering
+- Elevator assembly/motion for the empty-cabin foundation canary
+- M20.8 specialized render/UI fixes reported working sufficiently for closure
+
+Known deferred M20 issue:
+
+- Create Crushing Wheels on Sable: structural fixture PASS, both
+  `CrushingWheelBlockEntity` instances PASS, kinetic rotation PASS, central
+  `create:crushing_wheel_controller[facing=down,valid=true]` formation PASS,
+  ItemEntity interaction FAIL, LivingEntity interaction FAIL / not
+  runtime-proven, and recipe processing FAIL because entity intake does not
+  occur.
+
+Deferred reentry point: resume at
+`com.simibubi.create.content.kinetics.crusher.CrushingWheelControllerBlock` and
+`com.simibubi.create.content.kinetics.crusher.CrushingWheelControllerBlockEntity`,
+specifically `entityInside`, `checkEntityForProcessing`, `getCollisionShape`,
+`startCrushing`, `tick`, `processingEntity`, and raw `worldPosition` versus
+visible parent entity coordinates. This isolated failure does not block M21.
+
+### Session 7: Redstone Link
+
+```text
+/sable m20 spawn_link m20_link
+/sable m20 inspect_link @e[name=m20_link,limit=1]
+/sable m20 toggle_link @e[name=m20_link,limit=1]
+/sable m20 inspect_link @e[name=m20_link,limit=1]
+/sable m20 toggle_link @e[name=m20_link,limit=1]
+/sable m20 inspect_link @e[name=m20_link,limit=1]
+/sable m20 test_translate_parent @e[name=m20_link,limit=1]
+/sable m20 test_rotate_parent @e[name=m20_link,limit=1]
+```
+
+Expected: the transmitter and receiver have matching Create frequencies and
+remain in the same Sable. Toggling the local redstone source should make the
+receiver and lamp change through Create's normal Redstone Link network. If this
+valid same-Sable canary fails, the exact upstream
+`RedstoneLinkNetworkHandlerMixin` becomes the next production patch candidate.
 
 ```text
 /sable m19 test_rotate_parent @e[name=m19_preview,limit=1]

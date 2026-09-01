@@ -8,18 +8,32 @@ import net.minecraft.CrashReport;
 import net.minecraft.CrashReportCategory;
 import net.minecraft.ReportedException;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
 @Mixin(Entity.class)
 public abstract class EntityMixin {
+    @Unique
+    private static final ResourceLocation SABLE$CRUSHING_WHEEL_CONTROLLER =
+            new ResourceLocation("create", "crushing_wheel_controller");
+
+    @Unique
+    private static final Set<String> SABLE$LOGGED_CRUSHING_BRIDGE =
+            Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     @Shadow
     public abstract boolean isAlive();
@@ -60,6 +74,8 @@ public abstract class EntityMixin {
                         }
 
                         try {
+                            this.sable$logCrushingEntityBridge(intersecting, mutableBlockPos, blockState,
+                                    (Entity) (Object) this);
                             blockState.entityInside(this.level, mutableBlockPos, (Entity) (Object) this);
                             this.onInsideBlock(blockState);
                         } catch (final Throwable var12) {
@@ -72,5 +88,32 @@ public abstract class EntityMixin {
                 }
             }
         }
+    }
+
+    @Unique
+    private void sable$logCrushingEntityBridge(final SubLevel subLevel,
+                                               final BlockPos rawPos,
+                                               final BlockState blockState,
+                                               final Entity entity) {
+        if (!SABLE$CRUSHING_WHEEL_CONTROLLER.equals(BuiltInRegistries.BLOCK.getKey(blockState.getBlock()))) {
+            return;
+        }
+
+        final String key = entity.getId() + ":" + rawPos.asLong();
+        if (!SABLE$LOGGED_CRUSHING_BRIDGE.add(key)) {
+            return;
+        }
+
+        final BlockPos localPos = rawPos.subtract(subLevel.getPlot().getCenterBlock());
+        Sable.LOGGER.info("SABLE_M20_CRUSH_ENTITY_BRIDGE entityId={} entityType={} entityLevel={}"
+                        + " visibleEntityPos={} sableId={} controllerLocalPos={} controllerRawPos={}"
+                        + " vanillaEntityInsideReached=false sableEntityInsideReached=true",
+                entity.getId(),
+                BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()),
+                this.level.getClass().getName(),
+                entity.position(),
+                subLevel.getUniqueId(),
+                localPos,
+                rawPos);
     }
 }

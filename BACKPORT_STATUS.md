@@ -1665,23 +1665,188 @@ M19.1 corrects the exact Forge runtime injector boundary: Ponder 1.0.91 invokes
 that obfuscated method descriptor directly instead of the named
 `PoseStack.translate(DDD)` symbol that failed at startup.
 
+M19 is CLOSED by runtime acceptance: placement-helper ghost previews are visible
+inside Sable, do not crash, use the correct Sable-local/visible transform, and
+normal right-click placement remains unchanged. M19 production code is frozen
+unless a concrete regression appears.
+
 ## M20 Create-on-Sable Compatibility Parity
 
 M20 creates the finite parity record for ordinary Create-on-Sable compatibility
 before Simulated/Aeronautics work begins. `M20_CREATE_PARITY_MATRIX.md` inventories
-42 exact-upstream Create/Flywheel compatibility concerns from Sable
+47 exact-upstream Create/Flywheel compatibility concerns from Sable
 `b7226222caf4eace63a708bdcd73ef36c971137d` and maps them to the Forge
 1.20.1/Create 6.0.8 backport.
 
 No new broad production Create compatibility patch is enabled in M20. The
 closed runtime-proven foundations remain frozen: M13 contraptions, M14 pistons,
 M15 gantries, M16 block breaking, M17 specialized kinetic rendering, and M18
-Deployers. M19 remains isolated as placement-helper ghost-preview work pending
-runtime acceptance. M20 adds a family-level `/sable m20` harness for logistics,
+Deployers. M19 is closed and frozen as placement-helper ghost-preview work. M20
+adds a family-level `/sable m20` harness for logistics,
 fluids, redstone/kinetics, Mechanical Arm, and Rope Pulley/controller canaries
 so the remaining deferred rows can be tested without hidden-coordinate guesses.
+M20.3 keeps the canonical M20.2 gameplay fixtures and adds the narrow dynamic
+client bridges proven by runtime: Sable-contained belt transported-item culling
+is evaluated in visible space while Create's own `BeltRenderer.renderItem`
+continues to render the stack, Sable-contained Mechanical Arms use Create's own
+articulated `ArmRenderer` BER path instead of unavailable Flywheel visuals, and
+Mechanical Arm selection outlines are transformed from raw storage AABBs into
+visible-space AABBs before Catnip Outliner receives them. Normal-world Create
+rendering and M13-M19 production behavior remain unchanged.
 
-Matrix summary: `PORTED_RUNTIME_PROVEN=6`, `PORTED_STATIC_PROVEN=2`,
-`COVERED_BY_GENERALIZED_BACKPORT=7`, `NOT_APPLICABLE_1_20_1=1`,
-`UPSTREAM_FEATURE_ABSENT_IN_TARGET_CREATE=0`, `DEFERRED_EXPLICITLY=26`,
-`MISSING_APPLICABLE=0`.
+M20.4 finishes the ordinary Create closure implementation surface. Rope Pulley
+controller commands are labelled by observed `PulleyBlockEntity` movement
+semantics: for the canonical side motor, observed pulley speed `+32` extends
+from offset `0`, while observed pulley speed `-32` retracts toward `0`; the
+commands still modify only the Creative Motor scroll value. Sable-contained
+Rope Pulleys now use Create's own `AbstractPulleyRenderer` BER path for
+rope/magnet rendering when Flywheel reports visualization support inside a
+Sable sublevel. The exact upstream Rope Pulley weightless concern is covered by
+the generalized `#sable:weightless` physics data for `create:rope` and
+`create:pulley_magnet`. M20.4 also adds a same-Sable Redstone Link canary; the
+upstream `RedstoneLinkNetworkHandlerMixin` remains deferred unless runtime
+proves a valid fixture needs the wireless-range production patch.
+
+M20.5 is the final ordinary Create closure implementation pass before user
+acceptance. Runtime showed Rope Pulley rope/magnet motion and rendering are
+valid, but payload blocks were passed through because Create 6.0.8's
+`PulleyBlockEntity` payload scan reads raw controller positions through the
+parent `Level` instead of Sable plot storage. M20.5 adds the narrow
+`SableCreateControllerBlockLookup` bridge and exact Create 6.0.8
+`PulleyBlockEntity` wrappers so only Sable-owned raw controller positions are
+resolved through their owning SubLevel; normal-world Create remains unchanged.
+The upstream Rope Pulley weightless fix remains covered by generalized
+`#sable:weightless` data for `create:rope` and `create:pulley_magnet`.
+
+M20.5 also adds the fundamental Elevator Pulley assembly canary. Create 6.0.8
+requires the moving cabin to include exactly one horizontal
+`create:redstone_contact`; floor discovery is stored in `ElevatorColumn` and
+uses `ElevatorContactBlock`/`ElevatorColumn` `LevelAccessor` lookups. The
+backport now adapts those exact assembly/contact lookup boundaries for
+Sable-owned raw storage coordinates and adds `/sable m20 spawn_elevator`,
+`inspect_elevator`, `elevator_assemble`, `elevator_floor`, and
+`elevator_disassemble`. Elevator floor-control UI polish and riding behavior
+remain explicitly deferred; empty-cabin assembly/motion/disassembly is the M20
+closure boundary.
+
+M20.6 tightens the final Elevator implementation after exact Create 6.0.8
+assembly tracing showed that `ElevatorPulleyBlockEntity` reaches inherited
+`Contraption.searchMovedStructure`/`moveBlock`/`capture` before the
+Elevator-specific contact counting code can rescue Sable-owned raw positions.
+The shared `m20.create.ContraptionMixin` now adapts only those read-only
+`Level.getBlockState`/`getBlockEntity` lookups through
+`SableCreateControllerBlockLookup`; world mutation and contraption entity
+creation remain owned by Create. The elevator fixture now places the horizontal
+cabin `create:redstone_contact` at local `(0,2,0)`, the visible cabin reference
+block at `(-1,2,0)`, and the floor contacts at `(1,1,0)` and `(1,4,0)`, yielding
+the exact `ColumnCoords{x=1,z=0,facing=WEST}` expected by Create 6.0.8.
+
+M20.7 extends `M20_CREATE_FUNCTIONAL_COVERAGE.md` into a complete ordinary
+Create functional gauntlet derived from the exact mapped Create 6.0.8
+`AllBlocks` registration set. The grouped `/sable m20 gauntlet` surface now
+creates concrete same-Sable canaries for kinetic, redstone, logistics, fluids,
+actors, controls, interfaces, and processing instead of falsely deferring
+ordinary families that still require runtime qualification.
+
+M20.7a is a harness-only usability repair for the grouped gauntlets. The first
+M20.7 runtime attempt showed that independent canaries were spawning at the
+same visible parent-world pose, so multiple separate Sables were visually
+stacked and physically too close to diagnose. Grouped gauntlets now use a
+shared visible-world gallery: one semantic canary per Sable, deterministic
+28x28 slot spacing from the command executor, generated smooth-stone test
+platforms, colored edge markers for input/machine/target/output, printed
+gallery maps, individual per-family spawn commands, `focus` for safe viewing,
+and `cleanup` scoped to a base gauntlet name. No production Create/Sable
+compatibility code or mixin registration changed.
+
+M20.8 records a new runtime-qualified specialized rendering/UI boundary.
+Mechanical Mixer whisk/head, Mechanical Crafter internal gears, Portable Fluid
+Interface moving parts, Fluid Valve pointer/shaft, and Rotation Speed
+Controller moving partials use renderer-local
+`VisualizationManager.supportsVisualization` gates outside the earlier generic
+M11 coverage, so Sable now forces Create's own BER fallback only for
+Sable-contained instances at those exact bytecode call sites. Basin and Smart
+Fluid Pipe filter visuals plus Redstone Link frequency visuals use Create
+behaviour renderers whose distance culling compared the player against hidden
+storage-space centers; the exact upstream Sable distance bridge is ported for
+FilteringRenderer and LinkRenderer. Generic Create ValueBox rendering now uses
+the exact upstream visible-space PoseStack projection for Sable-contained value
+boxes.
+
+M20.8 also fixes two harness-only issues: the exact Create 6.0.8 Threshold
+Switch registry key is `create:stockpile_switch`, not
+`create:threshold_switch`, and the heated mixer canary now places the Blaze
+Burner with `blaze=smouldering` so exact Create creates the block entity and
+dynamic BlazeBurnerRenderer path. Mixer and Crushing Wheels processing remain
+runtime-diagnostic, not production compatibility failures, until their first
+failing Create prerequisite is identified by the new inspection output.
+
+M20.8b restores the exact upstream Sable Lithium/Radium option compatibility in
+the Forge backport using Radium 0.12.4's actual Forge metadata lookup.
+Radium's `world.tick_scheduler` optimization nulls vanilla `LevelChunkTicks`
+storage fields including `ticksPerPosition`, while Sable's sublevel
+deserialization copy intentionally rehydrates vanilla `pendingTicks` into that
+per-position index. Forge Radium reads `lithium:options` from each individual
+`[[mods]]` config entry via `ModInfo.getConfigElement(...)`, so the backport now
+packages the same four logical disables as a quoted inline map on Sable's
+`[[mods]]` entry; Fabric/NeoForge keep their exact upstream metadata shapes:
+`mixin.entity.collisions.unpushable_cramming=false`,
+`mixin.world.chunk_access=false`, `mixin.world.chunk_ticking=false`, and
+`mixin.world.tick_scheduler=false`. This is metadata-only; no scheduled ticks
+or saved Sable world data are discarded, and M20.8 renderer changes remain
+unchanged pending runtime qualification.
+
+M20 is `CLOSED_WITH_DEFERRED_KNOWN_ISSUE`. The latest completed Create
+compatibility pass for M20 parity/status accounting is M20.8; M20.8b repaired
+the Sable/Radium world-load blocker. The only remaining isolated ordinary
+Create failure is Create Crushing Wheels entity/item processing inside Sable,
+recorded explicitly as a deferred known issue that does not block M21. The
+first runtime session proved that the original logistics, fluid, arm, and
+pulley fixtures were not valid normal Create machines, so those observations
+are not production compatibility failures.
+M20.2 replaces the qualification fixtures with canonical, scaffold-connected
+layouts: a five-segment belt canary built as Create belt-connector output, a
+west-to-east tank/pipe/pump line powered by a side cogwheel, a Mechanical Arm
+powered by a side Y-axis cogwheel with depot interaction points, and an
+empty-column rope-pulley motion canary. Inspection now reports settle age,
+expected block/entity survival, and named-Sable plot ownership before any
+semantic PASS is considered. Fluids are runtime PASS and frozen. Belt
+structure/kinetics and belt geometry rendering are runtime PASS; belt
+transported-item rendering now has the M20.3 visible-space culling bridge. The
+Mechanical Arm kinetic fixture is runtime valid; M20.3 corrects the second
+interaction point to `DEPOSIT` and adds the Sable-only articulated-render and
+selection-outline bridges. Rope Pulley qualification remains an active-offset
+runtime test: `controller_extend` now requests the Creative Motor value that
+produces observed pulley speed `+32` and `controller_retract` requests the
+value that produces observed pulley speed `-32`, with no direct pulley-offset
+writes. `prepare_controller_payload` adds a secondary payload canary after the
+empty rope-motion test. `spawn_link`, `toggle_link`, and `inspect_link` provide
+the Redstone Link architectural canary without enabling broad wireless-network
+compatibility.
+
+M20 closure matrix summary: `PORTED_RUNTIME_PROVEN=11`, `PORTED_STATIC_PROVEN=7`,
+`COVERED_BY_GENERALIZED_BACKPORT=8`, `NOT_APPLICABLE_1_20_1=1`,
+`UPSTREAM_FEATURE_ABSENT_IN_TARGET_CREATE=0`, `DEFERRED_EXPLICITLY=21`,
+`MISSING_APPLICABLE=0`. Functional coverage summary:
+`RUNTIME_PROVEN=14`, `GENERALIZED_RUNTIME_PROVEN=7`, `STATIC_ONLY=0`,
+`RUNTIME_REQUIRED=20`, `DEFERRED_LARGE_SUBSYSTEM=5`. The same-Sable Redstone
+Link canary is mapped to `/sable m20 spawn_link <name>` and
+`/sable m20 gauntlet redstone <name>`; additional ordinary Create families are
+mapped to executable M20.7 gauntlet fixtures while trains, schematics, package
+logistics, and player-tool polish remain explicit future subsystem work.
+The final explicit M20 deferred known issue is Create Crushing Wheels on Sable.
+Known runtime facts: structural fixture PASS; both `CrushingWheelBlockEntity`
+instances PASS; kinetic rotation PASS; central
+`create:crushing_wheel_controller[facing=down,valid=true]` formation PASS;
+ItemEntity interaction FAIL; LivingEntity interaction FAIL / not runtime-proven;
+recipe processing FAIL because entity intake does not occur.
+The suspected boundary is visible parent-world entity interaction with hidden
+sublevel `CrushingWheelController` `entityInside`/collision/`tick` semantics.
+This is not evidence that kinetic propagation, Create block entities,
+generalized collision, controller formation, or processing blocks generally are
+broken. Future investigation should resume at
+`com.simibubi.create.content.kinetics.crusher.CrushingWheelControllerBlock` and
+`com.simibubi.create.content.kinetics.crusher.CrushingWheelControllerBlockEntity`,
+specifically `entityInside`, `checkEntityForProcessing`, `getCollisionShape`,
+`startCrushing`, `tick`, `processingEntity`, and raw `worldPosition` versus
+visible parent entity coordinates.

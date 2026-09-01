@@ -11,6 +11,7 @@ authors = "${mod_author}"
 credits = "${credits}"
 description = '''${description}'''
 logoFile = "icon.png"
+"lithium:options" = { "mixin.entity.collisions.unpushable_cramming" = false, "mixin.world.chunk_access" = false, "mixin.world.chunk_ticking" = false, "mixin.world.tick_scheduler" = false }
 
 [[mixins]]
 config = "sable-common-forge.mixins.json"

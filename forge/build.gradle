@@ -6,6 +6,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.jar.JarFile
+import java.util.jar.JarInputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -3495,6 +3496,57 @@ def forgeServiceProviders = [
         'dev.ryanhcode.sable.platform.SableSubLevelRenderPlatform'    : 'dev.ryanhcode.sable.forge.platform.SableSubLevelRenderPlatformImpl'
 ]
 
+def sableRadiumRequiredOptions = [
+        'mixin.entity.collisions.unpushable_cramming',
+        'mixin.world.chunk_access',
+        'mixin.world.chunk_ticking',
+        'mixin.world.tick_scheduler'
+]
+
+def requireSableRadiumTopLevelOptionsToml = { String tomlText, String sourceLabel ->
+    if (!tomlText.contains('["lithium:options"]')) {
+        throw new GradleException("${sourceLabel} is missing the Radium/Lithium option override table")
+    }
+    sableRadiumRequiredOptions.each { option ->
+        String expected = "\"${option}\" = false"
+        if (!tomlText.contains(expected)) {
+            throw new GradleException("${sourceLabel} is missing required Radium/Lithium override: ${expected}")
+        }
+    }
+    if (tomlText.contains('world.tickscheduler')) {
+        throw new GradleException("${sourceLabel} contains typo-prone world.tickscheduler; expected world.tick_scheduler")
+    }
+}
+
+def requireSableRadiumForgeModEntryOptionsToml = { String tomlText, String sourceLabel ->
+    String normalizedToml = tomlText.replace('\r\n', '\n')
+    if (normalizedToml.contains('\n["lithium:options"]')
+            || normalizedToml.trim().startsWith('["lithium:options"]')) {
+        throw new GradleException("${sourceLabel} uses NeoForge-style top-level lithium:options; "
+                + 'Radium 0.12.4 Forge reads options from the individual [[mods]] entry')
+    }
+    int modsIndex = normalizedToml.indexOf('[[mods]]')
+    if (modsIndex < 0) {
+        throw new GradleException("${sourceLabel} is missing the Forge [[mods]] entry")
+    }
+    int nextTableIndex = normalizedToml.indexOf('\n[', modsIndex + '[[mods]]'.length())
+    String modEntry = nextTableIndex < 0
+            ? normalizedToml.substring(modsIndex)
+            : normalizedToml.substring(modsIndex, nextTableIndex)
+    if (!modEntry.contains('"lithium:options" = {')) {
+        throw new GradleException("${sourceLabel} is missing Forge [[mods]] entry lithium:options map")
+    }
+    sableRadiumRequiredOptions.each { option ->
+        String expected = "\"${option}\" = false"
+        if (!modEntry.contains(expected)) {
+            throw new GradleException("${sourceLabel} is missing required Forge mod-entry Radium/Lithium override: ${expected}")
+        }
+    }
+    if (modEntry.contains('world.tickscheduler')) {
+        throw new GradleException("${sourceLabel} contains typo-prone world.tickscheduler; expected world.tick_scheduler")
+    }
+}
+
 tasks.register('verifyStandaloneForgeArtifact') {
     group = 'verification'
     description = 'Statically verifies the final reobfuscated Forge artifact and its JarJar-packaged Companion library.'
@@ -3611,6 +3663,8 @@ tasks.register('verifyStandaloneForgeArtifact') {
             if (forgeJar.manifest.mainAttributes.getValue('FMLAT') != 'accesstransformer-forge.cfg') {
                 throw new GradleException('Final Forge artifact manifest has no curated FMLAT')
             }
+            String finalForgeModsToml = readText('META-INF/mods.toml')
+            requireSableRadiumForgeModEntryOptionsToml.call(finalForgeModsToml, 'Final Forge artifact META-INF/mods.toml')
             if (!file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java').getText('UTF-8').contains('@Mod(Sable.MOD_ID)')) {
                 throw new GradleException('Forge bootstrap source is missing @Mod(Sable.MOD_ID)')
             }
@@ -4934,9 +4988,11 @@ tasks.matching { it.name == 'runStandaloneClient' }.configureEach {
 tasks.named('check') {
     dependsOn tasks.named('verifyForgeAccessTransformer')
     dependsOn tasks.named('verifyForgePackaging')
+    dependsOn tasks.named('verifySableRadiumCompatibilityBoundary')
 }
 
 tasks.named('build') {
+    dependsOn tasks.named('verifySableRadiumCompatibilityBoundary')
     dependsOn tasks.named('verifyRapierPackagedArtifact')
     dependsOn tasks.named('verifyM13ContraptionMixinTargets')
     dependsOn tasks.named('verifyM13ContraptionLifecycleBoundary')
@@ -5007,7 +5063,31 @@ tasks.named('build') {
     dependsOn tasks.named('verifyM19RegressionBoundary')
     dependsOn tasks.named('verifyM20CreateParityMatrixBoundary')
     dependsOn tasks.named('verifyM20CreateTargetFamiliesBoundary')
+    dependsOn tasks.named('verifyM20FixtureCoordinateBoundary')
     dependsOn tasks.named('verifyM20CommandHarnessBoundary')
+    dependsOn tasks.named('verifyM20FixtureRealismBoundary')
+    dependsOn tasks.named('verifyM20KineticLifecycleBoundary')
+    dependsOn tasks.named('verifyM20CanonicalFixtureBoundary')
+    dependsOn tasks.named('verifyM20SameSableOwnershipBoundary')
+    dependsOn tasks.named('verifyM20RendererBoundary')
+    dependsOn tasks.named('verifyM20DynamicRenderingAndArmUiBoundary')
+    dependsOn tasks.named('verifyM20SpecializedRendererOwnershipBoundary')
+    dependsOn tasks.named('verifyM20SpecializedRendererMixinBytecodeBoundary')
+    dependsOn tasks.named('verifyM20FixtureRegistryIdBoundary')
+    dependsOn tasks.named('verifyM20ProcessingDiagnosisBoundary')
+    dependsOn tasks.named('verifyM20UpstreamParityInventoryBoundary')
+    dependsOn tasks.named('verifyM20FunctionalCoverageBoundary')
+    dependsOn tasks.named('verifyM20GauntletGalleryBoundary')
+    dependsOn tasks.named('verifyM20RopePulleySemanticBoundary')
+    dependsOn tasks.named('verifyM20RopePulleyRenderingBoundary')
+    dependsOn tasks.named('verifyM20RopePulleyPayloadHarnessBoundary')
+    dependsOn tasks.named('verifyM20RopePulleyAssemblyBoundary')
+    dependsOn tasks.named('verifyM20RopePulleyMassWeightBoundary')
+    dependsOn tasks.named('verifyM20ElevatorAssemblyBoundary')
+    dependsOn tasks.named('verifyM20ElevatorContactControllerBoundary')
+    dependsOn tasks.named('verifyM20ControllerMixinBytecodeBoundary')
+    dependsOn tasks.named('verifyM20RedstoneLinkHarnessBoundary')
+    dependsOn tasks.named('verifyM20CrushingControllerBoundary')
     dependsOn tasks.named('verifyM20RegressionBoundary')
 }
 
@@ -5231,6 +5311,202 @@ tasks.register('verifyLithiumSableCompatibility') {
                 + 'Lithium onBlockCached INVOKE_ASSIGN canary present; '
                 + 'Sable getFeetBlockState overwrite removed; expression modifiers preserve vanilla lookup shape; '
                 + 'neighbor hooks setPos/baseTick present')
+    }
+}
+
+tasks.register('verifySableRadiumCompatibilityBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M20.8b Sable/Radium scheduler compatibility metadata and exact Radium option boundary.'
+
+    inputs.file(rootProject.file('../target_modpack/mods/radium-mc1.20.1-0.12.4+git.26c9d8e.jar'))
+    inputs.file(rootProject.file('forge/src/main/resources/META-INF/mods.toml'))
+    inputs.file(rootProject.file('neoforge/src/main/resources/META-INF/neoforge.mods.toml'))
+    inputs.file(rootProject.file('fabric/src/main/resources/fabric.mod.json'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/serialization/LevelChunkTicksMixin.java'))
+
+    doLast {
+        File radiumJar = rootProject.file('../target_modpack/mods/radium-mc1.20.1-0.12.4+git.26c9d8e.jar')
+        if (!radiumJar.isFile()) {
+            throw new GradleException("Missing exact target Radium jar: ${radiumJar}")
+        }
+        String radiumSha = sha256(radiumJar)
+        if (radiumSha != 'B42584E2672D6B5329959EC2B0F342395B19389FED0EE4D86EA71072F42F77A0') {
+            throw new GradleException("Unexpected Radium 0.12.4 jar SHA-256: ${radiumSha}")
+        }
+
+        String mixinConfig
+        String defaultConfig
+        String radiumModsToml
+        String schedulerMixinText
+        String lithiumConfigText
+        String caffeineConfigText
+        String caffeinePluginText
+        String forgeModInfoText
+        String forgeModFileInfoText
+        JarFile radiumZip = new JarFile(radiumJar)
+        try {
+            def requireRadiumEntry = { String entryName ->
+                def entry = radiumZip.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Exact Radium jar is missing ${entryName}")
+                }
+                entry
+            }
+            mixinConfig = radiumZip.getInputStream(requireRadiumEntry('lithium.mixins.json')).getText('UTF-8')
+            defaultConfig = radiumZip.getInputStream(requireRadiumEntry(
+                    'assets/lithium/lithium-mixin-config-default.properties')).getText('UTF-8')
+            radiumModsToml = radiumZip.getInputStream(requireRadiumEntry('META-INF/mods.toml')).getText('UTF-8')
+            schedulerMixinText = new String(radiumZip.getInputStream(requireRadiumEntry(
+                    'me/jellysquid/mods/lithium/mixin/world/tick_scheduler/ChunkTickSchedulerMixin.class'
+            )).readAllBytes(), StandardCharsets.ISO_8859_1)
+            lithiumConfigText = new String(radiumZip.getInputStream(requireRadiumEntry(
+                    'me/jellysquid/mods/lithium/common/config/LithiumConfig.class'
+            )).readAllBytes(), StandardCharsets.ISO_8859_1)
+
+            def nestedConfigEntry = requireRadiumEntry('META-INF/jars/NanoLiveConfig-1.2.1.jar')
+            byte[] nestedConfigBytes = radiumZip.getInputStream(nestedConfigEntry).readAllBytes()
+            def nestedEntries = [:]
+            new JarInputStream(new ByteArrayInputStream(nestedConfigBytes)).withCloseable { nested ->
+                def nestedEntry
+                while ((nestedEntry = nested.nextJarEntry) != null) {
+                    if (!nestedEntry.directory) {
+                        nestedEntries[nestedEntry.name] = nested.readAllBytes()
+                    }
+                }
+            }
+            byte[] caffeineConfigBytes = nestedEntries['net/caffeinemc/caffeineconfig/CaffeineConfig.class']
+            if (caffeineConfigBytes == null) {
+                throw new GradleException('Radium embedded NanoLiveConfig is missing CaffeineConfig.class')
+            }
+            caffeineConfigText = new String(caffeineConfigBytes, StandardCharsets.ISO_8859_1)
+            byte[] caffeinePluginBytes = nestedEntries['net/caffeinemc/caffeineconfig/AbstractCaffeineConfigMixinPlugin.class']
+            if (caffeinePluginBytes == null) {
+                throw new GradleException('Radium embedded NanoLiveConfig is missing AbstractCaffeineConfigMixinPlugin.class')
+            }
+            caffeinePluginText = new String(caffeinePluginBytes, StandardCharsets.ISO_8859_1)
+        } finally {
+            radiumZip.close()
+        }
+        String radiumForgeLoaderVersion = '1.20.1-47.4.20'
+        File fmlloaderRoot = new File(System.getProperty('user.home'),
+                ".gradle/caches/modules-2/files-2.1/net.minecraftforge/fmlloader/${radiumForgeLoaderVersion}")
+        Set<File> fmlloaderCandidates = fmlloaderRoot.isDirectory()
+                ? fileTree(dir: fmlloaderRoot, include: "**/fmlloader-${radiumForgeLoaderVersion}.jar").files
+                : [] as Set<File>
+        if (fmlloaderCandidates.size() != 1) {
+            throw new GradleException("Expected exactly one Forge fmlloader ${radiumForgeLoaderVersion} jar, found ${fmlloaderCandidates}")
+        }
+        JarFile fmlloaderZip = new JarFile(fmlloaderCandidates.first())
+        try {
+            def readForgeLoaderClass = { String entryName ->
+                def entry = fmlloaderZip.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Forge fmlloader jar is missing ${entryName}")
+                }
+                new String(fmlloaderZip.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+            }
+            forgeModInfoText = readForgeLoaderClass('net/minecraftforge/fml/loading/moddiscovery/ModInfo.class')
+            forgeModFileInfoText = readForgeLoaderClass('net/minecraftforge/fml/loading/moddiscovery/ModFileInfo.class')
+        } finally {
+            fmlloaderZip.close()
+        }
+
+        if (!radiumModsToml.contains('modId = "radium"')
+                || !radiumModsToml.contains('version = "0.12.4+git.26c9d8e"')
+                || !radiumModsToml.contains('provides=["lithium"]')) {
+            throw new GradleException('Target Radium metadata no longer proves the accepted Lithium provider/version')
+        }
+        if (!mixinConfig.contains('world.tick_scheduler.ChunkTickSchedulerMixin')) {
+            throw new GradleException('Exact Radium mixin config no longer contains world.tick_scheduler.ChunkTickSchedulerMixin')
+        }
+        sableRadiumRequiredOptions.each { option ->
+            if (!defaultConfig.contains("${option}=true")) {
+                throw new GradleException("Exact Radium default config does not expose expected option key ${option}=true")
+            }
+        }
+        [
+                'tickQueuesByTimeAndPriority',
+                'allTicks',
+                'f_193163_',
+                'f_193164_',
+                'f_193165_',
+                'f_193166_'
+        ].each { canary ->
+            if (!schedulerMixinText.contains(canary)) {
+                throw new GradleException("Radium scheduler mixin lost expected vanilla-layout replacement canary: ${canary}")
+            }
+        }
+        [
+                'lithium:options',
+                'getOptionOverrideCount'
+        ].each { canary ->
+            if (!lithiumConfigText.contains(canary) && !caffeineConfigText.contains(canary)) {
+                throw new GradleException("Radium/CaffeineConfig option loader lost expected canary: ${canary}")
+            }
+        }
+        if (!caffeinePluginText.contains('Loaded configuration file for')) {
+            throw new GradleException('Radium embedded CaffeineConfig plugin lost expected startup override-count log canary')
+        }
+        [
+                'forge$applyModOverride',
+                'LoadingModList',
+                'getMods',
+                'getConfigElement',
+                'addModOverride'
+        ].each { canary ->
+            if (!caffeineConfigText.contains(canary)) {
+                throw new GradleException("Radium Forge option loader lost expected canary: ${canary}")
+            }
+        }
+        [
+                'net/minecraftforge/forgespi/language/IConfigurable',
+                'getConfigElement',
+                'config'
+        ].each { canary ->
+            if (!forgeModInfoText.contains(canary)) {
+                throw new GradleException("Forge ModInfo no longer exposes the Radium-consumed mod-entry config canary: ${canary}")
+            }
+        }
+        [
+                'properties',
+                'modproperties',
+                'getConfigElement'
+        ].each { canary ->
+            if (!forgeModFileInfoText.contains(canary) && !forgeModInfoText.contains(canary)) {
+                throw new GradleException("Forge metadata parser no longer exposes expected property/config canary: ${canary}")
+            }
+        }
+
+        String forgeToml = rootProject.file('forge/src/main/resources/META-INF/mods.toml').getText('UTF-8')
+        String neoforgeToml = rootProject.file('neoforge/src/main/resources/META-INF/neoforge.mods.toml').getText('UTF-8')
+        String fabricJson = rootProject.file('fabric/src/main/resources/fabric.mod.json').getText('UTF-8')
+        requireSableRadiumForgeModEntryOptionsToml.call(forgeToml, 'Forge mods.toml')
+        requireSableRadiumTopLevelOptionsToml.call(neoforgeToml, 'NeoForge mods.toml')
+        sableRadiumRequiredOptions.each { option ->
+            if (!fabricJson.contains("\"${option}\": false")) {
+                throw new GradleException("Fabric metadata is missing required Lithium option override ${option}: false")
+            }
+        }
+
+        String copyMixin = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/mixin/plot/serialization/LevelChunkTicksMixin.java'
+        ).getText('UTF-8')
+        [
+                'private @Nullable List<SavedTick<T>> pendingTicks',
+                'private Set<ScheduledTick<?>> ticksPerPosition',
+                'this.pendingTicks = ((LevelChunkTicksMixin<T>) (Object) ticks).pendingTicks',
+                'this.ticksPerPosition.add(ScheduledTick.probe(savedTick.type(), savedTick.pos()))'
+        ].each { canary ->
+            if (!copyMixin.contains(canary)) {
+                throw new GradleException("LevelChunkTicksMixin no longer exposes the documented vanilla copy canary: ${canary}")
+            }
+        }
+
+        logger.lifecycle('verifySableRadiumCompatibilityBoundary PASS: '
+                + "radium=0.12.4+git.26c9d8e sha256=${radiumSha}; "
+                + 'exact scheduler mixin and option keys present; '
+                + 'Forge mod-entry metadata, NeoForge top-level metadata, and Fabric metadata disable '
+                + sableRadiumRequiredOptions.join(', '))
     }
 }
 
@@ -13337,16 +13613,16 @@ tasks.register('verifyM20CreateParityMatrixBoundary') {
         String matrix = rootProject.file('M20_CREATE_PARITY_MATRIX.md').getText('UTF-8')
         String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
         List<String> rows = matrix.readLines().findAll { it ==~ /\| [0-9]+ .*/ }
-        if (rows.size() != 42) {
-            throw new GradleException("M20 parity matrix must contain exactly 42 concern rows, found ${rows.size()}")
+        if (rows.size() != 48) {
+            throw new GradleException("M20 parity matrix must contain exactly 48 concern rows, found ${rows.size()}")
         }
         Map<String, Integer> expectedCounts = [
-                'PORTED_RUNTIME_PROVEN'              : 6,
-                'PORTED_STATIC_PROVEN'               : 2,
-                'COVERED_BY_GENERALIZED_BACKPORT'    : 7,
+                'PORTED_RUNTIME_PROVEN'              : 11,
+                'PORTED_STATIC_PROVEN'               : 7,
+                'COVERED_BY_GENERALIZED_BACKPORT'    : 8,
                 'NOT_APPLICABLE_1_20_1'              : 1,
                 'UPSTREAM_FEATURE_ABSENT_IN_TARGET_CREATE': 0,
-                'DEFERRED_EXPLICITLY'                : 26,
+                'DEFERRED_EXPLICITLY'                : 21,
                 'MISSING_APPLICABLE'                 : 0
         ]
         expectedCounts.each { key, expected ->
@@ -13362,6 +13638,16 @@ tasks.register('verifyM20CreateParityMatrixBoundary') {
                 'b7226222caf4eace63a708bdcd73ef36c971137d',
                 'MechanicalArmBlockEntity',
                 'PulleyBlockEntity',
+                'create:pulley_magnet',
+                'create:rope',
+                'weightless',
+                'PulleyBlockEntityMixin',
+                'ElevatorPulleyBlockEntityMixin',
+                'ElevatorContraptionMixin',
+                'ElevatorContactBlockMixin',
+                'ElevatorColumnMixin',
+                'Known deferred runtime failure',
+                'CrushingWheelControllerBlockEntityMixin',
                 'BeltBlockEntityMixin',
                 'PipeConnectionMixin',
                 'TrackPlacement',
@@ -13377,7 +13663,7 @@ tasks.register('verifyM20CreateParityMatrixBoundary') {
                 || !status.contains('MISSING_APPLICABLE=0')) {
             throw new GradleException('BACKPORT_STATUS.md must record M20 matrix summary and zero missing applicable rows')
         }
-        logger.lifecycle('verifyM20CreateParityMatrixBoundary PASS: M20 parity matrix has 42 finite rows, explicit deferrals, and zero missing applicable concerns')
+        logger.lifecycle('verifyM20CreateParityMatrixBoundary PASS: M20 parity matrix has 48 finite rows, one explicit Crushing Wheels deferred known failure, and zero missing applicable concerns')
     }
 }
 
@@ -13403,6 +13689,8 @@ tasks.register('verifyM20CreateTargetFamiliesBoundary') {
                     'com/simibubi/create/content/fluids/pipes/FluidPipeBlock.class',
                     'com/simibubi/create/content/fluids/pump/PumpBlockEntity.class',
                     'com/simibubi/create/content/contraptions/pulley/PulleyBlockEntity.class',
+                    'com/simibubi/create/content/redstone/link/RedstoneLinkBlockEntity.class',
+                    'com/simibubi/create/content/redstone/link/RedstoneLinkNetworkHandler.class',
                     'com/simibubi/create/content/contraptions/elevator/ElevatorPulleyBlockEntity.class',
                     'com/simibubi/create/content/contraptions/actors/harvester/HarvesterMovementBehaviour.class',
                     'com/simibubi/create/content/kinetics/base/BlockBreakingMovementBehaviour.class',
@@ -13439,14 +13727,20 @@ tasks.register('verifyM20CommandHarnessBoundary') {
             throw new GradleException('SableCommand must register the M20 harness')
         }
         [
+                'gauntlet',
                 'audit',
                 'status',
+                'give_arm_selector',
                 'spawn_logistics',
                 'inspect_logistics',
                 'reset_logistics',
+                'seed_logistics',
                 'spawn_fluids',
                 'inspect_fluids',
                 'reset_fluids',
+                'spawn_kinetic',
+                'inspect_kinetic',
+                'reset_kinetic',
                 'spawn_redstone',
                 'inspect_redstone',
                 'toggle_redstone',
@@ -13454,6 +13748,21 @@ tasks.register('verifyM20CommandHarnessBoundary') {
                 'inspect_arm',
                 'spawn_controller',
                 'inspect_controller',
+                'controller_forward',
+                'controller_reverse',
+                'controller_stop',
+                'controller_extend',
+                'controller_retract',
+                'prepare_controller_payload',
+                'spawn_elevator',
+                'inspect_elevator',
+                'elevator_assemble',
+                'elevator_floor',
+                'elevator_disassemble',
+                'spawn_link',
+                'inspect_link',
+                'reset_link',
+                'toggle_link',
                 'stabilize',
                 'test_translate_parent',
                 'test_rotate_parent',
@@ -13465,17 +13774,72 @@ tasks.register('verifyM20CommandHarnessBoundary') {
             }
         }
         [
+                'Commands.literal("gauntlet")',
+                'Commands.literal("focus")',
+                'Commands.literal("cleanup")',
+                'spawnGauntlet',
+                'spawnGauntletSingle',
+                'focusGauntlet',
+                'cleanupGauntlet',
+                'gauntletStatus',
+                'GallerySlot.ORIGIN',
+                'verifyGalleryNonOverlapping',
+                'sendGalleryHeader',
+                'sendGalleryEntry',
+                'group=kinetic',
+                'group=redstone',
+                'group=logistics',
+                'group=fluids',
+                'group=actors',
+                'group=controls',
+                'group=interfaces',
+                'group=processing',
+                'M20_CREATE_FUNCTIONAL_COVERAGE.md'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.6 gauntlet harness missing canary: ${canary}")
+            }
+        }
+        [
                 'M20_CREATE_PARITY_MATRIX.md',
-                'upstreamConcernRows=42',
+                'upstreamConcernRows=48',
                 'missingApplicable=0',
                 'logisticsSpec()',
                 'fluidsSpec()',
                 'redstoneSpec()',
                 'armSpec()',
                 'controllerSpec()',
+                'elevatorSpec()',
+                'linkSpec()',
+                'kineticSpec()',
+                'fixtureAgeTicks',
+                'SETTLE_TICKS',
+                'settledReadinessFailures',
+                'settled_power_source_not_ready_role_',
+                'configureFixtureAfterPlacement',
+                'setLifecycleLocalBlock',
+                'getEmbeddedLevelAccessor().setBlock',
                 'APPLIED_EXISTING_PHYSICS_HANDLE',
                 'USER_OBSERVED_REQUIRED',
-                'hiddenPlotPoseTranslation=false'
+                'hiddenPlotPoseTranslation=false',
+                'gallery_platform_',
+                'gallery_marker_input_blue_west',
+                'gallery_marker_machine_yellow_center',
+                'gallery_marker_target_red_east',
+                'gallery_marker_output_green_east',
+                'configureArmInteractionPoints',
+                'armInteractionPointTag(new BlockPos(-2, 0, 0), "TAKE")',
+                'armInteractionPointTag(new BlockPos(0, 0, 2), "DEPOSIT")',
+                'collectionSize(readFieldRaw(arm, "outputs")) != 1',
+                'SABLE_M20_ARM_SELECTOR_GIVE',
+                'SABLE_M20_CONTROLLER_PAYLOAD',
+                'SABLE_M20_ELEVATOR_ASSEMBLE',
+                'SABLE_M20_ELEVATOR_FLOOR',
+                'SABLE_M20_ELEVATOR_DISASSEMBLE',
+                'SABLE_M20_REDSTONE_LINK_TOGGLE',
+                'configureRedstoneLinkFixture',
+                'observedExtendPulleySpeed=+32',
+                'observedRetractPulleySpeed=-32'
         ].each { canary ->
             if (!commands.contains(canary)) {
                 throw new GradleException("M20 harness lost required canary: ${canary}")
@@ -13488,7 +13852,10 @@ tasks.register('verifyM20CommandHarnessBoundary') {
                 'destroyBlock(',
                 'new DeployerFakePlayer',
                 'manual transfer',
-                'manual fluid'
+                'manual fluid',
+                'setPropertyIfPresent(state, "powered", "true")',
+                'writeFieldRaw(be, "speed"',
+                'writeFieldRaw(be, "source"'
         ].each { forbidden ->
             if (commands.contains(forbidden)) {
                 throw new GradleException("M20 harness must remain lazy and must not fake Create semantics: ${forbidden}")
@@ -13497,12 +13864,219 @@ tasks.register('verifyM20CommandHarnessBoundary') {
         if (!smoke.contains('M20 Create-on-Sable Parity Harness')
                 || !smoke.contains('/sable m20 spawn_logistics m20_logistics')
                 || !smoke.contains('/sable m20 spawn_fluids m20_fluids')
-                || !smoke.contains('/sable m20 spawn_redstone m20_redstone')
                 || !smoke.contains('/sable m20 spawn_arm m20_arm')
-                || !smoke.contains('/sable m20 spawn_controller m20_controller')) {
+                || !smoke.contains('/sable m20 spawn_controller m20_controller')
+                || !smoke.contains('/sable m20 spawn_elevator m20_elevator')
+                || !smoke.contains('/sable m20 seed_logistics')
+                || !smoke.contains('/sable m20 controller_extend')) {
             throw new GradleException('TARGET_RUNTIME_SMOKE.md must contain the M20 family runtime plan')
         }
         logger.lifecycle('verifyM20CommandHarnessBoundary PASS: M20 family harness is complete, lazy, and runtime-truthful')
+    }
+}
+
+tasks.register('verifyM20GauntletGalleryBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.7a grouped gauntlets place one semantic canary per visible gallery slot without overlap.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        [
+                'GALLERY_SPACING_X = 28',
+                'GALLERY_SPACING_Z = 28',
+                'GALLERY_OVERLAP_MARGIN = 6',
+                'createEmptySubLevel(context, container, name, slot)',
+                'origin.add(slot.offsetX(), 0.0, slot.offsetZ())',
+                'verifyGalleryNonOverlapping(specs)',
+                'galleryBounds(specs.get(left), gallerySlot(left))',
+                'leftBounds.intersects(rightBounds)',
+                'spawnFixtureNamed(context, container, fixtureName, spec, slot)',
+                'sendGalleryEntry(context, group, fixtureName, spec, slot, galleryOrigin)',
+                'gallery_platform_',
+                'gallery_marker_input_blue_west',
+                'Commands.literal("focus")',
+                'Commands.literal("cleanup")'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.7a gallery verifier missing canary: ${canary}")
+            }
+        }
+        [
+                'Commands.literal("basic")',
+                'Commands.literal("chain")',
+                'Commands.literal("link")',
+                'Commands.literal("contact")',
+                'Commands.literal("threshold")',
+                'Commands.literal("observer")',
+                'Commands.literal("belt")',
+                'Commands.literal("funnels_tunnels")',
+                'Commands.literal("chute")',
+                'Commands.literal("ejector")',
+                'Commands.literal("vault")',
+                'Commands.literal("closed")',
+                'Commands.literal("valve")',
+                'Commands.literal("smart_pipe")',
+                'Commands.literal("hose_pulley")',
+                'Commands.literal("drill")',
+                'Commands.literal("saw_static")',
+                'Commands.literal("saw_tree")',
+                'Commands.literal("harvester")',
+                'Commands.literal("plough")',
+                'Commands.literal("roller")',
+                'Commands.literal("rope_pulley")',
+                'Commands.literal("elevator")',
+                'Commands.literal("gauges")',
+                'Commands.literal("rsc")',
+                'Commands.literal("display")',
+                'Commands.literal("cart")',
+                'Commands.literal("psi_item")',
+                'Commands.literal("pfi_fluid")',
+                'Commands.literal("press")',
+                'Commands.literal("mixer")',
+                'Commands.literal("heated_mixer")',
+                'Commands.literal("millstone")',
+                'Commands.literal("crushing")',
+                'Commands.literal("crafter")',
+                'Commands.literal("fan")'
+        ].each { literal ->
+            if (!commands.contains(literal)) {
+                throw new GradleException("M20.7a individual gauntlet spawn command missing: ${literal}")
+            }
+        }
+
+        int spacingX = 28
+        int spacingZ = 28
+        int margin = 6
+        def groups = [
+                kinetic: 2,
+                redstone: 5,
+                logistics: 6,
+                fluids: 4,
+                actors: 7,
+                controls: 5,
+                interfaces: 2,
+                processing: 7
+        ]
+        groups.each { group, count ->
+            def bounds = []
+            (0..<count).each { index ->
+                int column = index % 3
+                int row = (int) (index / 3)
+                int cx = (column - 1) * spacingX
+                int cz = row * spacingZ
+                bounds << [minX: cx - 7 - margin, maxX: cx + 7 + margin,
+                           minZ: cz - 7 - margin, maxZ: cz + 7 + margin]
+            }
+            for (int i = 0; i < bounds.size(); i++) {
+                for (int j = i + 1; j < bounds.size(); j++) {
+                    boolean overlaps = bounds[i].minX <= bounds[j].maxX
+                            && bounds[i].maxX >= bounds[j].minX
+                            && bounds[i].minZ <= bounds[j].maxZ
+                            && bounds[i].maxZ >= bounds[j].minZ
+                    if (overlaps) {
+                        throw new GradleException("M20.7a gallery ${group} slots ${i}/${j} overlap after margin")
+                    }
+                }
+            }
+        }
+        logger.lifecycle('verifyM20GauntletGalleryBoundary PASS: grouped M20 gauntlets use isolated 28x28 visible slots, marker platforms, focus, cleanup, and individual spawn commands')
+    }
+}
+
+tasks.register('verifyM20FixtureCoordinateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20 fixture-local offsets use the proven center-block plot coordinate contract.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String editHelper = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelBlockEditHelper.java').getText('UTF-8')
+        if (!editHelper.contains('getCenterBlock().offset(localOffset)')) {
+            throw new GradleException('M20 verifier expects the shared fixture coordinate contract to remain centerBlock + localOffset')
+        }
+        if (!commands.contains('applyFixture(subLevel, spec, false)')) {
+            throw new GradleException('Fresh M20 spawn must not clear an empty sublevel before placing fixture blocks')
+        }
+        if (!commands.contains('!getLocalBlockState(subLevel, local).isAir()')) {
+            throw new GradleException('M20 reset clear must skip already-air cells so vanilla no-op setBlockState(null) is not misclassified as outside-chunk')
+        }
+        if (!commands.contains('requireLocalOffsetFitsCenterChunk')) {
+            throw new GradleException('M20 fixture writes must retain an explicit single-center-chunk coordinate guard')
+        }
+        if (commands.contains('getBoundingBox().contains')) {
+            throw new GradleException('M20 fixture allocation must not use current populated block bounds as storage allocation bounds')
+        }
+
+        int centerX = 20481032
+        int centerY = 128
+        int centerZ = 20554760
+        int centerChunkX = Math.floorDiv(centerX, 16)
+        int centerChunkZ = Math.floorDiv(centerZ, 16)
+        int minAllowedX = centerChunkX * 16
+        int maxAllowedX = minAllowedX + 15
+        int minAllowedZ = centerChunkZ * 16
+        int maxAllowedZ = minAllowedZ + 15
+
+        Closure<Map> resolve = { List<Integer> local ->
+            int rawX = centerX + local[0]
+            int rawY = centerY + local[1]
+            int rawZ = centerZ + local[2]
+            [raw: [rawX, rawY, rawZ], chunk: [Math.floorDiv(rawX, 16), Math.floorDiv(rawZ, 16)]]
+        }
+        Closure<Boolean> fits = { List<Integer> local ->
+            Map resolved = resolve(local)
+            resolved.raw[0] >= minAllowedX && resolved.raw[0] <= maxAllowedX
+                    && resolved.raw[2] >= minAllowedZ && resolved.raw[2] <= maxAllowedZ
+                    && resolved.chunk == [centerChunkX, centerChunkZ]
+        }
+
+        List<Integer> regression = [-2, 0, -2]
+        Map regressionResolved = resolve(regression)
+        if (!fits(regression) || regressionResolved.raw != [20481030, 128, 20554758]) {
+            throw new GradleException("M20 regression offset ${regression} resolved unexpectedly: ${regressionResolved}")
+        }
+
+        Map<String, List<List<Integer>>> fixtures = [
+                kinetic   : [[0,0,0], [1,0,0], [2,0,0], [4,1,-1], [4,1,0], [5,1,0]],
+                logistics : [[-1,0,0], [-1,0,1], [-1,0,2], [-1,0,3], [-1,0,4],
+                             [0,0,0], [0,0,1], [0,0,2], [0,0,3], [0,0,4],
+                             [-1,1,0], [0,1,0], [0,1,1], [0,1,2], [0,1,3], [0,1,4]],
+                fluids    : [[-2,0,-1], [-2,0,0], [-1,0,-1], [-1,0,0], [0,0,-1], [0,0,0],
+                             [1,0,-1], [1,0,0], [2,0,-1], [2,0,0],
+                             [-2,1,0], [-1,1,0], [0,1,0], [1,1,0], [2,1,0],
+                             [0,1,-1], [-1,1,-1]],
+                redstone  : [[0,0,0], [1,0,0], [2,0,0], [3,0,0], [4,0,0], [5,0,0], [3,1,0]],
+                arm       : [[-2,0,0], [-2,0,1], [-2,0,2], [-1,0,0], [-1,0,1], [-1,0,2],
+                             [0,0,0], [0,0,1], [0,0,2], [1,0,0], [1,0,1], [1,0,2],
+                             [-2,1,0], [0,1,0], [1,1,0], [0,1,2]],
+                controller: [[0,0,0], [1,4,0], [2,4,0], [2,5,0], [1,5,0], [0,5,0]],
+                elevator  : [[0,6,0], [1,6,0], [0,2,0], [1,2,0], [2,0,0], [2,1,0],
+                             [2,3,0], [2,4,0], [2,5,0], [2,6,0], [3,1,0], [3,4,0]],
+                redstone_link: [[-1,0,0], [0,0,0], [1,0,0], [2,0,0], [3,0,0], [4,0,0],
+                                [5,0,0], [6,0,0], [0,1,0], [5,1,0], [6,1,0], [0,2,0]]
+        ]
+        fixtures.each { family, points ->
+            points.each { local ->
+                if (!fits(local)) {
+                    throw new GradleException("M20 ${family} fixture local ${local} resolves outside allocated center chunk: ${resolve(local)}")
+                }
+            }
+            List<Integer> minLocal = [points.collect { it[0] }.min(), points.collect { it[1] }.min(), points.collect { it[2] }.min()]
+            List<Integer> maxLocal = [points.collect { it[0] }.max(), points.collect { it[1] }.max(), points.collect { it[2] }.max()]
+            logger.lifecycle("verifyM20FixtureCoordinateBoundary ${family}: local=${minLocal}..${maxLocal} raw=${resolve(minLocal).raw}..${resolve(maxLocal).raw} chunks=${[centerChunkX, centerChunkZ]}")
+        }
+
+        List<List<Integer>> clearCorners = [[-3,0,-2], [7,6,7]]
+        clearCorners.each { local ->
+            if (!fits(local)) {
+                throw new GradleException("M20 reset clear envelope local ${local} resolves outside allocated center chunk: ${resolve(local)}")
+            }
+        }
+        logger.lifecycle("verifyM20FixtureCoordinateBoundary PASS: observed (-2,0,-2) resolves to ${regressionResolved.raw} in allocated ChunkPos [${centerChunkX},${centerChunkZ}] with block ranges x=${minAllowedX}..${maxAllowedX}, z=${minAllowedZ}..${maxAllowedZ}")
     }
 }
 
@@ -13518,8 +14092,28 @@ tasks.register('verifyM20RegressionBoundary') {
         String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
         String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
         String matrix = rootProject.file('M20_CREATE_PARITY_MATRIX.md').getText('UTF-8')
-        if (config.contains('m20.')) {
-            throw new GradleException('M20 must not register new production mixins without a proven runtime root cause')
+        int m20MixinCount = config.count('m20.create.')
+        if (m20MixinCount != 19
+                || !config.contains('m20.create.BeltRendererMixin')
+                || !config.contains('m20.create.SafeBlockEntityRendererMixin')
+                || !config.contains('m20.create.ArmRendererMixin')
+                || !config.contains('m20.create.ArmInteractionPointHandlerMixin')
+                || !config.contains('m20.create.AbstractPulleyRendererMixin')
+                || !config.contains('m20.create.MechanicalMixerRendererMixin')
+                || !config.contains('m20.create.MechanicalCrafterRendererMixin')
+                || !config.contains('m20.create.FluidValveRendererMixin')
+                || !config.contains('m20.create.PortableStorageInterfaceRendererMixin')
+                || !config.contains('m20.create.SpeedControllerRendererMixin')
+                || !config.contains('m20.create.FilteringRendererMixin')
+                || !config.contains('m20.create.LinkRendererMixin')
+                || !config.contains('m20.create.ValueBoxMixin')
+                || !config.contains('m20.create.ContraptionMixin')
+                || !config.contains('m20.create.PulleyBlockEntityMixin')
+                || !config.contains('m20.create.ElevatorPulleyBlockEntityMixin')
+                || !config.contains('m20.create.ElevatorContraptionMixin')
+                || !config.contains('m20.create.ElevatorContactBlockMixin')
+                || !config.contains('m20.create.ElevatorColumnMixin')) {
+            throw new GradleException('M20 may register only the proven Belt/Arm/Pulley/M20.8 specialized rendering plus Rope/Elevator controller lifecycle mixins')
         }
         [
                 'm11.create.KineticBlockEntityRendererMixin',
@@ -13528,7 +14122,9 @@ tasks.register('verifyM20RegressionBoundary') {
                 'm19.create.GhostBlockRendererMixin',
                 'compatibility.create.contraptions.ContraptionEntityRendererMixin',
                 'compatibility.create.behaviour_compatibility.block_breaking_behaviour.BlockBreakingMovementBehaviourMixin',
-                'compatibility.create.deployer.DeployerMovementBehaviourMixin'
+                'compatibility.create.deployer.DeployerMovementBehaviourMixin',
+                'compatibility.create.crushing_wheel.CrushingWheelBlockMixin',
+                'compatibility.create.crushing_wheel_entity_processing.CrushingWheelControllerBlockEntityMixin'
         ].each { canary ->
             if (!config.contains(canary)) {
                 throw new GradleException("M20 regression guard lost closed milestone mixin config entry: ${canary}")
@@ -13550,7 +14146,2139 @@ tasks.register('verifyM20RegressionBoundary') {
         if (commands.contains('hidden plot') && commands.contains('PoseStack')) {
             throw new GradleException('M20 harness must not introduce hidden-coordinate render logic')
         }
-        logger.lifecycle('verifyM20RegressionBoundary PASS: M20 adds parity docs and runtime harness only, preserving M13-M19 production boundaries')
+        logger.lifecycle('verifyM20RegressionBoundary PASS: M20 registers only the proven renderer bridges plus Rope/Elevator controller lifecycle and M20.9 Crushing Wheel entity/controller bridges while preserving M13-M19 production boundaries')
+    }
+}
+
+tasks.register('verifyM20FunctionalCoverageBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.7 functional coverage inventory and complete ordinary Create gauntlet command surface.'
+    dependsOn tasks.named("prepareCreateDevelopmentRuntime")
+
+    inputs.file(createDevelopmentRuntime)
+    inputs.file(rootProject.file('M20_CREATE_FUNCTIONAL_COVERAGE.md'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        File mappedCreateJar = createDevelopmentRuntime.get().asFile
+        if (!mappedCreateJar.isFile()) {
+            throw new GradleException("Missing mapped Create 6.0.8 jar for M20.6 coverage verification: ${mappedCreateJar}")
+        }
+        String coverage = rootProject.file('M20_CREATE_FUNCTIONAL_COVERAGE.md').getText('UTF-8')
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        JarFile createJar = new JarFile(mappedCreateJar)
+        try {
+            def allBlocks = createJar.getJarEntry('com/simibubi/create/AllBlocks.class')
+            if (allBlocks == null) {
+                throw new GradleException('Create 6.0.8 AllBlocks.class missing from mapped runtime jar')
+            }
+            int blockRegistrationFields = 0
+            new org.objectweb.asm.ClassReader(createJar.getInputStream(allBlocks).bytes)
+                    .accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                        @Override
+                        org.objectweb.asm.FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
+                            boolean staticField = (access & org.objectweb.asm.Opcodes.ACC_STATIC) != 0
+                            if (staticField && (descriptor == 'Lcom/tterrag/registrate/util/entry/BlockEntry;'
+                                    || descriptor == 'Lcom/simibubi/create/foundation/block/DyedBlockList;'
+                                    || descriptor == 'Lcom/simibubi/create/foundation/block/CopperBlockSet;')) {
+                                blockRegistrationFields++
+                            }
+                            null
+                        }
+                    }, 0)
+            if (blockRegistrationFields != 197) {
+                throw new GradleException("M20.6 expected exact Create 6.0.8 AllBlocks inventory of 197 block/list fields, found ${blockRegistrationFields}")
+            }
+        } finally {
+            createJar.close()
+        }
+        [
+                '`AllBlocks` exposes 197 block/list registration fields',
+                'Unique functional behaviour families: 46',
+                '| `RUNTIME_PROVEN` | 14 |',
+                '| `GENERALIZED_RUNTIME_PROVEN` | 7 |',
+                '| `STATIC_ONLY` | 0 |',
+                '| `RUNTIME_REQUIRED` | 20 |',
+                '| `DEFERRED_LARGE_SUBSYSTEM` | 5 |',
+                'create:elevator_pulley',
+                'create:elevator_contact',
+                'ElevatorContraption',
+                'create:rope_pulley',
+                'PulleyContraption',
+                'Ordinary Redstone Link',
+                '/sable m20 spawn_link <name>',
+                '/sable m20 gauntlet redstone <name>',
+                '/sable m20 gauntlet interfaces <name>',
+                '/sable m20 gauntlet processing <name>',
+                'M20.7 `/sable m20 gauntlet actors <name>` creates `saw_static` and `saw_tree`',
+                'M20.7 `/sable m20 gauntlet logistics <name>` creates `funnels_tunnels` and `chute_smart_chute`',
+                'M20.7 `/sable m20 gauntlet processing <name>` creates `press`, `mixer_basin`, and `millstone`',
+                'M20.7 `/sable m20 gauntlet controls <name>` creates `gauges` and `rotation_speed_controller`',
+                'Trains/tracks',
+                'Schematics',
+                'No non-decorative family is intentionally absent'
+        ].each { canary ->
+            if (!coverage.contains(canary)) {
+                throw new GradleException("M20.6 functional coverage inventory missing canary: ${canary}")
+            }
+        }
+        [
+                'Commands.literal("gauntlet")',
+                'spawnGauntlet',
+                'gauntletStatus',
+                'inspectGauntlet',
+                'case "kinetic" -> List.of(kineticSpec(), chainDriveSpec())',
+                'case "redstone" -> List.of(redstoneSpec(), linkSpec(), redstoneContactSpec()',
+                'case "logistics" -> List.of(logisticsSpec(), armSpec(), funnelsTunnelsSpec()',
+                'case "fluids" -> List.of(fluidsSpec(), fluidValveSpec(), smartFluidPipeSpec(), hosePulleySpec())',
+                'case "actors" -> List.of(drillRegressionSpec(), sawStaticSpec(), sawTreeSpec()',
+                'case "controls" -> List.of(elevatorSpec(), gaugesSpec(), rotationSpeedControllerSpec()',
+                'case "interfaces" -> List.of(portableStorageInterfaceSpec(), portableFluidInterfaceSpec())',
+                'case "processing" -> List.of(pressSpec(), mixerBasinSpec(), heatedBasinSpec(), millstoneSpec()',
+                'weightedEjectorSpec()',
+                'cartAssemblerSpec()',
+                'encasedFanSpec()'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.7 gauntlet command surface missing canary: ${canary}")
+            }
+        }
+        if (commands.contains('case "interfaces", "processing" -> List.of()')) {
+            throw new GradleException('M20.7 gauntlet must not report interfaces/processing as empty deferred groups')
+        }
+        logger.lifecycle('verifyM20FunctionalCoverageBoundary PASS: exact Create AllBlocks inventory and complete 46-family M20.7 gauntlet coverage are recorded')
+    }
+}
+
+tasks.register('verifyM20FixtureRealismBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.2 canonical fixtures are lifecycle-aware Create canaries rather than inert blockstate snapshots.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        [
+                'belt_connector_output_start',
+                'belt_connector_output_middle_1',
+                'belt_connector_output_end',
+                'seed_logistics',
+                'Create_BeltInventory_TransportedItemStack',
+                'configureBeltController',
+                'fillFluidHandler',
+                'new FluidStack(Fluids.WATER, 4000)',
+                'pump_kinetic_source_facing_east',
+                'pump_side_cog_axis_x',
+                'arm_kinetic_source_facing_up',
+                'arm_side_cog_axis_y',
+                'initInteractionPoints',
+                'armInteractionPointTag(new BlockPos(-2, 0, 0), "TAKE")',
+                'armInteractionPointTag(new BlockPos(0, 0, 2), "DEPOSIT")',
+                'pulley_kinetic_source_side',
+                'prepareControllerPayload',
+                'normal_Create_RopePulley_assembly_candidate',
+                'ropePathBelowPulleyClear',
+                'requiredAirLocals',
+                'redstone_link_transmitter_frequency_pair',
+                'redstone_link_receiver_frequency_pair',
+                'configureRedstoneLinkFixture',
+                'sameSableOwnership=',
+                'fixtureAgeTicks',
+                'settled='
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.1 fixture realism guard missing canary: ${canary}")
+            }
+        }
+        if (commands.contains('placed(new BlockPos(1, 0, 1), BELT_ID')
+                || commands.contains('placed(new BlockPos(2, 0, 1), BELT_ID')) {
+            throw new GradleException('M20 logistics must not regress to adjacent raw belt START states')
+        }
+        if (commands.contains('placed(new BlockPos(2, 0, 0), SHAFT_ID, "arm_input_shaft")')) {
+            throw new GradleException('M20 arm fixture must not regress to shaft-under-arm power')
+        }
+        if (commands.contains('placed(new BlockPos(2, 1, -1), CREATIVE_MOTOR_ID, "pump_kinetic_source")')) {
+            throw new GradleException('M20 fluids fixture must not regress to the invalid direct inline pump motor')
+        }
+        if (commands.contains('placed(new BlockPos(0, 1, 0), SHAFT_ID, "pulley_kinetic_input")')) {
+            throw new GradleException('M20 pulley fixture must not put a shaft in the downward rope path')
+        }
+        if (commands.contains('placed(new BlockPos(0, 0, 0), id("minecraft", "smooth_stone"), "compact_payload")')) {
+            throw new GradleException('M20 pulley primary fixture must not include payload in the rope-motion canary')
+        }
+        if (commands.contains('SubLevelBlockEditHelper.setLocalBlock(subLevel, REDSTONE_SIGNAL_LOCAL')) {
+            throw new GradleException('M20 redstone differential must use embedded local setBlock lifecycle, not raw chunk writes')
+        }
+        logger.lifecycle('verifyM20FixtureRealismBoundary PASS: M20.2 fixtures include canonical scaffolds, settle-time checks, side-powered pump/arm, belt seeding, and empty pulley rope column')
+    }
+}
+
+tasks.register('verifyM20KineticLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M20.1 kinetic and redstone differentials isolate Sable placement/update lifecycle.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        [
+                'spawn_kinetic',
+                'inspect_kinetic',
+                'first_inline_shaft',
+                'second_inline_shaft',
+                'powered_small_cog_axis_z',
+                'meshed_small_cog_axis_z',
+                'cogMeshingGeometry=small_cog_axis_z_at_(4,1,0)_meshes_with_parallel_axis_z_at_(5,1,0)',
+                'toggleSemantics=place_or_remove_redstone_source_not_direct_POWERED_write',
+                'downstream_speed_probe',
+                'theoreticalSpeed',
+                'network='
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20 kinetic lifecycle guard missing canary: ${canary}")
+            }
+        }
+        [
+                'writeFieldRaw(be, "speed"',
+                'writeFieldRaw(be, "network"',
+                'writeFieldRaw(be, "source"',
+                'directly force'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M20 must not fake kinetic graph fields: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM20KineticLifecycleBoundary PASS: M20.2 preserves shaft/cog lifecycle canaries and redstone toggles rely on neighbor updates')
+    }
+}
+
+tasks.register('verifyM20CanonicalFixtureBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.2 uses the accepted canonical Create fixture layouts.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        [
+                'scaffold(-1, 0, 0)',
+                'scaffold(0, 0, 4)',
+                'belt_kinetic_source_facing_east',
+                'belt_connector_output_middle_3',
+                'source_tank_water_4000mb',
+                'pump_facing_east',
+                'pump_side_cog_axis_x',
+                'pump_kinetic_source_facing_east',
+                'arm_input_depot_seeded_item',
+                'mechanical_arm_side_cog_powered',
+                'arm_side_cog_axis_y',
+                'arm_kinetic_source_facing_up',
+                'arm_output_depot',
+                'CONTROLLER_PULLEY_LOCAL',
+                'for (int y = 1; y <= 4; y++)',
+                'requiredAirLocals',
+                'prepareControllerPayload',
+                'LINK_TRANSMITTER_LOCAL',
+                'LINK_RECEIVER_LOCAL',
+                'LINK_LAMP_LOCAL',
+                'LINK_SIGNAL_LOCAL',
+                'redstone_link_output_indicator'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.2 canonical fixture guard missing canary: ${canary}")
+            }
+        }
+        [
+                'placed(new BlockPos(2, 0, -1), CREATIVE_MOTOR_ID, "arm_kinetic_source")',
+                'placed(new BlockPos(2, 0, 0), SHAFT_ID, "arm_input_shaft")',
+                'placed(new BlockPos(2, 1, -1), CREATIVE_MOTOR_ID, "pump_kinetic_source")',
+                'placed(new BlockPos(0, 0, 0), id("minecraft", "smooth_stone"), "compact_payload")',
+                'placed(new BlockPos(1, 1, 0), DEPOT_ID, "source_depot_seeded_item")',
+                'placed(new BlockPos(1, 1, 1), ANDESITE_FUNNEL_ID'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M20.2 canonical fixture regressed to invalid old layout: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM20CanonicalFixtureBoundary PASS: canonical M20.2 logistics/fluids/arm/pulley layouts are encoded')
+    }
+}
+
+tasks.register('verifyM20SameSableOwnershipBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.2 inspect/validate reports post-settle fixture ownership instead of spawn-time snapshots only.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        [
+                'allocatedPlotOwns',
+                'getPlot().getLoadedChunks()',
+                'fixture_ownership_not_in_named_sable_plot_at_local_',
+                'missing_block_entity_for_',
+                'sameSableOwnership=',
+                'settleTicksRequired',
+                'lifecycleStatus='
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20 same-Sable ownership guard missing canary: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM20SameSableOwnershipBoundary PASS: M20 inspect/validate reports post-settle same-Sable ownership and BE survival')
+    }
+}
+
+tasks.register('verifyM20RendererBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M20 BeltRenderer fallback targets exact Create 6.0.8 and remains Sable-only.'
+
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/BeltRendererMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M20 renderer verification: ${targetCreateJar}")
+        }
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            def entry = createJar.getJarEntry('com/simibubi/create/content/kinetics/belt/BeltRenderer.class')
+            if (entry == null) {
+                throw new GradleException('Create 6.0.8 BeltRenderer class is missing')
+            }
+            byte[] bytes = createJar.getInputStream(entry).bytes
+            String latin = new String(bytes, 'ISO-8859-1')
+            [
+                    'renderSafe',
+                    'com/simibubi/create/content/kinetics/belt/BeltBlockEntity',
+                    'dev/engine_room/flywheel/api/visualization/VisualizationManager',
+                    'supportsVisualization',
+                    'net/minecraft/world/level/LevelAccessor',
+                    'renderItem',
+                    'getTransportedItems'
+            ].each { canary ->
+                if (!latin.contains(canary)) {
+                    throw new GradleException("Create 6.0.8 BeltRenderer bytecode missing expected render gate: ${canary}")
+                }
+            }
+        } finally {
+            createJar.close()
+        }
+        String mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/BeltRendererMixin.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        [
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.belt.BeltRenderer", remap = false)',
+                'VisualizationManager;supportsVisualization',
+                'Sable.HELPER.getContainingClient(blockEntity) != null',
+                'sableSubLevel ? false : originalVisualizationSupported',
+                'hiddenPlotPoseTranslation=false',
+                'renderPath=Create_BeltRenderer',
+                'SABLE_M20_BELT_ITEM_RENDER',
+                'distanceSquaredWithSubLevels'
+        ].each { canary ->
+            if (!mixin.contains(canary)) {
+                throw new GradleException("M20 BeltRenderer mixin missing Sable-only fallback canary: ${canary}")
+            }
+        }
+        if (!config.contains('m20.create.BeltRendererMixin')) {
+            throw new GradleException('M20 BeltRenderer mixin must be registered in the client mixin config')
+        }
+        [
+                'fake belt',
+                'manual belt model',
+                'PoseStack.translate(2048',
+                'globally disable Flywheel'
+        ].each { forbidden ->
+            if (mixin.contains(forbidden)) {
+                throw new GradleException("M20 BeltRenderer mixin must not fake rendering or use hidden plot translations: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM20RendererBoundary PASS: M20 BeltRenderer geometry and transported-item culling fixes target exact Create 6.0.8 and are gated to Sable-contained belts')
+    }
+}
+
+tasks.register('verifyM20DynamicRenderingAndArmUiBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.3 dynamic Belt item rendering and Mechanical Arm renderer/selection bridges.'
+
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/BeltRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/SafeBlockEntityRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ArmRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ArmInteractionPointHandlerMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/AbstractPulleyRendererMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M20.3 verification: ${targetCreateJar}")
+        }
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            Closure<byte[]> readClass = { String entryName ->
+                def entry = createJar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 M20.3 class is missing: ${entryName}")
+                }
+                createJar.getInputStream(entry).bytes
+            }
+            Closure<List<Map>> classMethods = { byte[] bytes ->
+                List<Map> methods = []
+                new org.objectweb.asm.ClassReader(bytes).accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    @Override
+                    org.objectweb.asm.MethodVisitor visitMethod(int access, String methodName, String methodDescriptor, String signature, String[] exceptions) {
+                        Map method = [name: methodName, descriptor: methodDescriptor, calls: []]
+                        methods.add(method)
+                        return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                            @Override
+                            void visitMethodInsn(int opcode, String owner, String invocationName, String invocationDescriptor, boolean isInterface) {
+                                method.calls.add([opcode: opcode, owner: owner, name: invocationName, descriptor: invocationDescriptor, isInterface: isInterface])
+                            }
+                        }
+                    }
+                }, 0)
+                methods
+            }
+            Closure<Map> requireMethod = { List<Map> methods, String owner, String name, String descriptor ->
+                Map method = methods.find { it.name == name && it.descriptor == descriptor }
+                if (method == null) {
+                    throw new GradleException("${owner} missing exact method ${name}${descriptor}")
+                }
+                method
+            }
+            Closure<Integer> countInvoke = { Map method, int opcode, String owner, String name, String descriptor ->
+                method.calls.count {
+                    it.opcode == opcode && it.owner == owner && it.name == name && it.descriptor == descriptor
+                }
+            }
+
+            [
+                    'com/simibubi/create/content/kinetics/belt/BeltRenderer.class': ['renderItem', 'shouldCullItem', 'TransportedItemStack'],
+                    'com/simibubi/create/content/kinetics/mechanicalArm/ArmRenderer.class': ['renderSafe', 'supportsVisualization', 'renderArm'],
+                    'com/simibubi/create/foundation/blockEntity/renderer/SafeBlockEntityRenderer.class': ['shouldCullItem', 'Frustum'],
+                    'com/simibubi/create/content/kinetics/mechanicalArm/ArmInteractionPointHandler.class': ['drawOutlines', 'showAABB', 'cycleMode'],
+                    'com/simibubi/create/content/contraptions/pulley/AbstractPulleyRenderer.class': ['renderSafe', 'supportsVisualization', 'renderAt'],
+                    'com/simibubi/create/content/contraptions/pulley/PulleyRenderer.class': ['renderRope', 'renderMagnet'],
+                    'com/simibubi/create/content/contraptions/pulley/RopePulleyVisual.class': ['PulleyBlockEntity']
+            ].each { entryName, canaries ->
+                String latin = new String(readClass(entryName), 'ISO-8859-1')
+                canaries.each { canary ->
+                    if (!latin.contains(canary)) {
+                        throw new GradleException("Create 6.0.8 ${entryName} missing M20.3 canary: ${canary}")
+                    }
+                }
+            }
+            List<Map> beltMethods = classMethods(readClass('com/simibubi/create/content/kinetics/belt/BeltRenderer.class'))
+            Map beltRenderSafe = requireMethod(beltMethods, 'BeltRenderer',
+                    'renderSafe',
+                    '(Lcom/simibubi/create/content/kinetics/belt/BeltBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+            Map beltRenderItem = requireMethod(beltMethods, 'BeltRenderer',
+                    'renderItem',
+                    '(Lcom/simibubi/create/content/kinetics/belt/BeltBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;IILnet/minecraft/core/Direction;Lnet/minecraft/core/Vec3i;Lcom/simibubi/create/content/kinetics/belt/BeltSlope;IZZLcom/simibubi/create/content/kinetics/belt/transport/TransportedItemStack;Lnet/minecraft/world/phys/Vec3;)V')
+            if (countInvoke(beltRenderSafe, org.objectweb.asm.Opcodes.INVOKESTATIC,
+                    'dev/engine_room/flywheel/api/visualization/VisualizationManager',
+                    'supportsVisualization',
+                    '(Lnet/minecraft/world/level/LevelAccessor;)Z') != 1) {
+                throw new GradleException('M20.3 BeltRenderer renderSafe supportsVisualization injector would not resolve exactly once')
+            }
+            if (countInvoke(beltRenderItem, org.objectweb.asm.Opcodes.INVOKEVIRTUAL,
+                    'net/minecraft/world/phys/Vec3',
+                    'm_82554_',
+                    '(Lnet/minecraft/world/phys/Vec3;)D') != 1) {
+                throw new GradleException('M20.3 BeltRenderer renderItem Vec3.m_82554_ distance redirect would not resolve exactly once')
+            }
+            if (countInvoke(beltRenderItem, org.objectweb.asm.Opcodes.INVOKEVIRTUAL,
+                    'com/simibubi/create/content/kinetics/belt/BeltRenderer',
+                    'shouldCullItem',
+                    '(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/level/Level;)Z') != 1) {
+                throw new GradleException('M20.3 BeltRenderer renderItem shouldCullItem call shape changed; SafeBlockEntityRenderer argument mixin must be reaudited')
+            }
+            if (countInvoke(beltRenderItem, org.objectweb.asm.Opcodes.INVOKEVIRTUAL,
+                    'com/simibubi/create/foundation/blockEntity/renderer/SafeBlockEntityRenderer',
+                    'shouldCullItem',
+                    '(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/level/Level;)Z') != 0) {
+                throw new GradleException('M20.3 BeltRenderer must not target SafeBlockEntityRenderer.shouldCullItem from renderItem; runtime owner is BeltRenderer')
+            }
+            List<Map> safeMethods = classMethods(readClass('com/simibubi/create/foundation/blockEntity/renderer/SafeBlockEntityRenderer.class'))
+            Map safeShouldCullItem = requireMethod(safeMethods, 'SafeBlockEntityRenderer',
+                    'shouldCullItem',
+                    '(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/level/Level;)Z')
+            if (countInvoke(safeShouldCullItem, org.objectweb.asm.Opcodes.INVOKEVIRTUAL,
+                    'net/minecraft/client/renderer/culling/Frustum',
+                    'm_113029_',
+                    '(Lnet/minecraft/world/phys/AABB;)Z') != 1) {
+                throw new GradleException('M20.3 SafeBlockEntityRenderer shouldCullItem no longer performs the expected exact frustum isVisible check')
+            }
+            List<Map> armMethods = classMethods(readClass('com/simibubi/create/content/kinetics/mechanicalArm/ArmRenderer.class'))
+            Map armRenderSafe = requireMethod(armMethods, 'ArmRenderer',
+                    'renderSafe',
+                    '(Lcom/simibubi/create/content/kinetics/mechanicalArm/ArmBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+            if (countInvoke(armRenderSafe, org.objectweb.asm.Opcodes.INVOKESTATIC,
+                    'dev/engine_room/flywheel/api/visualization/VisualizationManager',
+                    'supportsVisualization',
+                    '(Lnet/minecraft/world/level/LevelAccessor;)Z') != 1) {
+                throw new GradleException('M20.3 ArmRenderer supportsVisualization injector would not resolve exactly once')
+            }
+            List<Map> armSelectionMethods = classMethods(readClass('com/simibubi/create/content/kinetics/mechanicalArm/ArmInteractionPointHandler.class'))
+            Map drawOutlines = requireMethod(armSelectionMethods, 'ArmInteractionPointHandler',
+                    'drawOutlines',
+                    '(Ljava/util/Collection;)V')
+            if (countInvoke(drawOutlines, org.objectweb.asm.Opcodes.INVOKEVIRTUAL,
+                    'net/createmod/catnip/outliner/Outliner',
+                    'showAABB',
+                    '(Ljava/lang/Object;Lnet/minecraft/world/phys/AABB;)Lnet/createmod/catnip/outliner/Outline$OutlineParams;') != 1) {
+                throw new GradleException('M20.3 ArmInteractionPointHandler showAABB injector would not resolve exactly once')
+            }
+            List<Map> pulleyMethods = classMethods(readClass('com/simibubi/create/content/contraptions/pulley/AbstractPulleyRenderer.class'))
+            Map pulleyRenderSafe = requireMethod(pulleyMethods, 'AbstractPulleyRenderer',
+                    'renderSafe',
+                    '(Lcom/simibubi/create/content/kinetics/base/KineticBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+            if (countInvoke(pulleyRenderSafe, org.objectweb.asm.Opcodes.INVOKESTATIC,
+                    'dev/engine_room/flywheel/api/visualization/VisualizationManager',
+                    'supportsVisualization',
+                    '(Lnet/minecraft/world/level/LevelAccessor;)Z') != 1) {
+                throw new GradleException('M20.4 AbstractPulleyRenderer supportsVisualization injector would not resolve exactly once')
+            }
+            if (countInvoke(pulleyRenderSafe, org.objectweb.asm.Opcodes.INVOKESTATIC,
+                    'com/simibubi/create/content/contraptions/pulley/AbstractPulleyRenderer',
+                    'renderAt',
+                    '(Lnet/minecraft/world/level/LevelAccessor;Lnet/createmod/catnip/render/SuperByteBuffer;FLnet/minecraft/core/BlockPos;Lcom/mojang/blaze3d/vertex/PoseStack;Lcom/mojang/blaze3d/vertex/VertexConsumer;)V') < 2) {
+                throw new GradleException('M20.4 AbstractPulleyRenderer renderSafe no longer emits rope/magnet renderAt calls as expected')
+            }
+            def ponderEntry = createJar.getJarEntry("META-INF/jarjar/Ponder-Forge-${forge_minecraft_version}-${forge_ponder_version}.jar")
+            if (ponderEntry == null) {
+                throw new GradleException('Create 6.0.8 jar is missing nested Ponder/Catnip jar for M20.3 verification')
+            }
+            byte[] nestedBytes = createJar.getInputStream(ponderEntry).readAllBytes()
+            def nestedEntries = [:]
+            new java.util.jar.JarInputStream(new ByteArrayInputStream(nestedBytes)).withCloseable { nested ->
+                def entry
+                while ((entry = nested.nextJarEntry) != null) {
+                    if (!entry.directory) {
+                        nestedEntries[entry.name] = nested.readAllBytes()
+                    }
+                }
+            }
+            byte[] outlinerBytes = nestedEntries['net/createmod/catnip/outliner/Outliner.class']
+            if (outlinerBytes == null) {
+                throw new GradleException('Ponder 1.0.91 Outliner class is missing')
+            }
+            String outlinerLatin = new String(outlinerBytes, 'ISO-8859-1')
+            if (!outlinerLatin.contains('showAABB') || !outlinerLatin.contains('Outline$OutlineParams')) {
+                throw new GradleException('Ponder 1.0.91 Outliner bytecode does not expose showAABB returning OutlineParams')
+            }
+        } finally {
+            createJar.close()
+        }
+
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String beltMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/BeltRendererMixin.java').getText('UTF-8')
+        String safeRendererMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/SafeBlockEntityRendererMixin.java').getText('UTF-8')
+        String armRendererMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ArmRendererMixin.java').getText('UTF-8')
+        String armSelectionMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ArmInteractionPointHandlerMixin.java').getText('UTF-8')
+        String pulleyMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/AbstractPulleyRendererMixin.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+
+        [
+                'armInteractionPointTag(new BlockPos(-2, 0, 0), "TAKE")',
+                'armInteractionPointTag(new BlockPos(0, 0, 2), "DEPOSIT")',
+                'collectionSize(readFieldRaw(arm, "outputs")) != 1',
+                'SABLE_M20_ARM_SELECTOR_GIVE',
+                'controller_extend',
+                'controller_retract',
+                'directPulleyOffsetWrites=false'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.3 command harness missing canary: ${canary}")
+            }
+        }
+        [
+                'SABLE_M20_BELT_ITEM_RENDER',
+                'distanceSquaredWithSubLevels',
+                'Vec3;m_82554_',
+                '@Redirect',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!beltMixin.contains(canary)) {
+                throw new GradleException("M20.3 Belt item render bridge missing canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(targets = "com.simibubi.create.foundation.blockEntity.renderer.SafeBlockEntityRenderer", remap = false)',
+                'method = "shouldCullItem(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/level/Level;)Z"',
+                '@ModifyVariable',
+                'argsOnly = true',
+                'projectOutOfSubLevel',
+                'SABLE_M20_ITEM_CULL',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!safeRendererMixin.contains(canary)) {
+                throw new GradleException("M20.3 SafeBlockEntityRenderer item cull bridge missing canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.mechanicalArm.ArmRenderer", remap = false)',
+                'VisualizationManager;supportsVisualization',
+                'Sable.HELPER.getContainingClient(blockEntity) != null',
+                'SABLE_M20_ARM_RENDER',
+                'Create_ArmRenderer_articulatedPartials'
+        ].each { canary ->
+            if (!armRendererMixin.contains(canary)) {
+                throw new GradleException("M20.3 Arm renderer bridge missing canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(targets = "com.simibubi.create.content.kinetics.mechanicalArm.ArmInteractionPointHandler", remap = false)',
+                'Outliner;showAABB',
+                'new BoundingBox3d(rawAabb).transform(subLevel.renderPose()',
+                'hiddenPlotOutline=false',
+                'SABLE_M20_ARM_SELECTION'
+        ].each { canary ->
+            if (!armSelectionMixin.contains(canary)) {
+                throw new GradleException("M20.3 Arm selection bridge missing canary: ${canary}")
+            }
+        }
+        [
+                '@Mixin(targets = "com.simibubi.create.content.contraptions.pulley.AbstractPulleyRenderer", remap = false)',
+                'VisualizationManager;supportsVisualization',
+                'Sable.HELPER.getContainingClient(blockEntity) != null',
+                'SABLE_M20_PULLEY_RENDER',
+                'Create_AbstractPulleyRenderer',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!pulleyMixin.contains(canary)) {
+                throw new GradleException("M20.4 Pulley renderer bridge missing canary: ${canary}")
+            }
+        }
+        [
+                'm20.create.BeltRendererMixin',
+                'm20.create.SafeBlockEntityRendererMixin',
+                'm20.create.ArmRendererMixin',
+                'm20.create.ArmInteractionPointHandlerMixin',
+                'm20.create.AbstractPulleyRendererMixin'
+        ].each { canary ->
+            if (!config.contains(canary)) {
+                throw new GradleException("M20.3 mixin config missing canary: ${canary}")
+            }
+        }
+        [
+                'custom arm',
+                'manual arm model',
+                'custom belt item',
+                'fake floating ItemStack',
+                'writeFieldRaw(be, "offset"',
+                'PoseStack.translate(2048'
+        ].each { forbidden ->
+            if ((beltMixin + safeRendererMixin + armRendererMixin + armSelectionMixin + pulleyMixin + commands).contains(forbidden)) {
+                throw new GradleException("M20.3 must not fake visuals, teleport payloads, or render hidden coordinates: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM20DynamicRenderingAndArmUiBoundary PASS: M20.3 belt item culling, Arm articulated BER, Arm selection UI, and M20.4 Pulley BER boundaries are encoded')
+    }
+}
+
+tasks.register('verifyM20SpecializedRendererOwnershipBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M20.8 specialized render ownership matrix and fixture-only registry/state repairs.'
+
+    inputs.file(rootProject.file('M20_SPECIALIZED_RENDER_MATRIX.md'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        String matrix = rootProject.file('M20_SPECIALIZED_RENDER_MATRIX.md').getText('UTF-8')
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        [
+                'MechanicalMixer',
+                'Basin filter',
+                'MechanicalCrafter',
+                'BlazeBurner',
+                'PortableFluidInterface',
+                'FluidValve',
+                'SmartFluidPipe filter',
+                'RedstoneLink frequency',
+                'RotationSpeedController',
+                'Specialized BER gate',
+                'Behaviour item/value-box distance culling',
+                'ValueBox plot translation',
+                'Fixture state'
+        ].each { canary ->
+            if (!matrix.contains(canary)) {
+                throw new GradleException("M20.8 render matrix missing ownership canary: ${canary}")
+            }
+        }
+        [
+                'private static final ResourceLocation THRESHOLD_SWITCH_ID = id("create", "stockpile_switch")',
+                'setPropertyIfPresent(state, "blaze", "smouldering")',
+                'SABLE_M20_MIXER_PROCESS',
+                'SABLE_M20_CRUSHING_PROCESS',
+                'recipeClassification=RUNTIME_REQUIRED_NO_PRODUCTION_PATCH'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.8 command harness missing fixture/diagnostic canary: ${canary}")
+            }
+        }
+        [
+                'm20.create.MechanicalMixerRendererMixin',
+                'm20.create.MechanicalCrafterRendererMixin',
+                'm20.create.FluidValveRendererMixin',
+                'm20.create.PortableStorageInterfaceRendererMixin',
+                'm20.create.SpeedControllerRendererMixin',
+                'm20.create.FilteringRendererMixin',
+                'm20.create.LinkRendererMixin',
+                'm20.create.ValueBoxMixin'
+        ].each { canary ->
+            if (!config.contains(canary)) {
+                throw new GradleException("M20.8 client mixin config missing specialized renderer canary: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM20SpecializedRendererOwnershipBoundary PASS: M20.8 ownership matrix covers all nine visual failures and fixture-only Threshold/Blaze fixes are encoded')
+    }
+}
+
+tasks.register('verifyM20SpecializedRendererMixinBytecodeBoundary') {
+    group = 'forge backport'
+    description = 'Verifies every M20.8 renderer/UI mixin against exact Create 6.0.8 runtime bytecode.'
+
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/render/SableCreateRenderBridge.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/MechanicalMixerRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/MechanicalCrafterRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/FluidValveRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/PortableStorageInterfaceRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/SpeedControllerRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/FilteringRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/LinkRendererMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ValueBoxMixin.java'))
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M20.8 bytecode verification: ${targetCreateJar}")
+        }
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            Closure<byte[]> readClass = { String entryName ->
+                def entry = createJar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 M20.8 class is missing: ${entryName}")
+                }
+                createJar.getInputStream(entry).bytes
+            }
+            Closure<List<Map>> classMethods = { byte[] bytes ->
+                List<Map> methods = []
+                new org.objectweb.asm.ClassReader(bytes).accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    @Override
+                    org.objectweb.asm.MethodVisitor visitMethod(int access, String methodName, String methodDescriptor, String signature, String[] exceptions) {
+                        Map method = [name: methodName, descriptor: methodDescriptor, calls: []]
+                        methods.add(method)
+                        return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                            @Override
+                            void visitMethodInsn(int opcode, String owner, String invocationName, String invocationDescriptor, boolean isInterface) {
+                                method.calls.add([opcode: opcode, owner: owner, name: invocationName, descriptor: invocationDescriptor, isInterface: isInterface])
+                            }
+                        }
+                    }
+                }, 0)
+                methods
+            }
+            Closure<Map> requireMethod = { List<Map> methods, String owner, String name, String descriptor ->
+                Map method = methods.find { it.name == name && it.descriptor == descriptor }
+                if (method == null) {
+                    throw new GradleException("${owner} missing exact method ${name}${descriptor}")
+                }
+                method
+            }
+            Closure<Integer> countInvoke = { Map method, int opcode, String owner, String name, String descriptor ->
+                method.calls.count {
+                    it.opcode == opcode && it.owner == owner && it.name == name && it.descriptor == descriptor
+                }
+            }
+            Closure<Void> verifyGate = { String classEntry, String ownerLabel, String methodName, String methodDescriptor ->
+                List<Map> methods = classMethods(readClass(classEntry))
+                Map method = requireMethod(methods, ownerLabel, methodName, methodDescriptor)
+                int count = countInvoke(method, org.objectweb.asm.Opcodes.INVOKESTATIC,
+                        'dev/engine_room/flywheel/api/visualization/VisualizationManager',
+                        'supportsVisualization',
+                        '(Lnet/minecraft/world/level/LevelAccessor;)Z')
+                if (count != 1) {
+                    throw new GradleException("M20.8 ${ownerLabel}.${methodName}${methodDescriptor} supportsVisualization target count=${count}, expected 1")
+                }
+                logger.lifecycle("verifyM20SpecializedRendererMixinBytecodeBoundary ${ownerLabel}.${methodName}${methodDescriptor} supportsVisualization count=${count}")
+            }
+            verifyGate('com/simibubi/create/content/kinetics/mixer/MechanicalMixerRenderer.class',
+                    'MechanicalMixerRenderer',
+                    'renderSafe',
+                    '(Lcom/simibubi/create/content/kinetics/mixer/MechanicalMixerBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+            verifyGate('com/simibubi/create/content/kinetics/crafter/MechanicalCrafterRenderer.class',
+                    'MechanicalCrafterRenderer',
+                    'renderFast',
+                    '(Lcom/simibubi/create/content/kinetics/crafter/MechanicalCrafterBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V')
+            verifyGate('com/simibubi/create/content/fluids/pipes/valve/FluidValveRenderer.class',
+                    'FluidValveRenderer',
+                    'renderSafe',
+                    '(Lcom/simibubi/create/content/fluids/pipes/valve/FluidValveBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+            verifyGate('com/simibubi/create/content/contraptions/actors/psi/PortableStorageInterfaceRenderer.class',
+                    'PortableStorageInterfaceRenderer',
+                    'renderSafe',
+                    '(Lcom/simibubi/create/content/contraptions/actors/psi/PortableStorageInterfaceBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+            verifyGate('com/simibubi/create/content/kinetics/speedController/SpeedControllerRenderer.class',
+                    'SpeedControllerRenderer',
+                    'renderSafe',
+                    '(Lcom/simibubi/create/content/kinetics/speedController/SpeedControllerBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+
+            List<Map> filteringMethods = classMethods(readClass('com/simibubi/create/foundation/blockEntity/behaviour/filtering/FilteringRenderer.class'))
+            Map filteringRender = requireMethod(filteringMethods, 'FilteringRenderer',
+                    'renderOnBlockEntity',
+                    '(Lcom/simibubi/create/foundation/blockEntity/SmartBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+            int filteringDistance = countInvoke(filteringRender, org.objectweb.asm.Opcodes.INVOKEVIRTUAL,
+                    'net/minecraft/world/phys/Vec3',
+                    'm_82557_',
+                    '(Lnet/minecraft/world/phys/Vec3;)D')
+            if (filteringDistance != 1) {
+                throw new GradleException("M20.8 FilteringRenderer distanceToSqr target count=${filteringDistance}, expected 1")
+            }
+            List<Map> linkMethods = classMethods(readClass('com/simibubi/create/content/redstone/link/LinkRenderer.class'))
+            Map linkRender = requireMethod(linkMethods, 'LinkRenderer',
+                    'renderOnBlockEntity',
+                    '(Lcom/simibubi/create/foundation/blockEntity/SmartBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+            int linkDistance = countInvoke(linkRender, org.objectweb.asm.Opcodes.INVOKEVIRTUAL,
+                    'net/minecraft/world/phys/Vec3',
+                    'm_82557_',
+                    '(Lnet/minecraft/world/phys/Vec3;)D')
+            if (linkDistance != 1) {
+                throw new GradleException("M20.8 LinkRenderer distanceToSqr target count=${linkDistance}, expected 1")
+            }
+            List<Map> valueBoxMethods = classMethods(readClass('com/simibubi/create/foundation/blockEntity/behaviour/ValueBox.class'))
+            Map valueBoxRender = requireMethod(valueBoxMethods, 'ValueBox',
+                    'render',
+                    '(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/createmod/catnip/render/SuperRenderTypeBuffer;Lnet/minecraft/world/phys/Vec3;F)V')
+            int valueBoxTranslate = countInvoke(valueBoxRender, org.objectweb.asm.Opcodes.INVOKEVIRTUAL,
+                    'com/mojang/blaze3d/vertex/PoseStack',
+                    'm_85837_',
+                    '(DDD)V')
+            if (valueBoxTranslate < 2) {
+                throw new GradleException("M20.8 ValueBox render PoseStack.translate target count=${valueBoxTranslate}, expected at least 2 with ordinal 0 present")
+            }
+            logger.lifecycle("verifyM20SpecializedRendererMixinBytecodeBoundary FilteringRenderer.distanceToSqr count=${filteringDistance}")
+            logger.lifecycle("verifyM20SpecializedRendererMixinBytecodeBoundary LinkRenderer.distanceToSqr count=${linkDistance}")
+            logger.lifecycle("verifyM20SpecializedRendererMixinBytecodeBoundary ValueBox.render PoseStack.translate count=${valueBoxTranslate}")
+        } finally {
+            createJar.close()
+        }
+        String bridge = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/render/SableCreateRenderBridge.java').getText('UTF-8')
+        String joinedMixins = [
+                'MechanicalMixerRendererMixin',
+                'MechanicalCrafterRendererMixin',
+                'FluidValveRendererMixin',
+                'PortableStorageInterfaceRendererMixin',
+                'SpeedControllerRendererMixin',
+                'FilteringRendererMixin',
+                'LinkRendererMixin',
+                'ValueBoxMixin'
+        ].collect { rootProject.file("common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/${it}.java").getText('UTF-8') }.join('\n')
+        [
+                'visualizationSupportedForSableBer',
+                'distanceToSqrWithSubLevels',
+                'hiddenPlotPoseTranslation=false',
+                'SABLE_M20_SPECIALIZED_BER',
+                'SABLE_M20_FILTER_RENDER'
+        ].each { canary ->
+            if (!(bridge + joinedMixins).contains(canary)) {
+                throw new GradleException("M20.8 renderer bridge missing canary: ${canary}")
+            }
+        }
+        [
+                'fake',
+                'manual whisk',
+                'manual gear',
+                'custom blaze',
+                'global Flywheel disable',
+                'require = 0',
+                'expect = 0',
+                'PoseStack.translate(2048'
+        ].each { forbidden ->
+            if (joinedMixins.contains(forbidden)) {
+                throw new GradleException("M20.8 renderer mixins must not hide failures or fake Create visuals: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM20SpecializedRendererMixinBytecodeBoundary PASS: all M20.8 renderer/UI injectors resolve against exact Create 6.0.8 bytecode')
+    }
+}
+
+tasks.register('verifyM20FixtureRegistryIdBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20 gauntlet Create block ids use exact registered target ids.'
+
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M20 fixture id verification: ${targetCreateJar}")
+        }
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        if (commands.contains('id("create", "threshold_switch")')) {
+            throw new GradleException('M20 Threshold Switch fixture must not use nonexistent create:threshold_switch; exact id is create:stockpile_switch')
+        }
+        if (!commands.contains('id("create", "stockpile_switch")')) {
+            throw new GradleException('M20 Threshold Switch fixture must use exact Create 6.0.8 create:stockpile_switch id')
+        }
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            def allBlocks = createJar.getJarEntry('com/simibubi/create/AllBlocks.class')
+            if (allBlocks == null) {
+                throw new GradleException('Create 6.0.8 AllBlocks class missing for registry id verification')
+            }
+            String latin = new String(createJar.getInputStream(allBlocks).bytes, 'ISO-8859-1')
+            [
+                    'stockpile_switch',
+                    'mechanical_mixer',
+                    'mechanical_crafter',
+                    'blaze_burner',
+                    'portable_fluid_interface',
+                    'fluid_valve',
+                    'smart_fluid_pipe',
+                    'redstone_link',
+                    'rotation_speed_controller',
+                    'crushing_wheel'
+            ].each { canary ->
+                if (!latin.contains(canary)) {
+                    throw new GradleException("Create 6.0.8 AllBlocks bytecode missing expected fixture id: ${canary}")
+                }
+            }
+        } finally {
+            createJar.close()
+        }
+        logger.lifecycle('verifyM20FixtureRegistryIdBoundary PASS: Threshold Switch uses create:stockpile_switch and audited M20.8 fixture ids exist in Create 6.0.8')
+    }
+}
+
+tasks.register('verifyM20ProcessingDiagnosisBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.8 keeps Mixer as diagnostic-only while Crushing Wheels remain an explicit deferred known runtime failure.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('M20_SPECIALIZED_RENDER_MATRIX.md'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String matrix = rootProject.file('M20_SPECIALIZED_RENDER_MATRIX.md').getText('UTF-8')
+        [
+                'SABLE_M20_MIXER_PROCESS',
+                'mixerSpeed=',
+                'basinContents=',
+                'heatLevel=',
+                'firstFailureCandidates=UNPOWERED,SPEED_TOO_LOW,NO_RECIPE,HEAT_MISSING,BASIN_LOOKUP_FAILED',
+                'SABLE_M20_CRUSHING_PROCESS',
+                'CRUSHING_LEFT_WHEEL_LOCAL = new BlockPos(-1, 1, 0)',
+                'CRUSHING_RIGHT_WHEEL_LOCAL = new BlockPos(1, 1, 0)',
+                'CRUSHING_CONTROLLER_LOCAL = new BlockPos(0, 1, 0)',
+                'CRUSHING_INPUT_LANE_LOCAL = new BlockPos(0, 2, 0)',
+                'CRUSHING_OUTPUT_LANE_LOCAL = new BlockPos(0, 0, 0)',
+                'rotationRelationshipValid=',
+                'controllerBlockPresent=',
+                'controllerBlockEntityPresent=',
+                'seededInput=minecraft:dioritex1_from_above',
+                'firstFailureCandidates=UNPOWERED,WRONG_AXIS,WRONG_ROTATION_RELATIONSHIP,',
+                'CONTROLLER_NOT_FORMED,ENTITY_INSIDE_NOT_REACHED,RAW_VISIBLE_AABB_MISMATCH,',
+                'INPUT_NOT_ENTERING,NO_RECIPE'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.8 processing diagnosis missing canary: ${canary}")
+            }
+        }
+        if (!matrix.contains('Mixer is not promoted to a production compatibility failure')
+                || !matrix.contains('Crushing Wheels are recorded separately as the explicit M20 deferred known runtime failure')) {
+            throw new GradleException('M20.8 matrix must keep Mixer pending while documenting the Crushing Wheels deferred known runtime failure')
+        }
+        logger.lifecycle('verifyM20ProcessingDiagnosisBoundary PASS: Mixer remains diagnostic-only and Crushing Wheels remain an explicit deferred known runtime failure')
+    }
+}
+
+tasks.register('verifyM20CrushingWheelsFixtureGeometryBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M20 Crushing Wheels fixture uses the exact Create controller-gap geometry.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(targetCreateJar)
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        [
+                'CRUSHING_LEFT_WHEEL_LOCAL = new BlockPos(-1, 1, 0)',
+                'CRUSHING_RIGHT_WHEEL_LOCAL = new BlockPos(1, 1, 0)',
+                'CRUSHING_CONTROLLER_LOCAL = new BlockPos(0, 1, 0)',
+                'CRUSHING_LEFT_MOTOR_LOCAL = new BlockPos(-1, 1, -1)',
+                'CRUSHING_RIGHT_MOTOR_LOCAL = new BlockPos(1, 1, -1)',
+                'left_crushing_wheel_axis_z',
+                'right_crushing_wheel_axis_z',
+                'left_crushing_wheel_source_axis_z',
+                'right_crushing_wheel_source_axis_z',
+                'role.contains("crushing_wheel_source_axis_z")',
+                'return "south"',
+                'configureCrushingWheelsFixture',
+                'setFixtureMotorSpeed(subLevel, CRUSHING_LEFT_MOTOR_LOCAL, -DEFAULT_RPM)',
+                'setFixtureMotorSpeed(subLevel, CRUSHING_RIGHT_MOTOR_LOCAL, DEFAULT_RPM)',
+                'updateCrushingWheelController(subLevel, CRUSHING_LEFT_WHEEL_LOCAL, Direction.EAST)',
+                'updateCrushingWheelController(subLevel, CRUSHING_RIGHT_WHEEL_LOCAL, Direction.WEST)',
+                'seedCrushingInputEntity',
+                'new ItemStack(Items.DIORITE, 1)',
+                'CRUSHING_OUTPUT_LANE_LOCAL',
+                'return "crushing_wheels".equals(spec.family()) && CRUSHING_OUTPUT_LANE_LOCAL.equals(local)',
+                'crushing_expected_Create_controller_block_at_local_',
+                'crushing_rotation_relationship_invalid_expected_left_negative_right_positive_axis_z'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20 crushing fixture geometry missing canary: ${canary}")
+            }
+        }
+        [
+                'placedWith(new BlockPos(0, 1, 0), CRUSHING_WHEEL_ID, "left_crushing_wheel_axis_z"',
+                'placedWith(new BlockPos(1, 1, 0), CRUSHING_WHEEL_ID, "right_crushing_wheel_axis_z"',
+                'placed(new BlockPos(-1, 1, 0), CREATIVE_MOTOR_ID, "left_crushing_wheel_source")',
+                'placed(new BlockPos(2, 1, 0), CREATIVE_MOTOR_ID, "right_crushing_wheel_source")',
+                'controllerProbe=RUNTIME_REQUIRED'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M20 crushing fixture regressed to invalid old geometry: ${forbidden}")
+            }
+        }
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar: ${targetCreateJar}")
+        }
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            byte[] wheelBytes = createJar.getInputStream(createJar.getJarEntry(
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelBlock.class')).bytes
+            byte[] controllerBytes = createJar.getInputStream(createJar.getJarEntry(
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlock.class')).bytes
+            String wheelLatin = new String(wheelBytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+            String controllerLatin = new String(controllerBytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+            [
+                    'updateControllers',
+                    'CRUSHING_WHEEL_CONTROLLER',
+                    'CRUSHING_WHEEL',
+                    'getRotationAxis',
+                    'getSpeed'
+            ].each { needle ->
+                if (!wheelLatin.contains(needle)) {
+                    throw new GradleException("Create 6.0.8 CrushingWheelBlock bytecode missing ${needle}")
+                }
+            }
+            [
+                    'entityInside',
+                    'checkEntityForProcessing',
+                    'startCrushing',
+                    'crushingspeed'
+            ].each { needle ->
+                if (!controllerLatin.contains(needle)) {
+                    throw new GradleException("Create 6.0.8 CrushingWheelControllerBlock bytecode missing ${needle}")
+                }
+            }
+        } finally {
+            createJar.close()
+        }
+        logger.lifecycle('verifyM20CrushingWheelsFixtureGeometryBoundary PASS: Crushing Wheels use vertical wheel planes, Z axes, one-block Create controller gap, and falling diorite input; M20.9 controller/entity bridge is verified separately')
+    }
+}
+
+tasks.register('verifyM20CrushingControllerBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M20.9 Create Crushing Wheel controller entity/collision bridge targets exact Create 6.0.8 bytecode.'
+    dependsOn tasks.named("prepareCreateDevelopmentRuntime")
+
+    inputs.file(createDevelopmentRuntime)
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/crushing_wheel/CrushingWheelBlockMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/crushing_wheel_entity_processing/CrushingWheelControllerBlockEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entities_in_blocks/EntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        File mappedCreateJar = createDevelopmentRuntime.get().asFile
+        if (!mappedCreateJar.isFile()) {
+            throw new GradleException("Missing mapped Create 6.0.8 jar for M20.9 crusher bytecode verification: ${mappedCreateJar}")
+        }
+        JarFile createJar = new JarFile(mappedCreateJar)
+        try {
+            Closure<byte[]> readClass = { String entryName ->
+                def entry = createJar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 M20.9 target class missing: ${entryName}")
+                }
+                createJar.getInputStream(entry).bytes
+            }
+            Closure<List<Map>> classMethods = { byte[] bytes ->
+                List<Map> methods = []
+                new org.objectweb.asm.ClassReader(bytes).accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    @Override
+                    org.objectweb.asm.MethodVisitor visitMethod(int access, String methodName, String methodDescriptor, String signature, String[] exceptions) {
+                        Map method = [name: methodName, descriptor: methodDescriptor, calls: [], fields: [], types: [], constants: []]
+                        methods.add(method)
+                        return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                            @Override
+                            void visitMethodInsn(int opcode, String owner, String invocationName, String invocationDescriptor, boolean isInterface) {
+                                method.calls.add([opcode: opcode, owner: owner, name: invocationName, descriptor: invocationDescriptor])
+                            }
+
+                            @Override
+                            void visitFieldInsn(int opcode, String owner, String fieldName, String fieldDescriptor) {
+                                method.fields.add([opcode: opcode, owner: owner, name: fieldName, descriptor: fieldDescriptor])
+                            }
+
+                            @Override
+                            void visitTypeInsn(int opcode, String type) {
+                                method.types.add([opcode: opcode, type: type])
+                            }
+
+                            @Override
+                            void visitLdcInsn(Object value) {
+                                method.constants.add(value)
+                            }
+                        }
+                    }
+                }, 0)
+                methods
+            }
+            Closure<Map> requireMethod = { List<Map> methods, String owner, String name, String descriptor ->
+                Map method = methods.find { it.name == name && it.descriptor == descriptor }
+                if (method == null) {
+                    throw new GradleException("${owner} missing exact method ${name}${descriptor}")
+                }
+                method
+            }
+            Closure<Integer> countInvoke = { Map method, int opcode, String owner, String name, String descriptor ->
+                method.calls.count {
+                    it.opcode == opcode && it.owner == owner && it.name == name && it.descriptor == descriptor
+                }
+            }
+            Closure<Integer> countInvokeByNameDescriptor = { Map method, String name, String descriptor ->
+                method.calls.count {
+                    it.name == name && it.descriptor == descriptor
+                }
+            }
+            Closure<Integer> countField = { Map method, int opcode, String owner, String name, String descriptor ->
+                method.fields.count {
+                    it.opcode == opcode && it.owner == owner && it.name == name && it.descriptor == descriptor
+                }
+            }
+            Closure<Integer> countFieldByNameDescriptor = { Map method, int opcode, String name, String descriptor ->
+                method.fields.count {
+                    it.opcode == opcode && it.name == name && it.descriptor == descriptor
+                }
+            }
+            Closure<Integer> countType = { Map method, int opcode, String type ->
+                method.types.count {
+                    it.opcode == opcode && it.type == type
+                }
+            }
+            Closure<Boolean> hasConstant = { Map method, Object constant ->
+                method.constants.contains(constant)
+            }
+
+            final int invokevirtual = org.objectweb.asm.Opcodes.INVOKEVIRTUAL
+            final int invokestatic = org.objectweb.asm.Opcodes.INVOKESTATIC
+            final int getfield = org.objectweb.asm.Opcodes.GETFIELD
+            final int getstatic = org.objectweb.asm.Opcodes.GETSTATIC
+            final int putfield = org.objectweb.asm.Opcodes.PUTFIELD
+            final int checkcast = org.objectweb.asm.Opcodes.CHECKCAST
+            final int instanceofOpcode = org.objectweb.asm.Opcodes.INSTANCEOF
+            final int newOpcode = org.objectweb.asm.Opcodes.NEW
+
+            List<Map> controllerBlockMethods = classMethods(readClass('com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlock.class'))
+            Map controllerInside = requireMethod(controllerBlockMethods, 'CrushingWheelControllerBlock', 'entityInside',
+                    '(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/Entity;)V')
+            if (countInvoke(controllerInside, invokevirtual, 'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlock',
+                    'checkEntityForProcessing',
+                    '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/Entity;)V') != 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.entityInside must call checkEntityForProcessing exactly once')
+            }
+            if (countInvokeByNameDescriptor(controllerInside, 'withBlockEntityDo',
+                    '(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;Ljava/util/function/Consumer;)V') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.entityInside no longer delegates makeStuckInBlock through withBlockEntityDo')
+            }
+            Map controllerInsideLambda = controllerBlockMethods.find {
+                it.name.startsWith('lambda$entityInside') && countInvokeByNameDescriptor(it, 'makeStuckInBlock',
+                        '(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/phys/Vec3;)V') >= 1
+            }
+            if (controllerInsideLambda == null) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.entityInside lambda must call Entity.makeStuckInBlock')
+            }
+            if (countField(controllerInsideLambda, getfield,
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'processingEntity', 'Lnet/minecraft/world/entity/Entity;') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.entityInside lambda must compare controller processingEntity')
+            }
+
+            Map checkProcessing = requireMethod(controllerBlockMethods, 'CrushingWheelControllerBlock', 'checkEntityForProcessing',
+                    '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/Entity;)V')
+            if (countInvokeByNameDescriptor(checkProcessing, 'getBlockEntity',
+                    '(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.checkEntityForProcessing must read controller BE')
+            }
+            if (countField(checkProcessing, getfield,
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'crushingspeed', 'F') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.checkEntityForProcessing must reject zero crushingspeed')
+            }
+            if (!hasConstant(checkProcessing, 'BypassCrushingWheel')) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.checkEntityForProcessing must check BypassCrushingWheel')
+            }
+            if (countInvoke(checkProcessing, invokevirtual,
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'isOccupied', '()Z') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.checkEntityForProcessing must reject occupied controllers')
+            }
+            if (countType(checkProcessing, instanceofOpcode, 'net/minecraft/world/entity/player/Player') < 1
+                    || countInvokeByNameDescriptor(checkProcessing, 'isCreative', '()Z') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.checkEntityForProcessing must reject creative players')
+            }
+            if (countField(checkProcessing, getstatic, 'net/minecraft/world/Difficulty', 'PEACEFUL',
+                    'Lnet/minecraft/world/Difficulty;') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.checkEntityForProcessing must reject players on PEACEFUL')
+            }
+            if (countInvoke(checkProcessing, invokevirtual,
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'startCrushing', '(Lnet/minecraft/world/entity/Entity;)V') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.checkEntityForProcessing must call startCrushing')
+            }
+
+            Map collisionShape = requireMethod(controllerBlockMethods, 'CrushingWheelControllerBlock', 'getCollisionShape',
+                    '(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/phys/shapes/CollisionContext;)Lnet/minecraft/world/phys/shapes/VoxelShape;')
+            if (countField(collisionShape, getstatic, 'com/simibubi/create/AllShapes',
+                    'CRUSHING_WHEEL_CONTROLLER_COLLISION', 'Lnet/createmod/catnip/math/VoxelShaper;') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.getCollisionShape must use CRUSHING_WHEEL_CONTROLLER_COLLISION')
+            }
+            if (countType(collisionShape, instanceofOpcode, 'net/minecraft/world/phys/shapes/EntityCollisionContext') < 1
+                    || countInvokeByNameDescriptor(collisionShape, 'getEntity', '()Lnet/minecraft/world/entity/Entity;') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.getCollisionShape must be entity-aware')
+            }
+            if (!hasConstant(collisionShape, 'BypassCrushingWheel')) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.getCollisionShape must check BypassCrushingWheel')
+            }
+            if (countInvokeByNameDescriptor(collisionShape, 'getBlockEntity',
+                    '(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.getCollisionShape must read controller BE')
+            }
+            if (countField(collisionShape, getfield,
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'processingEntity', 'Lnet/minecraft/world/entity/Entity;') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.getCollisionShape must compare processingEntity')
+            }
+            if (countInvoke(collisionShape, invokestatic, 'net/minecraft/world/phys/shapes/Shapes',
+                    'empty', '()Lnet/minecraft/world/phys/shapes/VoxelShape;') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlock.getCollisionShape must be able to return Shapes.empty')
+            }
+
+            List<Map> controllerBeMethods = classMethods(readClass('com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity.class'))
+            Map startCrushing = requireMethod(controllerBeMethods, 'CrushingWheelControllerBlockEntity', 'startCrushing',
+                    '(Lnet/minecraft/world/entity/Entity;)V')
+            if (countField(startCrushing, putfield,
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'processingEntity', 'Lnet/minecraft/world/entity/Entity;') != 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlockEntity.startCrushing must store processingEntity')
+            }
+            if (countInvokeByNameDescriptor(startCrushing, 'getUUID', '()Ljava/util/UUID;') < 1
+                    || countField(startCrushing, putfield,
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'entityUUID', 'Ljava/util/UUID;') != 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlockEntity.startCrushing must store entityUUID from Entity.getUUID')
+            }
+
+            Map tick = requireMethod(controllerBeMethods, 'CrushingWheelControllerBlockEntity', 'tick', '()V')
+            [
+                    ['net/minecraft/world/entity/Entity', 'getBoundingBox', '()Lnet/minecraft/world/phys/AABB;'],
+                    ['net/minecraft/world/entity/Entity', 'getX', '()D'],
+                    ['net/minecraft/world/entity/Entity', 'getY', '()D'],
+                    ['net/minecraft/world/entity/Entity', 'getZ', '()D']
+            ].each { call ->
+                int count = countInvoke(tick, invokevirtual, call[0], call[1], call[2])
+                if (count < 1) {
+                    throw new GradleException("Create 6.0.8 CrushingWheelControllerBlockEntity.tick missing ${call[0]}.${call[1]}${call[2]}")
+                }
+                logger.lifecycle("verifyM20CrushingControllerBoundary CrushingWheelControllerBlockEntity.tick ${call[1]} count=${count}")
+            }
+            if (countType(tick, newOpcode, 'net/minecraft/world/phys/AABB') < 1
+                    || countInvokeByNameDescriptor(tick, '<init>', '(Lnet/minecraft/core/BlockPos;)V') < 1
+                    || countInvokeByNameDescriptor(tick, 'inflate', '(D)Lnet/minecraft/world/phys/AABB;') < 1
+                    || countInvokeByNameDescriptor(tick, 'intersects',
+                    '(Lnet/minecraft/world/phys/AABB;)Z') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlockEntity.tick must compare entity AABB with inflated worldPosition AABB')
+            }
+            [
+                    ['net/minecraft/core/BlockPos', 'getX', '()I'],
+                    ['net/minecraft/core/BlockPos', 'getZ', '()I']
+            ].each { call ->
+                if (countInvoke(tick, invokevirtual, call[0], call[1], call[2]) < 1) {
+                    throw new GradleException("Create 6.0.8 CrushingWheelControllerBlockEntity.tick missing worldPosition coordinate read ${call[1]}")
+                }
+            }
+            if (countInvoke(tick, invokevirtual, 'net/minecraft/world/entity/Entity',
+                    'setDeltaMovement', '(Lnet/minecraft/world/phys/Vec3;)V') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlockEntity.tick must pull entities through setDeltaMovement')
+            }
+            if (countType(tick, instanceofOpcode, 'net/minecraft/world/entity/item/ItemEntity') < 1
+                    || countInvoke(tick, invokevirtual,
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'intakeItem', '(Lnet/minecraft/world/entity/item/ItemEntity;)V') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlockEntity.tick must intake ItemEntity')
+            }
+            if (countType(tick, instanceofOpcode, 'net/minecraft/world/entity/LivingEntity') < 1
+                    || countInvokeByNameDescriptor(tick, 'hurt', '(Lnet/minecraft/world/damagesource/DamageSource;F)Z') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlockEntity.tick must keep the living-entity damage path')
+            }
+            if (countField(tick, getfield, 'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'processingEntity', 'Lnet/minecraft/world/entity/Entity;') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlockEntity.tick must still own processingEntity')
+            }
+
+            Map intakeItem = requireMethod(controllerBeMethods, 'CrushingWheelControllerBlockEntity', 'intakeItem',
+                    '(Lnet/minecraft/world/entity/item/ItemEntity;)V')
+            if (countInvoke(intakeItem, invokevirtual, 'net/minecraft/world/entity/item/ItemEntity',
+                    'getItem', '()Lnet/minecraft/world/item/ItemStack;') < 1
+                    || countInvokeByNameDescriptor(intakeItem, 'copy', '()Lnet/minecraft/world/item/ItemStack;') < 1
+                    || countInvokeByNameDescriptor(intakeItem, 'setStackInSlot',
+                    '(ILnet/minecraft/world/item/ItemStack;)V') < 1
+                    || countInvoke(intakeItem, invokevirtual,
+                    'com/simibubi/create/content/kinetics/crusher/CrushingWheelControllerBlockEntity',
+                    'itemInserted', '(Lnet/minecraft/world/item/ItemStack;)V') < 1
+                    || countInvoke(intakeItem, invokevirtual, 'net/minecraft/world/entity/item/ItemEntity',
+                    'discard', '()V') < 1) {
+                throw new GradleException('Create 6.0.8 CrushingWheelControllerBlockEntity.intakeItem must copy the ItemEntity stack, insert it, and discard the entity')
+            }
+        } finally {
+            createJar.close()
+        }
+
+        String mixinConfig = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        String wheelMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/crushing_wheel/CrushingWheelBlockMixin.java').getText('UTF-8')
+        String controllerMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/crushing_wheel_entity_processing/CrushingWheelControllerBlockEntityMixin.java').getText('UTF-8')
+        String entitiesInBlocksMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entities_in_blocks/EntityMixin.java').getText('UTF-8')
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        [
+                'compatibility.create.crushing_wheel.CrushingWheelBlockMixin',
+                'compatibility.create.crushing_wheel_entity_processing.CrushingWheelControllerBlockEntityMixin'
+        ].each { canary ->
+            if (!mixinConfig.contains(canary)) {
+                throw new GradleException("M20.9 crusher mixin config missing ${canary}")
+            }
+        }
+        [
+                'transformPositionInverse(entityIn.position())',
+                'transformNormal(new Vec3(x, 0, z))',
+                'getBlockEntityOptional(level, pos)',
+                'setDeltaMovement(entityIn.getDeltaMovement().add(impulse))'
+        ].each { canary ->
+            if (!wheelMixin.contains(canary)) {
+                throw new GradleException("M20.9 CrushingWheelBlockMixin missing upstream semantic canary: ${canary}")
+            }
+        }
+        [
+                'Sable.HELPER.getContaining(this)',
+                'transformInverse(this.sable$parentSublevel.logicalPose())',
+                'transformPositionInverse(instance.position()).x',
+                'transformPositionInverse(instance.position()).y',
+                'transformPositionInverse(instance.position()).z',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!controllerMixin.contains(canary)) {
+                throw new GradleException("M20.9 CrushingWheelControllerBlockEntityMixin missing coordinate bridge canary: ${canary}")
+            }
+        }
+        [
+                'controllerCollisionShapePresent',
+                'physicsColliderContainsController',
+                'structuralReady',
+                'runtimeProven=USER_REQUIRED',
+                'RAW_VISIBLE_AABB_MISMATCH'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.9 crusher inspect diagnostics missing canary: ${canary}")
+            }
+        }
+        [
+                'SABLE_M20_CRUSH_ENTITY_BRIDGE',
+                'create", "crushing_wheel_controller',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(intersecting, mutableBlockPos)',
+                'blockState.entityInside(this.level, mutableBlockPos'
+        ].each { canary ->
+            if (!entitiesInBlocksMixin.contains(canary)) {
+                throw new GradleException("M20.9 inside-block bridge diagnostic missing canary: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM20CrushingControllerBoundary PASS: Create 6.0.8 crusher entityInside, collision shape, and controller BE tick boundaries are exact-bytecode verified')
+    }
+}
+
+tasks.register('verifyM20UpstreamParityInventoryBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.5 records the final exact-upstream Create parity inventory with Rope Pulley and Elevator included.'
+
+    inputs.file(rootProject.file('M20_CREATE_PARITY_MATRIX.md'))
+    inputs.file(rootProject.file('BACKPORT_STATUS.md'))
+    inputs.file(rootProject.file('common/src/main/resources/data/sable/tags/block/weightless.json'))
+    inputs.file(rootProject.file('common/src/main/resources/data/sable/physics_block_properties/weightless.json'))
+    inputs.file(rootProject.file('neoforge/src/main/java/dev/ryanhcode/sable/neoforge/mixin/compatibility/create/redstone_links/RedstoneLinkNetworkHandlerMixin.java'))
+
+    doLast {
+        String matrix = rootProject.file('M20_CREATE_PARITY_MATRIX.md').getText('UTF-8')
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        String weightlessTag = rootProject.file('common/src/main/resources/data/sable/tags/block/weightless.json').getText('UTF-8')
+        String weightlessProps = rootProject.file('common/src/main/resources/data/sable/physics_block_properties/weightless.json').getText('UTF-8')
+        String upstreamLink = rootProject.file('neoforge/src/main/java/dev/ryanhcode/sable/neoforge/mixin/compatibility/create/redstone_links/RedstoneLinkNetworkHandlerMixin.java').getText('UTF-8')
+
+        List<String> rows = matrix.readLines().findAll { it ==~ /\| [0-9]+ .*/ }
+        if (rows.size() != 48) {
+            throw new GradleException("M20 parity inventory must have 48 rows after M20.9 Crushing Wheel controller addition, found ${rows.size()}")
+        }
+        [
+                '`data/sable/tags/block/weightless.json`',
+                '`data/sable/physics_block_properties/weightless.json`',
+                '`create:rope`',
+                '`create:pulley_magnet`',
+                '`m20.create.PulleyBlockEntityMixin`',
+                '`m20.create.ElevatorPulleyBlockEntityMixin`',
+                '`m20.create.ElevatorContraptionMixin`',
+                '`m20.create.ElevatorContactBlockMixin`',
+                '`m20.create.ElevatorColumnMixin`',
+                '`compatibility.create.crushing_wheel.CrushingWheelBlockMixin`',
+                '`compatibility.create.crushing_wheel_entity_processing.CrushingWheelControllerBlockEntityMixin`',
+                '`redstone_links.RedstoneLinkNetworkHandlerMixin`',
+                '`MISSING_APPLICABLE` | 0'
+        ].each { canary ->
+            if (!matrix.contains(canary)) {
+                throw new GradleException("M20.4 parity matrix missing exact-upstream canary: ${canary}")
+            }
+        }
+        if (!weightlessTag.contains('create:rope') || !weightlessTag.contains('create:pulley_magnet')
+                || !weightlessProps.contains('"sable:mass": 0.0')) {
+            throw new GradleException('M20.4 Rope Pulley weightless upstream fix is not covered by generalized data')
+        }
+        if (!upstreamLink.contains('withinRange') || !upstreamLink.contains('linkRange')
+                || !upstreamLink.contains('logicalPose().transformPosition')) {
+            throw new GradleException('M20.4 upstream Redstone Link semantic reference is unavailable or stale')
+        }
+        [
+                'M20 is `CLOSED_WITH_DEFERRED_KNOWN_ISSUE`',
+                'M20 closure matrix summary',
+                'PORTED_STATIC_PROVEN=7',
+                'COVERED_BY_GENERALIZED_BACKPORT=8',
+                'DEFERRED_EXPLICITLY=21',
+                'Known runtime facts: structural fixture PASS',
+                'create:crushing_wheel_controller[facing=down,valid=true]',
+                'ItemEntity interaction FAIL',
+                'LivingEntity interaction FAIL / not runtime-proven',
+                'Future investigation should resume at'
+        ].each { canary ->
+            if (!status.contains(canary)) {
+                throw new GradleException("BACKPORT_STATUS.md must record M20 closure with explicit Crushing Wheels deferred known issue: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM20UpstreamParityInventoryBoundary PASS: Rope Pulley/Elevator parity rows, Redstone Link deferred concern, and M20 Crushing Wheels known deferred issue are explicit')
+    }
+}
+
+tasks.register('verifyM20RopePulleySemanticBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.4 Rope Pulley controls are named by observed pulley motion while only changing Creative Motor state.'
+
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M20.4 pulley semantic verification: ${targetCreateJar}")
+        }
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            def pulleyEntry = createJar.getJarEntry('com/simibubi/create/content/contraptions/pulley/PulleyBlockEntity.class')
+            if (pulleyEntry == null) {
+                throw new GradleException('Create 6.0.8 PulleyBlockEntity class is missing')
+            }
+            String pulleyLatin = new String(createJar.getInputStream(pulleyEntry).bytes, 'ISO-8859-1')
+            if (!pulleyLatin.contains('toMotionVector') || !pulleyLatin.contains('getInterpolatedOffset')
+                    || !pulleyLatin.contains('PulleyContraption')) {
+                throw new GradleException('Create 6.0.8 PulleyBlockEntity no longer exposes the audited linear actuator semantics')
+            }
+        } finally {
+            createJar.close()
+        }
+
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        [
+                'controller_extend',
+                'setControllerMotor(context, -DEFAULT_RPM, "extend")',
+                'controller_retract',
+                'setControllerMotor(context, DEFAULT_RPM, "retract")',
+                'observedExtendPulleySpeed=+32',
+                'observedRetractPulleySpeed=-32',
+                'requestedMotorValue=',
+                'observedPulleySpeed=',
+                'actualDirection=',
+                'directPulleyOffsetWrites=false',
+                'pulleyDirection(final double speed)'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.4 Rope Pulley semantic guard missing canary: ${canary}")
+            }
+        }
+        [
+                'writeFieldRaw(pulley, "offset"',
+                'writeFieldRaw(pulley, "running"',
+                'new PulleyContraption'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M20.4 controller commands must not fake pulley lifecycle: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM20RopePulleySemanticBoundary PASS: controller_extend/retract are labelled by observed pulley speed and motor-only control')
+    }
+}
+
+tasks.register('verifyM20RopePulleyRenderingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.4 Pulley renderer fallback targets exact Create 6.0.8 bytecode and remains Sable-only.'
+
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/AbstractPulleyRendererMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M20.4 pulley render verification: ${targetCreateJar}")
+        }
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            Closure<byte[]> readClass = { String entryName ->
+                def entry = createJar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 M20.4 pulley renderer class is missing: ${entryName}")
+                }
+                createJar.getInputStream(entry).bytes
+            }
+            Closure<Map> methodCalls = { byte[] bytes, String name, String descriptor ->
+                Map result = null
+                new org.objectweb.asm.ClassReader(bytes).accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    @Override
+                    org.objectweb.asm.MethodVisitor visitMethod(int access, String methodName, String methodDescriptor, String signature, String[] exceptions) {
+                        if (methodName == name && methodDescriptor == descriptor) {
+                            result = [calls: []]
+                            return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                                @Override
+                                void visitMethodInsn(int opcode, String owner, String invocationName, String invocationDescriptor, boolean isInterface) {
+                                    result.calls.add([opcode: opcode, owner: owner, name: invocationName, descriptor: invocationDescriptor])
+                                }
+                            }
+                        }
+                        null
+                    }
+                }, 0)
+                if (result == null) {
+                    throw new GradleException("AbstractPulleyRenderer missing exact renderSafe${descriptor}")
+                }
+                result
+            }
+            Map renderSafe = methodCalls(readClass('com/simibubi/create/content/contraptions/pulley/AbstractPulleyRenderer.class'),
+                    'renderSafe',
+                    '(Lcom/simibubi/create/content/kinetics/base/KineticBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V')
+            int vizCalls = renderSafe.calls.count {
+                it.opcode == org.objectweb.asm.Opcodes.INVOKESTATIC
+                        && it.owner == 'dev/engine_room/flywheel/api/visualization/VisualizationManager'
+                        && it.name == 'supportsVisualization'
+                        && it.descriptor == '(Lnet/minecraft/world/level/LevelAccessor;)Z'
+            }
+            int renderAtCalls = renderSafe.calls.count {
+                it.opcode == org.objectweb.asm.Opcodes.INVOKESTATIC
+                        && it.owner == 'com/simibubi/create/content/contraptions/pulley/AbstractPulleyRenderer'
+                        && it.name == 'renderAt'
+                        && it.descriptor == '(Lnet/minecraft/world/level/LevelAccessor;Lnet/createmod/catnip/render/SuperByteBuffer;FLnet/minecraft/core/BlockPos;Lcom/mojang/blaze3d/vertex/PoseStack;Lcom/mojang/blaze3d/vertex/VertexConsumer;)V'
+            }
+            if (vizCalls != 1) {
+                throw new GradleException("M20.4 Pulley visualization WrapOperation would resolve ${vizCalls} calls, expected 1")
+            }
+            if (renderAtCalls < 2) {
+                throw new GradleException("M20.4 Pulley renderer no longer emits expected rope/magnet renderAt calls, found ${renderAtCalls}")
+            }
+        } finally {
+            createJar.close()
+        }
+
+        String mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/AbstractPulleyRendererMixin.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        [
+                '@Mixin(targets = "com.simibubi.create.content.contraptions.pulley.AbstractPulleyRenderer", remap = false)',
+                'Sable.HELPER.getContainingClient(blockEntity) != null',
+                'SABLE_M20_PULLEY_RENDER',
+                'Create_AbstractPulleyRenderer',
+                'hiddenPlotPoseTranslation=false'
+        ].each { canary ->
+            if (!mixin.contains(canary)) {
+                throw new GradleException("M20.4 Pulley mixin missing canary: ${canary}")
+            }
+        }
+        if (!config.contains('m20.create.AbstractPulleyRendererMixin')) {
+            throw new GradleException('M20.4 Pulley renderer mixin must be registered in the client config')
+        }
+        [
+                'custom rope',
+                'custom magnet',
+                'fake rope',
+                'PoseStack.translate(2048'
+        ].each { forbidden ->
+            if (mixin.contains(forbidden)) {
+                throw new GradleException("M20.4 Pulley renderer must not fake visuals or render hidden coordinates: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM20RopePulleyRenderingBoundary PASS: exact Create 6.0.8 AbstractPulleyRenderer gate is Sable-only forced to BER')
+    }
+}
+
+tasks.register('verifyM20RopePulleyPayloadHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.4 secondary Rope Pulley payload canary does not fake contraption lifecycle.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        [
+                'prepare_controller_payload',
+                'SABLE_M20_CONTROLLER_PAYLOAD',
+                'normal_Create_RopePulley_assembly_candidate',
+                'directPulleyOffsetWrites=false',
+                'directContraptionCreation=false',
+                'CONTROLLER_PAYLOAD_TAG',
+                'ropePathBelowPulleyClear(subLevel, false)'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.4 Pulley payload harness missing canary: ${canary}")
+            }
+        }
+        [
+                'new ControlledContraptionEntity',
+                'PulleyContraptionEntity',
+                'setPos(',
+                'writeFieldRaw(pulley, "offset"',
+                'writeFieldRaw(pulley, "running"'
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M20.4 Pulley payload harness must not create/teleport/write lifecycle state: ${forbidden}")
+            }
+        }
+        if (!smoke.contains('Session 5: Rope Pulley Payload') || !smoke.contains('prepare_controller_payload')) {
+            throw new GradleException('TARGET_RUNTIME_SMOKE.md must include the secondary Rope Pulley payload canary')
+        }
+        logger.lifecycle('verifyM20RopePulleyPayloadHarnessBoundary PASS: payload canary prepares blocks only and leaves Create to assemble/move/disassemble')
+    }
+}
+
+tasks.register('verifyM20RopePulleyAssemblyBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.5 Rope Pulley payload assembly uses Sable-aware Create 6.0.8 lifecycle lookups.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/controllers/SableCreateControllerBlockLookup.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/PulleyBlockEntityMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String helper = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/controllers/SableCreateControllerBlockLookup.java').getText('UTF-8')
+        String mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/PulleyBlockEntityMixin.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        [
+                'SableCreateControllerBlockLookup.getBlockState(level, pos, original',
+                'SableCreateControllerBlockLookup.getBlockEntity(level, pos, original',
+                'rope_pulley_scan_or_assembly',
+                'rope_pulley_controller_or_mirror'
+        ].each { canary ->
+            if (!mixin.contains(canary)) {
+                throw new GradleException("M20.5 Rope Pulley mixin missing canary: ${canary}")
+            }
+        }
+        [
+                'Sable.HELPER.getContaining(level, pos)',
+                'SubLevelBlockStateLookup.getBlockStateOrAir(subLevel, pos)',
+                'SubLevelBlockStateLookup.getBlockEntity(subLevel, pos)',
+                'wouldGenerateChunk=false'
+        ].each { canary ->
+            if (!helper.contains(canary)) {
+                throw new GradleException("M20.5 controller lookup helper missing canary: ${canary}")
+            }
+        }
+        [
+                'payloadLocals = List.of(new BlockPos(0, 0, 0), new BlockPos(1, 0, 0))',
+                'controllerMovedContraptionPresent(subLevel)',
+                'directContraptionCreation=false',
+                'directPulleyOffsetWrites=false'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.5 Rope Pulley payload harness missing canary: ${canary}")
+            }
+        }
+        [
+                'new ControlledContraptionEntity',
+                'new PulleyContraption',
+                'writeFieldRaw(pulley, "offset"',
+                'writeFieldRaw(pulley, "running"',
+                'setPos('
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M20.5 Rope Pulley harness must not fake payload lifecycle: ${forbidden}")
+            }
+        }
+        if (!config.contains('m20.create.PulleyBlockEntityMixin')) {
+            throw new GradleException('M20.5 Rope Pulley lifecycle mixin must be registered')
+        }
+        logger.lifecycle('verifyM20RopePulleyAssemblyBoundary PASS: Rope Pulley payload assembly scans use Sable-aware storage lookups without fake lifecycle writes')
+    }
+}
+
+tasks.register('verifyM20RopePulleyMassWeightBoundary') {
+    group = 'forge backport'
+    description = 'Verifies upstream Rope Pulley rope/magnet weightless compatibility is covered by generalized backport data.'
+
+    inputs.file(rootProject.file('common/src/main/resources/data/sable/tags/block/weightless.json'))
+    inputs.file(rootProject.file('common/src/main/resources/data/sable/physics_block_properties/weightless.json'))
+    inputs.file(rootProject.file('M20_CREATE_PARITY_MATRIX.md'))
+
+    doLast {
+        String tag = rootProject.file('common/src/main/resources/data/sable/tags/block/weightless.json').getText('UTF-8')
+        String props = rootProject.file('common/src/main/resources/data/sable/physics_block_properties/weightless.json').getText('UTF-8')
+        String matrix = rootProject.file('M20_CREATE_PARITY_MATRIX.md').getText('UTF-8')
+        ['create:rope', 'create:pulley_magnet'].each { canary ->
+            if (!tag.contains(canary)) {
+                throw new GradleException("M20.5 upstream Rope Pulley weightless block missing from tag: ${canary}")
+            }
+        }
+        if (!props.contains('"sable:mass": 0.0')) {
+            throw new GradleException('M20.5 weightless physics block properties must keep zero mass')
+        }
+        if (!matrix.contains('Rope Pulley mass/temporary rope handling')
+                || !matrix.contains('COVERED_BY_GENERALIZED_BACKPORT')) {
+            throw new GradleException('M20.5 parity matrix must explicitly record generalized Rope Pulley weightless coverage')
+        }
+        logger.lifecycle('verifyM20RopePulleyMassWeightBoundary PASS: Create rope and pulley magnet remain weightless through generalized Sable data')
+    }
+}
+
+tasks.register('verifyM20ElevatorAssemblyBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.5 Elevator Pulley fixture and Sable-aware assembly bridge are present.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ContraptionMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorPulleyBlockEntityMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorContraptionMixin.java'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String sharedContraptionMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ContraptionMixin.java').getText('UTF-8')
+        String pulleyMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorPulleyBlockEntityMixin.java').getText('UTF-8')
+        String contraptionMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorContraptionMixin.java').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        [
+                'spawn_elevator',
+                'inspect_elevator',
+                'elevator_assemble',
+                'elevator_floor',
+                'elevator_disassemble',
+                'ELEVATOR_CABIN_CONTACT_LOCAL',
+                'REDSTONE_CONTACT_ID',
+                'ELEVATOR_CONTACT_ID',
+                'ELEVATOR_CABIN_CONTACT_LOCAL = new BlockPos(0, 2, 0)',
+                'ELEVATOR_CABIN_BLOCK_LOCAL = new BlockPos(-1, 2, 0)',
+                'ELEVATOR_LOWER_CONTACT_LOCAL = new BlockPos(1, 1, 0)',
+                'ELEVATOR_UPPER_CONTACT_LOCAL = new BlockPos(1, 4, 0)',
+                'elevator_cabin_redstone_contact_facing_east',
+                'elevator_lower_floor_contact_facing_west',
+                'elevator_upper_floor_contact_facing_west',
+                'expectedFirstScanLocal=',
+                'expectedHorizontalRedstoneContacts=1',
+                'expectedColumn=ColumnCoords{x=1,z=0,facing=WEST}',
+                'Create_ElevatorPulley_speed_driven_assembly',
+                'directElevatorEntityCreation=false',
+                'directOffsetWrites=false'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.5 Elevator harness missing canary: ${canary}")
+            }
+        }
+        [
+                'elevator_assembly_or_contact',
+                'elevator_contact_loaded',
+                'elevator_controller_or_mirror'
+        ].each { canary ->
+            if (!pulleyMixin.contains(canary)) {
+                throw new GradleException("M20.5 ElevatorPulleyBlockEntity mixin missing canary: ${canary}")
+            }
+        }
+        [
+                'elevator_contraption_capture',
+                'elevator_floor_broadcast'
+        ].each { canary ->
+            if (!contraptionMixin.contains(canary)) {
+                throw new GradleException("M20.5 ElevatorContraption mixin missing canary: ${canary}")
+            }
+        }
+        ['m20.create.ElevatorPulleyBlockEntityMixin', 'm20.create.ElevatorContraptionMixin'].each { canary ->
+            if (!config.contains(canary)) {
+                throw new GradleException("M20.5 Elevator assembly mixin missing from config: ${canary}")
+            }
+        }
+        [
+                'searchMovedStructure',
+                'moveBlock',
+                'capture',
+                'contraption_structure_search',
+                'SableCreateControllerBlockLookup.getBlockState',
+                'SableCreateControllerBlockLookup.getBlockEntity'
+        ].each { canary ->
+            if (!sharedContraptionMixin.contains(canary)) {
+                throw new GradleException("M20.6 shared Contraption mixin missing assembly lookup canary: ${canary}")
+            }
+        }
+        if (!config.contains('m20.create.ContraptionMixin')) {
+            throw new GradleException('M20.6 shared Contraption mixin missing from common mixin config')
+        }
+        [
+                'new ElevatorContraption',
+                'new ControlledContraptionEntity',
+                'writeFieldRaw(pulley, "offset"',
+                'setPos('
+        ].each { forbidden ->
+            if (commands.contains(forbidden)) {
+                throw new GradleException("M20.5 Elevator harness must not fake assembly/motion: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM20ElevatorAssemblyBoundary PASS: Elevator fixture and Create-owned assembly controls are encoded')
+    }
+}
+
+tasks.register('verifyM20ElevatorContactControllerBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.5 Elevator contacts/floor discovery use Sable-aware storage lookups.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorContactBlockMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorColumnMixin.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+
+    doLast {
+        String contactMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorContactBlockMixin.java').getText('UTF-8')
+        String columnMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorColumnMixin.java').getText('UTF-8')
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        [
+                'getColumnCoords',
+                'elevator_column_coords',
+                'SableCreateControllerBlockLookup.getBlockState'
+        ].each { canary ->
+            if (!contactMixin.contains(canary)) {
+                throw new GradleException("M20.5 ElevatorContactBlock mixin missing canary: ${canary}")
+            }
+        }
+        [
+                'elevator_column_contact_entity',
+                'elevator_column_floor_reached_entity',
+                'elevator_column_init_names_entity',
+                'elevator_column_gather_state',
+                'elevator_column_gather_set'
+        ].each { canary ->
+            if (!columnMixin.contains(canary)) {
+                throw new GradleException("M20.5 ElevatorColumn mixin missing canary: ${canary}")
+            }
+        }
+        [
+                'configureElevatorContacts',
+                'configureElevatorContactName(subLevel, ELEVATOR_LOWER_CONTACT_LOCAL, "0", "Lower")',
+                'configureElevatorContactName(subLevel, ELEVATOR_UPPER_CONTACT_LOCAL, "1", "Upper")',
+                'vanilla_redstone_signal_into_Create_ElevatorContact',
+                'uiFloorControls=DEFERRED'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.5 Elevator contact harness missing canary: ${canary}")
+            }
+        }
+        logger.lifecycle('verifyM20ElevatorContactControllerBoundary PASS: Elevator floor contacts and column lookups are Sable-aware and UI polish remains deferred')
+    }
+}
+
+tasks.register('verifyM20ControllerMixinBytecodeBoundary') {
+    group = 'forge backport'
+    description = 'Verifies every new M20.5 controller mixin targets exact Create 6.0.8 bytecode invocations.'
+    dependsOn tasks.named("prepareCreateDevelopmentRuntime")
+
+    inputs.file(createDevelopmentRuntime)
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+    inputs.files(
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ContraptionMixin.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/PulleyBlockEntityMixin.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorPulleyBlockEntityMixin.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorContraptionMixin.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorContactBlockMixin.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m20/create/ElevatorColumnMixin.java'))
+
+    doLast {
+        File mappedCreateJar = createDevelopmentRuntime.get().asFile
+        if (!mappedCreateJar.isFile()) {
+            throw new GradleException("Missing mapped Create 6.0.8 jar for M20.5 bytecode verification: ${mappedCreateJar}")
+        }
+        JarFile createJar = new JarFile(mappedCreateJar)
+        try {
+            Closure<byte[]> readClass = { String entryName ->
+                def entry = createJar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 M20.5 target class missing: ${entryName}")
+                }
+                createJar.getInputStream(entry).bytes
+            }
+            Closure<Integer> countInvocation = { byte[] bytes, String methodName, String methodDescriptor,
+                                                 String owner, String invocationName, String invocationDescriptor,
+                                                 int opcode ->
+                Integer count = null
+                new org.objectweb.asm.ClassReader(bytes).accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    @Override
+                    org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
+                        if (name == methodName && descriptor == methodDescriptor) {
+                            count = 0
+                            return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                                @Override
+                                void visitMethodInsn(int seenOpcode, String seenOwner, String seenName, String seenDescriptor, boolean isInterface) {
+                                    if (seenOpcode == opcode && seenOwner == owner && seenName == invocationName
+                                            && seenDescriptor == invocationDescriptor) {
+                                        count = count + 1
+                                    }
+                                }
+                            }
+                        }
+                        null
+                    }
+                }, 0)
+                if (count == null) {
+                    throw new GradleException("M20.5 bytecode target method missing: ${methodName}${methodDescriptor}")
+                }
+                count
+            }
+            Closure<Void> requireInvocation = { String classEntry, String methodName, String methodDescriptor,
+                                                String owner, String invocationName, String invocationDescriptor,
+                                                int opcode, int minimum ->
+                int count = countInvocation(readClass(classEntry), methodName, methodDescriptor, owner,
+                        invocationName, invocationDescriptor, opcode)
+                if (count < minimum) {
+                    throw new GradleException("M20.5 ${classEntry} ${methodName}${methodDescriptor} has ${count} "
+                            + "matching ${owner}.${invocationName}${invocationDescriptor}, expected at least ${minimum}")
+                }
+                logger.lifecycle("verifyM20ControllerMixinBytecodeBoundary ${classEntry} ${methodName}${methodDescriptor} ${owner}.${invocationName}${invocationDescriptor} count=${count}")
+                null
+            }
+            final int invokevirtual = org.objectweb.asm.Opcodes.INVOKEVIRTUAL
+            final int invokeinterface = org.objectweb.asm.Opcodes.INVOKEINTERFACE
+            requireInvocation('com/simibubi/create/content/contraptions/Contraption.class',
+                    'searchMovedStructure', '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/core/Direction;)Z',
+                    'net/minecraft/world/level/Level', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/Contraption.class',
+                    'moveBlock', '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/Direction;Ljava/util/Queue;Ljava/util/Set;)Z',
+                    'net/minecraft/world/level/Level', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/Contraption.class',
+                    'capture', '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)Lorg/apache/commons/lang3/tuple/Pair;',
+                    'net/minecraft/world/level/Level', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/Contraption.class',
+                    'moveBlock', '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/Direction;Ljava/util/Queue;Ljava/util/Set;)Z',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/Contraption.class',
+                    'capture', '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)Lorg/apache/commons/lang3/tuple/Pair;',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/Contraption.class',
+                    'getBlockEntityNBT', '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)Lnet/minecraft/nbt/CompoundTag;',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/pulley/PulleyBlockEntity.class',
+                    'visitNewPosition', '()V',
+                    'net/minecraft/world/level/Level', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/pulley/PulleyBlockEntity.class',
+                    'assemble', '()V',
+                    'net/minecraft/world/level/Level', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokevirtual, 2)
+            requireInvocation('com/simibubi/create/content/contraptions/pulley/PulleyBlockEntity.class',
+                    'disassemble', '()V',
+                    'net/minecraft/world/level/Level', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokevirtual, 4)
+            requireInvocation('com/simibubi/create/content/contraptions/pulley/PulleyBlockEntity.class',
+                    'tick', '()V',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/pulley/PulleyBlockEntity.class',
+                    'startMirroringOther', '(Lnet/minecraft/core/BlockPos;)V',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/pulley/PulleyBlockEntity.class',
+                    'notifyMirrorsOfDisassembly', '()V',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorPulleyBlockEntity.class',
+                    'assemble', '()V',
+                    'net/minecraft/world/level/Level', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokevirtual, 2)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorPulleyBlockEntity.class',
+                    'assemble', '()V',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorPulleyBlockEntity.class',
+                    'triggerContact', '(Lcom/simibubi/create/content/contraptions/elevator/ElevatorContraption;I)V',
+                    'net/minecraft/world/level/Level', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorPulleyBlockEntity.class',
+                    'triggerContact', '(Lcom/simibubi/create/content/contraptions/elevator/ElevatorContraption;I)V',
+                    'net/minecraft/world/level/Level', 'isLoaded',
+                    '(Lnet/minecraft/core/BlockPos;)Z',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorPulleyBlockEntity.class',
+                    'clicked', '()V',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorContraption.class',
+                    'capture', '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)Lorg/apache/commons/lang3/tuple/Pair;',
+                    'net/minecraft/world/level/Level', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorContraption.class',
+                    'broadcastFloorData', '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)V',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorContactBlock.class',
+                    'getColumnCoords', '(Lnet/minecraft/world/level/LevelAccessor;Lnet/minecraft/core/BlockPos;)Lcom/simibubi/create/content/contraptions/elevator/ElevatorColumn$ColumnCoords;',
+                    'net/minecraft/world/level/LevelAccessor', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokeinterface, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorColumn.class',
+                    'markDirty', '()V',
+                    'net/minecraft/world/level/LevelAccessor', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokeinterface, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorColumn.class',
+                    'lambda$floorReached$2', '(Lnet/minecraft/world/level/LevelAccessor;Ljava/lang/String;Lnet/minecraft/core/BlockPos;)V',
+                    'net/minecraft/world/level/LevelAccessor', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokeinterface, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorColumn.class',
+                    'lambda$compileNamesList$3', '(Lnet/minecraft/core/BlockPos;)Lnet/createmod/catnip/data/IntAttached;',
+                    'net/minecraft/world/level/LevelAccessor', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokeinterface, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorColumn.class',
+                    'initNames', '(Lnet/minecraft/world/level/Level;)V',
+                    'net/minecraft/world/level/Level', 'getBlockEntity',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    invokevirtual, 2)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorColumn.class',
+                    'lambda$gatherAll$5', '(Lnet/minecraft/core/BlockPos;)V',
+                    'net/minecraft/world/level/LevelAccessor', 'getBlockState',
+                    '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    invokeinterface, 1)
+            requireInvocation('com/simibubi/create/content/contraptions/elevator/ElevatorColumn.class',
+                    'lambda$gatherAll$5', '(Lnet/minecraft/core/BlockPos;)V',
+                    'net/minecraft/world/level/LevelAccessor', 'setBlock',
+                    '(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;I)Z',
+                    invokeinterface, 1)
+        } finally {
+            createJar.close()
+        }
+        logger.lifecycle('verifyM20ControllerMixinBytecodeBoundary PASS: all new M20.5 controller lifecycle mixins have exact Create 6.0.8 bytecode targets')
+    }
+}
+
+tasks.register('verifyM20RedstoneLinkHarnessBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M20.4 Redstone Link canary is same-Sable, frequency-configured, and production-mixin deferred.'
+
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java'))
+    inputs.file(rootProject.file('M20_CREATE_PARITY_MATRIX.md'))
+    inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
+
+    doLast {
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create 6.0.8 jar for M20.4 Redstone Link verification: ${targetCreateJar}")
+        }
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            [
+                    'com/simibubi/create/content/redstone/link/RedstoneLinkBlockEntity.class': ['receivedSignal', 'transmittedSignal', 'createLink'],
+                    'com/simibubi/create/content/redstone/link/LinkBehaviour.class': ['FrequencyFirst', 'FrequencyLast', 'setFrequency', 'initialize'],
+                    'com/simibubi/create/content/redstone/link/RedstoneLinkNetworkHandler.class': ['withinRange', 'updateNetworkOf']
+            ].each { entryName, canaries ->
+                def entry = createJar.getJarEntry(entryName)
+                if (entry == null) {
+                    throw new GradleException("Create 6.0.8 Redstone Link target class missing: ${entryName}")
+                }
+                String latin = new String(createJar.getInputStream(entry).bytes, 'ISO-8859-1')
+                canaries.each { canary ->
+                    if (!latin.contains(canary)) {
+                        throw new GradleException("Create 6.0.8 Redstone Link bytecode missing canary ${canary} in ${entryName}")
+                    }
+                }
+            }
+        } finally {
+            createJar.close()
+        }
+
+        String commands = rootProject.file('common/src/main/java/dev/ryanhcode/sable/command/M20TestCommands.java').getText('UTF-8')
+        String matrix = rootProject.file('M20_CREATE_PARITY_MATRIX.md').getText('UTF-8')
+        String config = rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        [
+                'spawn_link',
+                'inspect_link',
+                'toggle_link',
+                'LINK_TRANSMITTER_LOCAL',
+                'LINK_RECEIVER_LOCAL',
+                'LINK_LAMP_LOCAL',
+                'LINK_SIGNAL_LOCAL',
+                'configureRedstoneLinkFixture',
+                'setFrequency',
+                'Items.REDSTONE',
+                'Items.IRON_INGOT',
+                'productionMixin=none'
+        ].each { canary ->
+            if (!commands.contains(canary)) {
+                throw new GradleException("M20.4 Redstone Link harness missing canary: ${canary}")
+            }
+        }
+        if (!matrix.contains('`redstone_links.RedstoneLinkNetworkHandlerMixin`')
+                || !matrix.contains('Defer global wireless network semantics')) {
+            throw new GradleException('M20.4 matrix must keep Redstone Link production compatibility explicit and deferred')
+        }
+        if (config.contains('RedstoneLinkNetworkHandlerMixin')) {
+            throw new GradleException('M20.4 must not proactively enable the Redstone Link production range mixin')
+        }
+        logger.lifecycle('verifyM20RedstoneLinkHarnessBoundary PASS: same-Sable Redstone Link canary is present and production mixin remains deferred')
     }
 }
 
