@@ -19,7 +19,7 @@
 > `MC1.20-1.3.3` / Ponder `1.0.91` baseline. No Minecraft process was launched;
 > the prior M6 runtime result remains historical evidence for the old target.
 
-The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 added the Java 17/1.20.1 Companion library, official Veil 1.20, selected Java 17 rewrites, and the minimal Forge source graph. M4 replaced the missing modern Veil/Minecraft packet surface with a tested Forge 47 transport. M5 ported the selected Minecraft core/Mixins, added the Forge bootstrap and eight platform providers, and produced a statically verified Forge package. M6 now passes the Forge main-menu, empty-world, runtime-boundary, persistence, and stationary single-block smoke gates. Deferred advanced rendering, full physics/Sable Rapier, Create/Flywheel integration, Simulated, and Aeronautics remain unported.
+The upstream `common`, `fabric`, `neoforge`, and `sable_rapier` modules remain available for reference. M0-M2 established trustworthy Forge build plumbing. M3 added the Java 17/1.20.1 Companion library, official Veil 1.20, selected Java 17 rewrites, and the minimal Forge source graph. M4 replaced the missing modern Veil/Minecraft packet surface with a tested Forge 47 transport. M5 ported the selected Minecraft core/Mixins, added the Forge bootstrap and eight platform providers, and produced a statically verified Forge package. M6 now passes the Forge main-menu, empty-world, runtime-boundary, persistence, and stationary single-block smoke gates. Deferred advanced rendering, full physics/Sable Rapier, Create/Flywheel integration, and the first Simulated bootstrap have since been staged; Aeronautics remains unported.
 
 > **M7 standalone packaged-artifact runtime acceptance complete (2026-08-23):**
 > the final packaged Sable artifact now boots through Forge/ModLauncher without
@@ -1850,3 +1850,42 @@ broken. Future investigation should resume at
 specifically `entityInside`, `checkEntityForProcessing`, `getCollisionShape`,
 `startCrushing`, `tick`, `processingEntity`, and raw `worldPosition` versus
 visible parent entity coordinates.
+
+## M21 Simulated Bootstrap
+
+M21 freezes the Simulated upstream baseline at
+`https://github.com/Creators-of-Aeronautics/Simulated-Project.git`
+commit `9e60263fb5cb00033f14af655a7e72cf7aebb3e2` (`Simulated 1.3.0`,
+Minecraft `1.21.1`, NeoForge `21.1.228`, Java `21`, Create `6.0.10-280`,
+Flywheel `1.0.6`, Ponder `1.0.81`, Sable `2.0.0`, Sable Companion `1.6.0`).
+This revision was selected because it is the first Simulated release-line
+changelog commit immediately after the Sable dependency range was moved to
+`[2.0.0,3.0.0)`, and it landed within minutes of the requested Sable
+`mc1.21.1-2.0.0-neoforge` tag commit.
+
+`M21_SIMULATED_PORT_MATRIX.md` inventories all `634` upstream production Java
+sources. Static action counts are: `ADAPT_NOW=11`, `DEFER_M22=352`,
+`DEFER_M23=160`, `DEFER_M24=7`, `NOT_APPLICABLE_1_20_1=104`.
+The target implementation is intentionally Forge-only inside `:forge`; it does
+not revive upstream multi-loader architecture, NeoForge services, Java 21
+payload APIs, Veil packet bootstrap, or full Registrate behavior.
+
+The adapted M21 registration surface adds a second Forge mod id, `simulated`,
+to the existing Sable artifact. It registers `6` bootstrap-safe blocks,
+`11` items, `2` block entity types, one creative tab, common/client config
+specs, and a Forge `SimpleChannel` at `simulated:main`. Resources include
+blockstates, block/item models, English language entries, recipe JSONs, and
+bootstrap tags for the static gallery. `/sable m21 status`,
+`/sable m21 registry_check`, and `/sable m21 fixture bootstrap_gallery` provide
+the manual runtime check surface without launching Minecraft from Codex.
+
+Runtime physics/constraints remain deferred. This includes springs as force
+systems, torsion springs, swivel bearings, rope/winch behavior, docking
+connectors, sensors, control blocks, Simulated entities, linked typewriter
+menus, portable-engine dyeing, particles, Ponder, optional integrations, and
+all upstream Simulated mixins. No new production mixin is introduced for M21.
+
+Current status: `M21 IMPLEMENTED / RUNTIME_REQUIRED`. M21 is not closed until
+the user manually proves title-screen load, world load, the two `/sable m21`
+diagnostics, fixture spawn, static render/place/break/BlockEntity behavior,
+creative/JEI visibility where applicable, and save/reload.

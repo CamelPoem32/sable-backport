@@ -5,6 +5,7 @@ import dev.ryanhcode.sable.SableCommonEvents;
 import dev.ryanhcode.sable.SableConfig;
 import dev.ryanhcode.sable.command.SableCommand;
 import dev.ryanhcode.sable.command.SableCommandArgumentTypes;
+import dev.ryanhcode.sable.command.M21SimulatedBootstrapCommands;
 import dev.ryanhcode.sable.command.argument.SubLevelSelectorModifiers;
 import dev.ryanhcode.sable.index.SableAttributes;
 import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
@@ -74,6 +75,10 @@ public final class SableForge {
 
     private void registerCommand(final RegisterCommandsEvent event) {
         SableCommand.register(event.getDispatcher(), event.getBuildContext());
+        final var m21Builder = net.minecraft.commands.Commands.literal("sable")
+                .requires(commandSourceStack -> commandSourceStack.hasPermission(2));
+        M21SimulatedBootstrapCommands.register(m21Builder, event.getBuildContext());
+        event.getDispatcher().register(m21Builder);
         SableForgeRuntimeSmoke.commandRegistered();
     }
 

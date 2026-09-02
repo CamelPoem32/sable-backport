@@ -17685,3 +17685,416 @@ tasks.register('verifyVeilRuntimeBoundary') {
 }
 
 apply from: rootProject.file('gradle/runtime-preflight.gradle')
+
+def m21SimulatedSourceDir = rootProject.file('forge/src/main/java/dev/simulated_team/simulated')
+def m21SimulatedResourceDir = rootProject.file('forge/src/main/resources')
+def m21SimulatedExpectedBlocks = [
+        'physics_assembler',
+        'spring',
+        'rope_connector',
+        'iron_handle',
+        'redstone_magnet',
+        'white_symmetric_sail'
+]
+def m21SimulatedExpectedItems = m21SimulatedExpectedBlocks + [
+        'contraption_diagram',
+        'rope_coupling',
+        'gyroscopic_mechanism',
+        'engine_assembly',
+        'honey_glue'
+]
+def m21SimulatedExpectedBlockEntities = [
+        'physics_assembler',
+        'spring'
+]
+
+tasks.register('verifyM21SimulatedBaselineBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the frozen Simulated upstream baseline is documented and not current-main drift.'
+
+    inputs.file(rootProject.file('M21_SIMULATED_BASELINE.md'))
+    inputs.file(rootProject.file('M21_SIMULATED_PORT_MATRIX.md'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/Simulated.java'))
+
+    doLast {
+        String baseline = rootProject.file('M21_SIMULATED_BASELINE.md').getText('UTF-8')
+        String matrix = rootProject.file('M21_SIMULATED_PORT_MATRIX.md').getText('UTF-8')
+        String simulated = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/Simulated.java').getText('UTF-8')
+        String commit = '9e60263fb5cb00033f14af655a7e72cf7aebb3e2'
+        [
+                'https://github.com/Creators-of-Aeronautics/Simulated-Project.git',
+                commit,
+                'Simulated `1.3.0`',
+                'Sable `2.0.0`',
+                'Create version: `6.0.10-280`',
+                'Java version: `21`'
+        ].each { required ->
+            if (!baseline.contains(required)) {
+                throw new GradleException("M21 baseline document is missing ${required}")
+            }
+        }
+        if (!matrix.contains(commit) || !simulated.contains(commit)) {
+            throw new GradleException('M21 source/matrix do not agree with the frozen Simulated commit')
+        }
+        if (baseline.contains('4406c68') && !baseline.contains('not the M21 baseline')) {
+            throw new GradleException('M21 baseline appears to accept current Simulated main drift')
+        }
+        logger.lifecycle('verifyM21SimulatedBaselineBoundary PASS: frozen Simulated commit ' + commit)
+    }
+}
+
+tasks.register('verifyM21SimulatedSourceInventoryBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M21 Simulated matrix inventories the full upstream production Java graph.'
+
+    inputs.file(rootProject.file('M21_SIMULATED_PORT_MATRIX.md'))
+
+    doLast {
+        String matrix = rootProject.file('M21_SIMULATED_PORT_MATRIX.md').getText('UTF-8')
+        [
+                '| ADAPT_NOW | 11 |',
+                '| DEFER_M22 | 352 |',
+                '| DEFER_M23 | 160 |',
+                '| DEFER_M24 | 7 |',
+                '| NOT_APPLICABLE_1_20_1 | 104 |'
+        ].each { required ->
+            if (!matrix.contains(required)) {
+                throw new GradleException("M21 port matrix count drift: missing ${required}")
+            }
+        }
+        int sourceRows = matrix.readLines().count {
+            it.startsWith('| `simulated/') && it.contains('|')
+        }
+        if (sourceRows != 634) {
+            throw new GradleException("M21 port matrix must inventory 634 production Java sources, found ${sourceRows}")
+        }
+        logger.lifecycle('verifyM21SimulatedSourceInventoryBoundary PASS: upstreamProductionJavaSources=634')
+    }
+}
+
+tasks.register('verifyM21Java17Boundary') {
+    group = 'forge backport'
+    description = 'Verifies M21-selected Simulated sources and produced classes stay within Java 17.'
+
+    inputs.dir(m21SimulatedSourceDir)
+    inputs.dir(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command')).optional()
+    inputs.dir(layout.buildDirectory.dir('classes/java/main')).optional()
+
+    doLast {
+        def forbidden = [
+                '.getFirst(',
+                '.getLast(',
+                'SequencedCollection',
+                'StringTemplate',
+                'case null',
+                ' when '
+        ]
+        def offenders = []
+        fileTree(rootProject.file('forge/src/main/java')) {
+            include 'dev/simulated_team/simulated/**/*.java'
+            include 'dev/ryanhcode/sable/command/M21SimulatedBootstrapCommands.java'
+        }.files.each { source ->
+            String text = source.getText('UTF-8')
+            forbidden.each { token ->
+                if (text.contains(token)) {
+                    offenders.add("${source}:${token}")
+                }
+            }
+        }
+        if (!offenders.isEmpty()) {
+            throw new GradleException("M21 selected sources use Java 21-only constructs/APIs: ${offenders}")
+        }
+
+        File classesDir = layout.buildDirectory.dir('classes/java/main').get().asFile
+        def highVersion = []
+        if (classesDir.isDirectory()) {
+            fileTree(classesDir) {
+                include 'dev/simulated_team/simulated/**/*.class'
+                include 'dev/ryanhcode/sable/command/M21SimulatedBootstrapCommands.class'
+            }.files.each { classFile ->
+                byte[] bytes = Files.readAllBytes(classFile.toPath())
+                if (bytes.length >= 8) {
+                    int major = ((bytes[6] & 0xff) << 8) | (bytes[7] & 0xff)
+                    if (major > 61) {
+                        highVersion.add("${classFile.name}:${major}")
+                    }
+                }
+            }
+        }
+        if (!highVersion.isEmpty()) {
+            throw new GradleException("M21 class files exceed Java 17 major version 61: ${highVersion}")
+        }
+        logger.lifecycle('verifyM21Java17Boundary PASS: selected Simulated sources avoid Java 21 APIs and class major > 61')
+    }
+}
+
+tasks.register('verifyM21RegistryManifestBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M21 registered ids match the manifest and command checks.'
+
+    inputs.file(rootProject.file('M21_SIMULATED_REGISTRY_MANIFEST.md'))
+    inputs.files(fileTree(m21SimulatedSourceDir) { include '**/*.java' })
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M21SimulatedBootstrapCommands.java'))
+
+    doLast {
+        String manifest = rootProject.file('M21_SIMULATED_REGISTRY_MANIFEST.md').getText('UTF-8')
+        String blocks = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/index/SimulatedBlocks.java').getText('UTF-8')
+        String items = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/index/SimulatedItems.java').getText('UTF-8')
+        String blockEntities = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/index/SimulatedBlockEntityTypes.java').getText('UTF-8')
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M21SimulatedBootstrapCommands.java').getText('UTF-8')
+        m21SimulatedExpectedBlocks.each { id ->
+            if (!manifest.contains("`simulated:${id}`") || !blocks.contains("register(\"${id}\"")
+                    || !commands.contains("Simulated.path(\"${id}\")")) {
+                throw new GradleException("M21 block registry id drift: ${id}")
+            }
+        }
+        m21SimulatedExpectedItems.each { id ->
+            if (!manifest.contains("`simulated:${id}`") || !items.contains("register(\"${id}\"")
+                    || !commands.contains("Simulated.path(\"${id}\")")) {
+                throw new GradleException("M21 item registry id drift: ${id}")
+            }
+        }
+        m21SimulatedExpectedBlockEntities.each { id ->
+            if (!blockEntities.contains("register(\"${id}\"")) {
+                throw new GradleException("M21 block entity registry id drift: ${id}")
+            }
+        }
+        if (!manifest.contains('| `minecraft:block` | 6 |')
+                || !manifest.contains('| `minecraft:item` | 11 |')
+                || !manifest.contains('| `minecraft:block_entity_type` | 2 |')) {
+            throw new GradleException('M21 registry manifest count drift')
+        }
+        logger.lifecycle('verifyM21RegistryManifestBoundary PASS: blocks=6, items=11, blockEntities=2')
+    }
+}
+
+tasks.register('verifyM21Create608ApiBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M21 Simulated bootstrap keeps Create 6.0.8 as the target and does not add newer Create APIs.'
+
+    inputs.file(rootProject.file('gradle.properties'))
+    inputs.file(rootProject.file('forge/build.gradle'))
+    inputs.dir(m21SimulatedSourceDir)
+
+    doLast {
+        String props = rootProject.file('gradle.properties').getText('UTF-8')
+        String buildText = rootProject.file('forge/build.gradle').getText('UTF-8')
+        if (!props.contains('forge_create_version=6.0.8')
+                || !props.contains('forge_flywheel_version=1.0.5')
+                || !props.contains('forge_ponder_version=1.0.91')) {
+            throw new GradleException('M21 target Create/Flywheel/Ponder versions drifted')
+        }
+        if (!buildText.contains('compileOnly fg.deobf("local.target:create-${forge_minecraft_version}:${forge_create_version}")')) {
+            throw new GradleException('M21 must keep established fg.deobf Create dependency architecture')
+        }
+        def sourceDrift = []
+        fileTree(m21SimulatedSourceDir) { include '**/*.java' }.files.each { source ->
+            String text = source.getText('UTF-8')
+            if (text.contains('6.0.10') || text.contains('com.simibubi.create.foundation.data.CreateRegistrate')
+                    || text.contains('com.tterrag.registrate')) {
+                sourceDrift.add(source)
+            }
+        }
+        if (!sourceDrift.isEmpty()) {
+            throw new GradleException("M21 bootstrap source contains newer Create/Registrate coupling: ${sourceDrift}")
+        }
+        logger.lifecycle('verifyM21Create608ApiBoundary PASS: Create target remains 6.0.8 with no newer bootstrap API coupling')
+    }
+}
+
+tasks.register('verifyM21SableApiBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M21 Simulated does not copy or bypass Sable/Companion APIs.'
+
+    inputs.dir(m21SimulatedSourceDir)
+    inputs.file(rootProject.file('M21_SIMULATED_PORT_MATRIX.md'))
+
+    doLast {
+        def forbiddenRefs = []
+        fileTree(m21SimulatedSourceDir) { include '**/*.java' }.files.each { source ->
+            String text = source.getText('UTF-8')
+            ['dev.ryanhcode.sable.neoforge', 'dev.ryanhcode.sable.fabric', 'SableCompanion.INSTANCE'].each { token ->
+                if (text.contains(token)) {
+                    forbiddenRefs.add("${source}:${token}")
+                }
+            }
+        }
+        if (!forbiddenRefs.isEmpty()) {
+            throw new GradleException("M21 Simulated source bypasses current Sable API boundary: ${forbiddenRefs}")
+        }
+        String matrix = rootProject.file('M21_SIMULATED_PORT_MATRIX.md').getText('UTF-8')
+        if (!matrix.contains('SABLE_INTEGRATION') || !matrix.contains('DEFER_M22')) {
+            throw new GradleException('M21 matrix must classify Sable integration deferrals explicitly')
+        }
+        logger.lifecycle('verifyM21SableApiBoundary PASS: no competing Sable API copy or modern Sable platform coupling')
+    }
+}
+
+tasks.register('verifyM21NetworkBootstrapBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M21 network bootstrap is Forge SimpleChannel only.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/network/SimulatedNetwork.java'))
+
+    doLast {
+        String network = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/network/SimulatedNetwork.java').getText('UTF-8')
+        ['NetworkRegistry.newSimpleChannel', 'PROTOCOL_VERSION = "m21-bootstrap"', 'Simulated.path("main")'].each { token ->
+            if (!network.contains(token)) {
+                throw new GradleException("M21 network bootstrap missing ${token}")
+            }
+        }
+        ['CustomPacketPayload', 'RegisterPayloadHandlersEvent', 'foundry.veil', 'net.neoforged'].each { token ->
+            if (network.contains(token)) {
+                throw new GradleException("M21 network bootstrap contains unsupported payload API ${token}")
+            }
+        }
+        logger.lifecycle('verifyM21NetworkBootstrapBoundary PASS: Forge SimpleChannel simulated:main is registration-only')
+    }
+}
+
+tasks.register('verifyM21ResourceBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M21 registered static content has packaged resources.'
+
+    inputs.dir(m21SimulatedResourceDir)
+
+    doLast {
+        m21SimulatedExpectedBlocks.each { id ->
+            File blockstate = rootProject.file("forge/src/main/resources/assets/simulated/blockstates/${id}.json")
+            File blockModel = rootProject.file("forge/src/main/resources/assets/simulated/models/block/${id}.json")
+            File itemModel = rootProject.file("forge/src/main/resources/assets/simulated/models/item/${id}.json")
+            if (!blockstate.isFile() || !blockModel.isFile() || !itemModel.isFile()) {
+                throw new GradleException("M21 resource missing for registered block ${id}")
+            }
+            new JsonSlurper().parse(blockstate)
+            new JsonSlurper().parse(blockModel)
+            new JsonSlurper().parse(itemModel)
+        }
+        (m21SimulatedExpectedItems - m21SimulatedExpectedBlocks).each { id ->
+            File itemModel = rootProject.file("forge/src/main/resources/assets/simulated/models/item/${id}.json")
+            if (!itemModel.isFile()) {
+                throw new GradleException("M21 resource missing for registered ordinary item ${id}")
+            }
+            new JsonSlurper().parse(itemModel)
+        }
+        m21SimulatedExpectedBlocks.each { id ->
+            File recipe = rootProject.file("forge/src/main/resources/data/simulated/recipes/${id}.json")
+            if (!recipe.isFile()) {
+                throw new GradleException("M21 recipe/future-accessibility record missing for ${id}")
+            }
+            def parsed = new JsonSlurper().parse(recipe)
+            if (parsed.type != 'minecraft:crafting_shaped' && parsed.type != 'minecraft:crafting_shapeless') {
+                throw new GradleException("M21 recipe ${recipe} has unexpected type ${parsed.type}")
+            }
+        }
+        String resources = fileTree(rootProject.file('forge/src/main/resources/assets/simulated')) {
+            include '**/*.json'
+        }.files.collect { it.getText('UTF-8') }.join('\n')
+        if (resources.contains('minecraft:item/') && resources.contains('model_data')) {
+            throw new GradleException('M21 resources appear to contain stale 1.21-only custom-model-data paths')
+        }
+        logger.lifecycle('verifyM21ResourceBoundary PASS: blockstates=6, blockModels=6, itemModels=11, recipes=6')
+    }
+}
+
+tasks.register('verifyM21ForgeArtifactBoundary') {
+    group = 'forge backport'
+    description = 'Verifies source metadata and, when present, final Forge artifacts contain M21 Simulated bootstrap without NeoForge metadata.'
+
+    inputs.file(rootProject.file('forge/src/main/resources/META-INF/mods.toml'))
+    inputs.dir(m21SimulatedSourceDir)
+    inputs.dir(m21SimulatedResourceDir)
+    inputs.file(layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}.jar")).optional()
+    inputs.file(layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}-all.jar")).optional()
+
+    doLast {
+        String mods = rootProject.file('forge/src/main/resources/META-INF/mods.toml').getText('UTF-8')
+        if (!mods.contains('modId = "simulated"')
+                || !mods.contains('version = "1.3.0-m21-backport"')
+                || !mods.contains('[[dependencies.simulated]]')) {
+            throw new GradleException('M21 Forge mods.toml does not declare the simulated mod boundary')
+        }
+        if (mods.contains('neoforge')) {
+            throw new GradleException('M21 Forge mods.toml must not ship NeoForge metadata')
+        }
+        long newestM21Input = fileTree(rootProject.file('forge/src/main/java')) {
+            include 'dev/simulated_team/simulated/**/*.java'
+            include 'dev/ryanhcode/sable/command/M21SimulatedBootstrapCommands.java'
+        }.files.collect { it.lastModified() }.max()
+        newestM21Input = Math.max(newestM21Input, rootProject.file('forge/src/main/resources/META-INF/mods.toml').lastModified())
+        [
+                layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}.jar").get().asFile,
+                layout.buildDirectory.file("libs/${mod_id}-forge-${forge_minecraft_version}-${version}-all.jar").get().asFile
+        ].findAll { it.isFile() && it.lastModified() >= newestM21Input }.each { jar ->
+            JarFile jarFile = new JarFile(jar)
+            try {
+                [
+                        'dev/simulated_team/simulated/Simulated.class',
+                        'dev/simulated_team/simulated/forge/SimulatedForge.class',
+                        'dev/simulated_team/simulated/index/SimulatedBlocks.class',
+                        'assets/simulated/lang/en_us.json',
+                        'data/simulated/recipes/physics_assembler.json'
+                ].each { entryName ->
+                    if (jarFile.getJarEntry(entryName) == null) {
+                        throw new GradleException("${jar.name} missing M21 entry ${entryName}")
+                    }
+                }
+                if (jarFile.getJarEntry('META-INF/neoforge.mods.toml') != null) {
+                    throw new GradleException("${jar.name} accidentally packages NeoForge metadata")
+                }
+                def highVersion = []
+                jarFile.entries().toList().findAll {
+                    it.name.startsWith('dev/simulated_team/simulated/') && it.name.endsWith('.class')
+                }.each { entry ->
+                    byte[] bytes = jarFile.getInputStream(entry).readAllBytes()
+                    int major = ((bytes[6] & 0xff) << 8) | (bytes[7] & 0xff)
+                    if (major > 61) {
+                        highVersion.add("${entry.name}:${major}")
+                    }
+                }
+                if (!highVersion.isEmpty()) {
+                    throw new GradleException("${jar.name} contains Java >17 Simulated classes: ${highVersion}")
+                }
+            } finally {
+                jarFile.close()
+            }
+        }
+        logger.lifecycle('verifyM21ForgeArtifactBoundary PASS: source metadata valid; artifact entries checked when present')
+    }
+}
+
+tasks.register('verifyM21RegressionBoundary') {
+    group = 'forge backport'
+    description = 'Runs M13-M20 static regression boundaries relevant before Simulated runtime.'
+
+    dependsOn tasks.named('verifyM13ContraptionLifecycleBoundary')
+    dependsOn tasks.named('verifyM13ContraptionControllerBoundary')
+    dependsOn tasks.named('verifyM14PistonArchitectureBoundary')
+    dependsOn tasks.named('verifyM15GantryArchitectureBoundary')
+    dependsOn tasks.named('verifyM16BlockBreakingMixinDeferredBoundary')
+    dependsOn tasks.named('verifyM17SpecializedKineticRenderImplementationBoundary')
+    dependsOn tasks.named('verifyM18RegressionBoundary')
+    dependsOn tasks.named('verifyM19RegressionBoundary')
+    dependsOn tasks.named('verifyM20RegressionBoundary')
+    dependsOn tasks.named('verifyM20ProcessingDiagnosisBoundary')
+
+    doLast {
+        logger.lifecycle('verifyM21RegressionBoundary PASS: M13-M20 static regression boundaries preserved; M20 Crushing Wheels remains deferred')
+    }
+}
+
+tasks.register('verifyM21SimulatedBootstrap') {
+    group = 'forge backport'
+    description = 'Runs all M21 Simulated bootstrap static verifiers.'
+
+    dependsOn tasks.named('verifyM21SimulatedBaselineBoundary')
+    dependsOn tasks.named('verifyM21SimulatedSourceInventoryBoundary')
+    dependsOn tasks.named('verifyM21Java17Boundary')
+    dependsOn tasks.named('verifyM21RegistryManifestBoundary')
+    dependsOn tasks.named('verifyM21Create608ApiBoundary')
+    dependsOn tasks.named('verifyM21SableApiBoundary')
+    dependsOn tasks.named('verifyM21NetworkBootstrapBoundary')
+    dependsOn tasks.named('verifyM21ResourceBoundary')
+    dependsOn tasks.named('verifyM21ForgeArtifactBoundary')
+    dependsOn tasks.named('verifyM21RegressionBoundary')
+}

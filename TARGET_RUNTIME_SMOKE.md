@@ -3124,3 +3124,40 @@ at the transformed visible candidate. No hidden-space ghost should appear.
 
 Expected: command output confirms fixture state only; visual PASS remains the
 user-observed presence and correct placement of the Create ghost preview.
+
+## M21 Simulated Bootstrap Runtime Sequence
+
+M21 must be tested manually. Codex must not launch Minecraft for this
+milestone.
+
+Use the existing target pack with Minecraft `1.20.1`, Forge `47.4.20`, Create
+`6.0.8`, Flywheel `1.0.5`, Ponder `1.0.91`, and the M21-built Sable artifact.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world.
+/sable m21 status
+/sable m21 registry_check
+/sable m21 fixture bootstrap_gallery
+Place and break the visible Simulated gallery blocks manually.
+Save and quit, then reload the same world.
+/sable m21 registry_check
+```
+
+Expected for M21:
+
+- `/sable m21 status` reports `simulatedPresent=true`, the frozen Simulated
+  baseline commit, `registeredBlocks=6`, `registeredItems=11`,
+  `registeredBlockEntities=2`, `networkReady=true`, `configReady=true`,
+  `missingRegistrations=[]`, and `status=BOOTSTRAP_READY`.
+- `/sable m21 registry_check` reports `SABLE_M21_REGISTRY_CHECK status=PASS`.
+- `/sable m21 fixture bootstrap_gallery` creates a small static row of
+  representative Simulated blocks and reports `physicsAssemblerBE=true` and
+  `springBE=true`.
+- Blocks render with static models, can be broken, can be placed manually from
+  their items, and do not crash while ticking or across save/reload.
+
+Do not require Sable assembly through Simulated, spring forces, swivel physics,
+rope/winch physics, docking, sensors, vehicle motion, or multiplayer in M21.

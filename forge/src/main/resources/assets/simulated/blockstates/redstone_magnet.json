@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "simulated:block/redstone_magnet"
+    }
+  }
+}

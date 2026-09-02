@@ -1,0 +1,11 @@
+{
+  "replace": false,
+  "values": [
+    "simulated:physics_assembler",
+    "simulated:spring",
+    "simulated:rope_connector",
+    "simulated:iron_handle",
+    "simulated:redstone_magnet",
+    "simulated:white_symmetric_sail"
+  ]
+}

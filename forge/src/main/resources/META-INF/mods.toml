@@ -19,6 +19,14 @@ config = "sable-common-forge.mixins.json"
 [[mixins]]
 config = "sable-forge.mixins.json"
 
+[[mods]]
+modId = "simulated"
+version = "1.3.0-m21-backport"
+displayName = "Create Simulated"
+authors = "Simulated Team; Forge 1.20.1 bootstrap backport by Sable backport"
+credits = "The Creators of Aeronautics"
+description = '''M21 Forge 1.20.1 bootstrap registration surface for Create Simulated. Runtime physics and vehicle gameplay are deferred.'''
+
 [[dependencies.sable]]
 modId = "forge"
 mandatory = true
@@ -46,3 +54,31 @@ mandatory = false
 versionRange = "${create_version_range}"
 ordering = "AFTER"
 side = "BOTH"
+
+[[dependencies.simulated]]
+modId = "forge"
+mandatory = true
+versionRange = "[${forge_version},)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.simulated]]
+modId = "minecraft"
+mandatory = true
+versionRange = "${minecraft_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.simulated]]
+modId = "create"
+mandatory = true
+versionRange = "${create_version_range}"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.simulated]]
+modId = "flywheel"
+mandatory = false
+versionRange = "${flywheel_version_range}"
+ordering = "AFTER"
+side = "CLIENT"

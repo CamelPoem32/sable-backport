@@ -1,0 +1,14 @@
+{
+  "block.simulated.iron_handle": "Iron Handle",
+  "block.simulated.physics_assembler": "Physics Assembler",
+  "block.simulated.redstone_magnet": "Redstone Magnet",
+  "block.simulated.rope_connector": "Rope Connector",
+  "block.simulated.spring": "Spring",
+  "block.simulated.white_symmetric_sail": "Symmetric Sail",
+  "item.simulated.contraption_diagram": "Contraption Diagram",
+  "item.simulated.engine_assembly": "Engine Assembly",
+  "item.simulated.gyroscopic_mechanism": "Gyroscopic Mechanism",
+  "item.simulated.honey_glue": "Honey Glue",
+  "item.simulated.rope_coupling": "Rope Coupling",
+  "itemGroup.simulated.main_tab": "Create Simulated"
+}
