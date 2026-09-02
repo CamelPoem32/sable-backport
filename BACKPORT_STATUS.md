@@ -1885,7 +1885,98 @@ connectors, sensors, control blocks, Simulated entities, linked typewriter
 menus, portable-engine dyeing, particles, Ponder, optional integrations, and
 all upstream Simulated mixins. No new production mixin is introduced for M21.
 
-Current status: `M21 IMPLEMENTED / RUNTIME_REQUIRED`. M21 is not closed until
-the user manually proves title-screen load, world load, the two `/sable m21`
-diagnostics, fixture spawn, static render/place/break/BlockEntity behavior,
-creative/JEI visibility where applicable, and save/reload.
+Current status: `M21 CLOSED / RUNTIME_PROVEN`. User runtime evidence reported:
+`/sable m21 status` returned `simulatedPresent=true`, `registeredBlocks=6`,
+`registeredItems=11`, `registeredBlockEntities=2`, `networkReady=true`,
+`configReady=true`, `clientBootstrapExpected=true`, `missingRegistrations=0`,
+and `status=BOOTSTRAP_READY`; `/sable m21 registry_check` returned
+`status=PASS missing=[]`; `/sable m21 fixture bootstrap_gallery` returned
+`status=PASS physicalAssemblerBE=true springBE=true`.
+
+## M22 Simulated Basic Assembly Lifecycle
+
+M22 implements the narrow Simulated `physics_assembler` lifecycle boundary from
+frozen Simulated commit `9e60263fb5cb00033f14af655a7e72cf7aebb3e2`. The
+canonical upstream path is `PhysicsAssemblerBlock.useWithoutItem` /
+`PhysicsAssemblerGUIHandler.release` -> assemble packet ->
+`PhysicsAssemblerBlockEntity.assembleOrDisassemble` ->
+`SimAssemblyHelper.assembleFromSingleBlock` -> `SimAssemblyContraption` ->
+`SubLevelAssemblyHelper.assembleBlocks`; disassembly re-enters the same block
+entity while it is inside the sublevel and calls
+`SimAssemblyHelper.disassembleSubLevel` over the current visible pose.
+
+The Forge backport keeps this source graph small and M22-scoped. The existing
+M21 registrations remain unchanged at `6` blocks, `11` items, and `2` block
+entity types. `physics_assembler` now has server-side right-click
+assemble/disassemble behavior, BlockEntity NBT for lifecycle diagnostics, real
+Sable `BlockSubLevelAssemblyListener` move notification, and guarded restore
+space checks. The collector ports the upstream 18-neighbor traversal, Create
+`BlockMovementChecks`, Super Glue, chassis, piston, gantry, bogey, double-chest,
+and cart-assembler attachment cases. Honey glue, Simulated-specific movement
+checks for future blocks, moving Create contraption merge/disassemble transfer,
+springs, swivel bearings, rope, docking, sensors, and Aeronautics remain
+deferred to M23+.
+
+The target Sable ownership path deliberately reuses the backported
+`SubLevelAssemblyHelper.assembleBlocks` and `moveBlocks` APIs. Those APIs own
+raw plot allocation, BlockState and BlockEntity NBT transfer, mass tracker
+creation, physics body registration, collision geometry, tracking points, and
+the hidden plot coordinate boundary. M22 disassembly computes the restore
+anchor from `subLevel.logicalPose().transformPosition(rawAssemblerPos)` so
+blocks restore at the current visible position rather than the original parent
+position or the hidden plot coordinates. Occupied restore cells report
+`DISASSEMBLY_BLOCKED` instead of overwriting unrelated world blocks.
+
+New `/sable m22` commands provide `status`, `fixture basic_assembly`,
+`inspect <selector>`, and test-only `nudge <selector> <dx> <dy> <dz>`.
+The fixture creates a small parent-world platform with a Physics Assembler, a
+vanilla chest seeded with one diamond, a simple Create shaft, and ordinary
+payload blocks. The user must trigger assembly/disassembly through normal
+right-click interaction with the Physics Assembler; `nudge` only teleports the
+real Sable body through `RigidBodyHandle.teleport` for lifecycle qualification
+when no upstream gameplay controller is in scope.
+
+Current status: `M22 CLOSED / RUNTIME_PROVEN`. User runtime evidence reported:
+assembly `PASS`, actual Sable object/body creation `PASS`, visible transform
+stability `PASS`, solid collision/player standing `PASS`, BlockEntity data
+preservation `PASS`, short nudge movement `PASS`, save/reload while assembled
+`PASS`, transformed disassembly at the current visible position `PASS`, no
+block loss or duplication `PASS`, and repeat assemble/disassemble `PASS`.
+
+## M23 Simulated Physical Constraints
+
+M23 ports the narrow physical-constraint boundary from frozen Simulated commit
+`9e60263fb5cb00033f14af655a7e72cf7aebb3e2`. The upstream constraint families
+are inventoried in `M23_CONSTRAINT_FAMILY_MATRIX.md`: Spring is the only
+runtime-enabled M23 canary, Rope Connector remains structural from M21, and
+Torsion Spring, Swivel Bearing, Rope Winch, and Docking Connector remain
+deferred to M24 rather than receiving invented or fake constraint semantics.
+
+The Spring implementation keeps the upstream ownership model: `SpringItem`
+creates two `simulated:spring` endpoints, each endpoint is a
+`SpringBlockEntity`, and Sable calls
+`sable$physicsTick(ServerSubLevel, RigidBodyHandle, timeStep)` while an endpoint
+is inside a physical sublevel. The force actor applies upstream point damping,
+Hooke-style force, alignment torque, and axial angular damping through
+`ForceTotal` and `RigidBodyHandle.applyForcesAndReset`; no backend Spring joint
+or Simulated-specific fake collision is introduced.
+
+M23 does not add registry IDs. It activates behavior under the existing M21
+`simulated:spring` block/item/block-entity registration and preserves the M21
+registration counts unless a later runtime pass explicitly expands the graph.
+Spring pair persistence uses the upstream tags `Controller`, `DesiredLength`,
+`Goal`, and `GoalSubLevel`. M22 disassembly now blocks with
+`DISASSEMBLY_BLOCKED activeConstraints=[...]` if an active Spring relationship
+still spans the sublevel, avoiding body deletion while a constraint actor owns
+cross-body state.
+
+New `/sable m23` commands provide `status`, `fixture spring basic`, deferred
+fixture notices for torsion/swivel/rope/docking, and `inspect spring`. The
+fixture builds two small M22-assembled bodies and gives the player a Spring item
+so the actual pairing still uses normal Spring item interaction. No production
+mixins are introduced for M23.
+
+Current status: `M23 IMPLEMENTED / RUNTIME_REQUIRED`. M23 is not closed until a
+manual runtime session proves Spring creation, force response, aligned
+rendering/collision, persistence, disassembly blocking while constrained,
+constraint removal, and repeat stability.

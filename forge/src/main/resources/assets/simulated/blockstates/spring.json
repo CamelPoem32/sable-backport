@@ -1,7 +1,9 @@
 {
-  "variants": {
-    "": {
-      "model": "simulated:block/spring"
+  "multipart": [
+    {
+      "apply": {
+        "model": "simulated:block/spring"
+      }
     }
-  }
+  ]
 }

@@ -1,6 +1,7 @@
 package dev.simulated_team.simulated.index;
 
 import dev.simulated_team.simulated.Simulated;
+import dev.simulated_team.simulated.content.items.spring.SpringItem;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.registries.DeferredRegister;
@@ -14,7 +15,7 @@ public final class SimulatedItems {
     public static final RegistryObject<Item> PHYSICS_ASSEMBLER = REGISTER.register("physics_assembler",
             () -> SimulatedBlocks.blockItem(SimulatedBlocks.PHYSICS_ASSEMBLER));
     public static final RegistryObject<Item> SPRING = REGISTER.register("spring",
-            () -> SimulatedBlocks.blockItem(SimulatedBlocks.SPRING));
+            () -> new SpringItem(new Item.Properties()));
     public static final RegistryObject<Item> ROPE_CONNECTOR = REGISTER.register("rope_connector",
             () -> SimulatedBlocks.blockItem(SimulatedBlocks.ROPE_CONNECTOR));
     public static final RegistryObject<Item> IRON_HANDLE = REGISTER.register("iron_handle",

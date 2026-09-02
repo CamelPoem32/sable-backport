@@ -3161,3 +3161,103 @@ Expected for M21:
 
 Do not require Sable assembly through Simulated, spring forces, swivel physics,
 rope/winch physics, docking, sensors, vehicle motion, or multiplayer in M21.
+
+## M22 Simulated Basic Assembly Runtime Sequence
+
+M22 must be tested manually. Codex must not launch Minecraft for this
+milestone.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world.
+/sable m21 status
+/sable m21 registry_check
+/sable m22 status
+/sable m22 fixture basic_assembly
+/sable m22 inspect static_world
+Right-click the printed Physics Assembler position.
+/sable m22 inspect @n
+Walk on and collide with the assembled object.
+Open/check the chest if interaction is available while assembled.
+/sable m22 nudge @n 1 0 0
+/sable m22 inspect @n
+Save and quit while ASSEMBLED.
+Reload the same world.
+/sable m22 inspect @n
+Right-click the Physics Assembler again to disassemble.
+/sable m22 inspect static_world
+Verify the chest still contains the diamond, the Create shaft is present, and no blocks duplicated or disappeared.
+Repeat one right-click assemble/disassemble cycle.
+```
+
+Expected for M22:
+
+- `m21` commands still report the closed M21 bootstrap state.
+- `/sable m22 status` reports `status=BASIC_LIFECYCLE_READY`.
+- The fixture prints `assemblerPos`, `chestPos`, `shaftPos`, and
+  `trigger=right_click_physics_assembler`.
+- Assembly creates one real Sable sublevel with nonzero block count, nonzero
+  mass, `bodyRegistered=true`, and `collisionGeometryPresent=true`.
+- `SABLE_M22_ASSEMBLY_TRANSFORM` visible delta is near zero in the log.
+- `nudge` moves the real body through Sable; rendering and collision should
+  move together.
+- Disassembly restores blocks at the current visible position and reports no
+  occupied-space overwrite.
+
+M22 is closed as `CLOSED / RUNTIME_PROVEN`. User evidence confirms assembly,
+physical Sable object/body creation, visible transform stability, collision and
+player standing, BlockEntity data preservation, short nudge movement,
+save/reload while assembled, disassembly at the moved visible position, no
+block loss or duplication, and one repeat assemble/disassemble cycle.
+
+## M23 Simulated Physical Constraints Runtime Sequence
+
+M23 must be tested manually. Codex must not launch Minecraft for this
+milestone. Test Spring first; torsion, swivel, rope/winch, and docking are
+documented future families and should only return deferred fixture notices in
+M23.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world.
+/sable m21 status
+/sable m22 status
+/sable m23 status
+/sable m23 fixture spring basic
+Right-click each printed Physics Assembler position to assemble both bodies.
+Use the Spring item on the printed facing support faces.
+/sable m23 inspect spring
+Walk on and collide with both assembled bodies.
+Observe a small Spring force response over a few seconds.
+Save and quit while the Spring pair exists.
+Reload the same world.
+/sable m23 inspect spring
+Attempt M22 disassembly before removing the Spring.
+Break one Spring endpoint to remove the pair.
+/sable m23 inspect spring
+Disassemble both Physics Assemblers normally.
+Verify blocks restore without loss or duplication.
+Repeat one Spring create/remove cycle.
+```
+
+Expected for M23:
+
+- `/sable m23 status` reports `status=SPRING_GATE_READY`,
+  `spring=ADAPT_NOW`, `rope_connector=STRUCTURAL_ONLY`, and all other
+  constraint families deferred.
+- `/sable m23 fixture spring basic` creates two ordinary M22 assembly bodies
+  and reports support positions for normal Spring item interaction.
+- `/sable m23 inspect spring` reports a logical Spring constraint id, endpoint
+  ownership, body handle validity for assembled bodies, rest/current length,
+  stiffness, damping, and save-restore state.
+- The log contains `SABLE_M23_CONSTRAINT` create/remove diagnostics and no
+  hidden plot coordinate appears as visible movement.
+- M22 disassembly is blocked while the active Spring constraint spans the body,
+  then succeeds after the Spring is removed.
+
+Do not require torsion, swivel, rope/winch, docking, sensors, Aeronautics, or
+multiplayer qualification in M23.

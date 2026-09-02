@@ -18098,3 +18098,778 @@ tasks.register('verifyM21SimulatedBootstrap') {
     dependsOn tasks.named('verifyM21ForgeArtifactBoundary')
     dependsOn tasks.named('verifyM21RegressionBoundary')
 }
+
+def m22AssemblySources = [
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlock.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyContraption.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/service/SimAssemblyService.java'),
+        rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M22SimulatedAssemblyCommands.java')
+]
+
+tasks.register('verifyM22AssemblyUpstreamBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M22 documents the exact Simulated 1.3.0 upstream assembly path.'
+
+    inputs.file(rootProject.file('M22_ASSEMBLY_ARCHITECTURE.md'))
+
+    doLast {
+        String doc = rootProject.file('M22_ASSEMBLY_ARCHITECTURE.md').getText('UTF-8')
+        [
+                '9e60263fb5cb00033f14af655a7e72cf7aebb3e2',
+                'simulated:physics_assembler',
+                'PhysicsAssemblerBlockEntity.assembleOrDisassemble',
+                'SimAssemblyHelper.assembleFromSingleBlock',
+                'SimAssemblyContraption.searchMovedStructure',
+                'SubLevelAssemblyHelper.assembleBlocks'
+        ].each { token ->
+            if (!doc.contains(token)) {
+                throw new GradleException("M22 architecture document missing upstream boundary token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM22AssemblyUpstreamBoundary PASS: canonical Physics Assembler call graph documented')
+    }
+}
+
+tasks.register('verifyM22AssemblySourceInventoryBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M22 source graph is explicitly inventoried and narrow.'
+
+    inputs.file(rootProject.file('M22_ASSEMBLY_PORT_MATRIX.md'))
+    inputs.files(m22AssemblySources)
+
+    doLast {
+        String matrix = rootProject.file('M22_ASSEMBLY_PORT_MATRIX.md').getText('UTF-8')
+        [
+                '| PORT_NOW | 0 |',
+                '| ADAPT_NOW | 8 |',
+                '| STRUCTURAL_ONLY | 1 |',
+                '| DEFER_M23 | 10 |',
+                '| NOT_APPLICABLE_1_20_1 | 3 |'
+        ].each { token ->
+            if (!matrix.contains(token)) {
+                throw new GradleException("M22 port matrix count drift: ${token}")
+            }
+        }
+        m22AssemblySources.each { source ->
+            if (!source.isFile()) {
+                throw new GradleException("M22 selected source missing: ${source}")
+            }
+        }
+        logger.lifecycle('verifyM22AssemblySourceInventoryBoundary PASS: selected source graph is documented and present')
+    }
+}
+
+tasks.register('verifyM22StructureCollectionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M22 keeps the upstream-shaped assembly collector.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyContraption.java'))
+
+    doLast {
+        String source = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyContraption.java').getText('UTF-8')
+        [
+                'DIRECTION_OFFSETS',
+                'new BlockPos(1, 1, 0)',
+                'BlockMovementChecks.isBrittle',
+                'BlockMovementChecks.isBlockAttachedTowards',
+                'SuperGlueEntity',
+                'AbstractChassisBlock',
+                'MechanicalPistonBlock',
+                'GantryCarriageBlock',
+                'AbstractBogeyBlock',
+                'AllBlocks.CART_ASSEMBLER'
+        ].each { token ->
+            if (!source.contains(token)) {
+                throw new GradleException("M22 collector missing upstream semantic token: ${token}")
+            }
+        }
+        if (source.contains('SpringConstraint') || source.contains('Docking') || source.contains('Sensor')) {
+            throw new GradleException('M22 collector pulled in M23+ constraint/sensor concepts')
+        }
+        logger.lifecycle('verifyM22StructureCollectionBoundary PASS: collector retains upstream traversal and Create movement checks')
+    }
+}
+
+tasks.register('verifyM22SableOwnershipBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M22 reuses Sable assembly ownership APIs instead of copying Sable internals.'
+
+    inputs.files(m22AssemblySources)
+
+    doLast {
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        [
+                'SubLevelAssemblyHelper.assembleBlocks',
+                'SubLevelAssemblyHelper.moveBlocks',
+                'SubLevelAssemblyHelper.moveTrackingPoints',
+                'RigidBodyHandle.of',
+                'SubLevelContainer.getContainer'
+        ].each { token ->
+            if (!helper.contains(token)) {
+                throw new GradleException("M22 helper missing Sable API use: ${token}")
+            }
+        }
+        fileTree(rootProject.file('forge/src/main/java/dev/simulated_team/simulated')) { include '**/*.java' }.files.each { source ->
+            String text = source.getText('UTF-8')
+            if (text.contains('class ServerSubLevel') || text.contains('class SubLevelContainer')
+                    || text.contains('package dev.ryanhcode.sable')) {
+                throw new GradleException("M22 Simulated source appears to copy Sable implementation: ${source}")
+            }
+        }
+        logger.lifecycle('verifyM22SableOwnershipBoundary PASS: assembly ownership remains in backported Sable APIs')
+    }
+}
+
+tasks.register('verifyM22AssemblyTransformBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M22 diagnostics and disassembly derive visible coordinates from the current Sable pose.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java'))
+
+    doLast {
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        String be = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java').getText('UTF-8')
+        [
+                'currentVisibleBlockPos',
+                'subLevel.logicalPose()',
+                'transformPosition',
+                'new SubLevelAssemblyHelper.AssemblyTransform(subLevelAnchor, disassemblyGoal',
+                'visibleDeltaAfterAssembly'
+        ].each { token ->
+            if (!helper.contains(token) && !be.contains(token)) {
+                throw new GradleException("M22 transform boundary missing token: ${token}")
+            }
+        }
+        if (helper.contains('20000000') || be.contains('20000000')) {
+            throw new GradleException('M22 transform code must not hard-code hidden plot coordinates')
+        }
+        logger.lifecycle('verifyM22AssemblyTransformBoundary PASS: visible transform is pose-derived with no plot-coordinate hack')
+    }
+}
+
+tasks.register('verifyM22BlockDataPreservationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M22 delegates BlockState and BlockEntity NBT movement to Sable moveBlocks.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+
+    doLast {
+        String sableHelper = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java').getText('UTF-8')
+        String simHelper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        [
+                'blockEntity.saveWithFullMetadata()',
+                'newBlockEntity.load(tag)',
+                'final BlockState subLevelState = transform.apply(state)',
+                'SubLevelAssemblyHelper.moveBlocks'
+        ].each { token ->
+            if (!sableHelper.contains(token) && !simHelper.contains(token)) {
+                throw new GradleException("M22 BlockEntity preservation proof missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM22BlockDataPreservationBoundary PASS: BlockState and BlockEntity data transfer remains Sable-owned')
+    }
+}
+
+tasks.register('verifyM22DisassemblyBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M22 disassembly is guarded and removes old Sable ownership.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java'))
+
+    doLast {
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        String exception = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java').getText('UTF-8')
+        String combined = helper + '\n' + exception
+        [
+                'findOccupiedRestoreSpace',
+                'DISASSEMBLY_BLOCKED',
+                'removeSubLevel(subLevel, SubLevelRemovalReason.REMOVED)',
+                'M22_DISASSEMBLY_MAX_VELOCITY',
+                'M22_DISASSEMBLY_MAX_ANGULAR_VELOCITY'
+        ].each { token ->
+            if (!combined.contains(token)) {
+                throw new GradleException("M22 disassembly boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM22DisassemblyBoundary PASS: disassembly checks occupied space and removes old sublevel')
+    }
+}
+
+tasks.register('verifyM22PersistenceBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M22 stores only assembler metadata and relies on Sable sublevel serialization.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java'))
+
+    doLast {
+        String be = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java').getText('UTF-8')
+        [
+                'saveAdditional',
+                'M22PrimaryAssembler',
+                'M22LifecycleState',
+                'getLastSerializationPointer'
+        ].each { token ->
+            if (!be.contains(token)) {
+                throw new GradleException("M22 persistence boundary missing token: ${token}")
+            }
+        }
+        if (be.contains('SavedData') || be.contains('DimensionDataStorage')) {
+            throw new GradleException('M22 must not add duplicate Simulated persistence storage')
+        }
+        logger.lifecycle('verifyM22PersistenceBoundary PASS: assembler metadata is local; Sable owns assembled persistence')
+    }
+}
+
+tasks.register('verifyM22FixtureBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M22 fixture creates a parent-world assembly canary with chest and Create shaft.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M22SimulatedAssemblyCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M22SimulatedAssemblyCommands.java').getText('UTF-8')
+        [
+                'basic_assembly',
+                'Blocks.CHEST',
+                'ChestBlockEntity',
+                'Items.DIAMOND',
+                'AllBlocks.SHAFT',
+                'trigger=right_click_physics_assembler',
+                'RigidBodyHandle',
+                'handle.teleport'
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M22 fixture/diagnostic command missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM22FixtureBoundary PASS: basic assembly fixture and test-only nudge are present')
+    }
+}
+
+tasks.register('verifyM22RegressionBoundary') {
+    group = 'forge backport'
+    description = 'Runs M13-M21 static regression boundaries relevant before M22 runtime.'
+
+    dependsOn tasks.named('verifyM21SimulatedBootstrap')
+
+    doLast {
+        String m21Manifest = rootProject.file('M21_SIMULATED_REGISTRY_MANIFEST.md').getText('UTF-8')
+        String m22Commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M22SimulatedAssemblyCommands.java').getText('UTF-8')
+        if (!m21Manifest.contains('| `minecraft:block` | 6 |')
+                || !m21Manifest.contains('| `minecraft:item` | 11 |')
+                || !m22Commands.contains('registeredBlocks=6')
+                || !m22Commands.contains('registeredItems=11')) {
+            throw new GradleException('M22 silently changed M21 Simulated registration counts')
+        }
+        logger.lifecycle('verifyM22RegressionBoundary PASS: M13-M21 boundaries preserved; M21 registration counts unchanged')
+    }
+}
+
+tasks.register('verifyM22SimulatedAssembly') {
+    group = 'forge backport'
+    description = 'Runs all M22 Simulated basic assembly lifecycle static verifiers.'
+
+    dependsOn tasks.named('verifyM22AssemblyUpstreamBoundary')
+    dependsOn tasks.named('verifyM22AssemblySourceInventoryBoundary')
+    dependsOn tasks.named('verifyM22StructureCollectionBoundary')
+    dependsOn tasks.named('verifyM22SableOwnershipBoundary')
+    dependsOn tasks.named('verifyM22AssemblyTransformBoundary')
+    dependsOn tasks.named('verifyM22BlockDataPreservationBoundary')
+    dependsOn tasks.named('verifyM22DisassemblyBoundary')
+    dependsOn tasks.named('verifyM22PersistenceBoundary')
+    dependsOn tasks.named('verifyM22FixtureBoundary')
+    dependsOn tasks.named('verifyM22RegressionBoundary')
+}
+
+def m23ConstraintDocs = files(
+        rootProject.file('M23_CONSTRAINT_ARCHITECTURE.md'),
+        rootProject.file('M23_CONSTRAINT_FAMILY_MATRIX.md'),
+        rootProject.file('M23_CONSTRAINT_PORT_MATRIX.md')
+)
+
+def m23ConstraintSources = files(
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlock.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/items/spring/SpringItem.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/index/SimulatedConfig.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/index/SimulatedItems.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'),
+        rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java'),
+        rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java')
+)
+
+tasks.register('verifyM23ConstraintUpstreamBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 documents the exact frozen Simulated constraint owners.'
+
+    inputs.files(m23ConstraintDocs)
+
+    doLast {
+        String docs = m23ConstraintDocs.files.collect { it.getText('UTF-8') }.join('\n')
+        [
+                '9e60263fb5cb00033f14af655a7e72cf7aebb3e2',
+                'SpringBlockEntity',
+                'RotaryConstraintConfiguration',
+                'FixedConstraintConfiguration',
+                'ServerLevelRopeManager',
+                'ServerRopeStrand',
+                'TorsionSpringBlockEntity'
+        ].each { token ->
+            if (!docs.contains(token)) {
+                throw new GradleException("M23 upstream constraint boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23ConstraintUpstreamBoundary PASS: frozen Simulated 1.3.0 constraint owners documented')
+    }
+}
+
+tasks.register('verifyM23ConstraintFamilyInventoryBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 inventories every exact Simulated constraint family and action.'
+
+    inputs.file(rootProject.file('M23_CONSTRAINT_FAMILY_MATRIX.md'))
+
+    doLast {
+        String matrix = rootProject.file('M23_CONSTRAINT_FAMILY_MATRIX.md').getText('UTF-8')
+        [
+                '| ADAPT_NOW | 1 |',
+                '| STRUCTURAL_ONLY | 1 |',
+                '| DEFER_M24 | 4 |',
+                '`simulated:spring`',
+                '`simulated:rope_connector`',
+                '`simulated:rope_winch`',
+                '`simulated:swivel_bearing`',
+                '`simulated:swivel_bearing_link_block`',
+                '`simulated:torsion_spring`',
+                '`simulated:docking_connector`',
+                '`simulated:paired_docking_connector`'
+        ].each { token ->
+            if (!matrix.contains(token)) {
+                throw new GradleException("M23 family matrix missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23ConstraintFamilyInventoryBoundary PASS: all constraint families are classified')
+    }
+}
+
+tasks.register('verifyM23ConstraintSourceInventoryBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 selected source graph is documented and present.'
+
+    inputs.files(m23ConstraintDocs, m23ConstraintSources)
+
+    doLast {
+        String matrix = rootProject.file('M23_CONSTRAINT_PORT_MATRIX.md').getText('UTF-8')
+        [
+                '| ADAPT_NOW | 7 |',
+                '| STRUCTURAL_ONLY | 1 |',
+                '| DEFER_M24 | 16 |',
+                '| NOT_APPLICABLE_1_20_1 | 4 |',
+                'content/items/spring/SpringItem.java',
+                'network/packets/PlaceSpringPacket.java',
+                'M23SimulatedConstraintCommands.java'
+        ].each { token ->
+            if (!matrix.contains(token)) {
+                throw new GradleException("M23 source matrix missing token: ${token}")
+            }
+        }
+        m23ConstraintSources.files.each { source ->
+            if (!source.isFile()) {
+                throw new GradleException("M23 selected source missing: ${source}")
+            }
+        }
+        logger.lifecycle('verifyM23ConstraintSourceInventoryBoundary PASS: Spring-gate source graph is explicit')
+    }
+}
+
+tasks.register('verifyM23SableConstraintApiBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 reuses the backported Sable constraint/force APIs.'
+
+    inputs.files(m23ConstraintSources)
+    inputs.files(
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/block/BlockEntitySubLevelActor.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/handle/RigidBodyHandle.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/force/ForceTotal.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/constraint/RotaryConstraintConfiguration.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/constraint/FixedConstraintConfiguration.java')
+    )
+
+    doLast {
+        String spring = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        String api = [
+                'common/src/main/java/dev/ryanhcode/sable/api/block/BlockEntitySubLevelActor.java',
+                'common/src/main/java/dev/ryanhcode/sable/api/physics/handle/RigidBodyHandle.java',
+                'common/src/main/java/dev/ryanhcode/sable/api/physics/force/ForceTotal.java',
+                'common/src/main/java/dev/ryanhcode/sable/api/physics/constraint/RotaryConstraintConfiguration.java',
+                'common/src/main/java/dev/ryanhcode/sable/api/physics/constraint/FixedConstraintConfiguration.java'
+        ].collect { rootProject.file(it).getText('UTF-8') }.join('\n')
+        [
+                'BlockEntitySubLevelActor',
+                'RigidBodyHandle',
+                'ForceTotal',
+                'applyForcesAndReset',
+                'RotaryConstraintConfiguration',
+                'FixedConstraintConfiguration'
+        ].each { token ->
+            if (!spring.contains(token) && !api.contains(token)) {
+                throw new GradleException("M23 Sable API proof missing token: ${token}")
+            }
+        }
+        fileTree(rootProject.file('forge/src/main/java/dev/simulated_team/simulated')) { include '**/*.java' }.files.each { source ->
+            String text = source.getText('UTF-8')
+            if (text.contains('class FixedConstraintConfiguration') || text.contains('class RotaryConstraintConfiguration')
+                    || text.contains('class RigidBodyHandle') || text.contains('class ForceTotal')) {
+                throw new GradleException("M23 Simulated source appears to copy Sable API implementation: ${source}")
+            }
+        }
+        logger.lifecycle('verifyM23SableConstraintApiBoundary PASS: M23 uses existing Sable force/constraint APIs')
+    }
+}
+
+tasks.register('verifyM23ConstraintCoordinateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 Spring separates raw/local endpoints from visible pose coordinates.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+
+    doLast {
+        String source = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        [
+                'logicalPose().transformPosition',
+                'transformNormalInverse',
+                'JOMLConversion.atCenterOf',
+                'Sable.HELPER.distanceSquaredWithSubLevels',
+                'SABLE_M23_CONSTRAINT'
+        ].each { token ->
+            if (!source.contains(token)) {
+                throw new GradleException("M23 coordinate boundary missing token: ${token}")
+            }
+        }
+        if (source.contains('20000000') || source.contains('20_000_000')) {
+            throw new GradleException('M23 Spring must not hard-code hidden plot coordinates')
+        }
+        logger.lifecycle('verifyM23ConstraintCoordinateBoundary PASS: Spring force coordinates are pose-derived')
+    }
+}
+
+tasks.register('verifyM23ConstraintIdentityBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 stores logical endpoint identity instead of Java object references.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+
+    doLast {
+        String source = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        [
+                'logicalConstraintId',
+                'GoalSubLevel',
+                'Goal',
+                'partnerSubLevel',
+                'partnerPos.asLong()'
+        ].each { token ->
+            if (!source.contains(token)) {
+                throw new GradleException("M23 identity boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23ConstraintIdentityBoundary PASS: Spring identity is persistent endpoint/sublevel data')
+    }
+}
+
+tasks.register('verifyM23SpringBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 Spring preserves the exact upstream force constants and force path.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/items/spring/SpringItem.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlock.java'))
+
+    doLast {
+        String combined = [
+                'forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java',
+                'forge/src/main/java/dev/simulated_team/simulated/content/items/spring/SpringItem.java',
+                'forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlock.java'
+        ].collect { rootProject.file(it).getText('UTF-8') }.join('\n')
+        [
+                'MAX_LENGTH = 9.0D',
+                'TIME_TO_SNAP = 0.75D',
+                'POINT_DAMPING = 4.5D',
+                'HOOKE_STIFFNESS = 145.0D',
+                'ALIGNMENT_TORQUE = 20.0D',
+                'AXIAL_ANGULAR_DAMPING = 2.0D',
+                'sable$physicsTick',
+                'applyImpulseAtPoint',
+                'applyForcesAndReset',
+                'Size implements StringRepresentable',
+                'M23SpringFirstBlock',
+                'M23SpringFirstFace'
+        ].each { token ->
+            if (!combined.contains(token)) {
+                throw new GradleException("M23 Spring boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23SpringBoundary PASS: Spring force canary matches frozen upstream constants and shape')
+    }
+}
+
+tasks.register('verifyM23TorsionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 keeps Torsion Spring deferred without inventing a backend joint.'
+
+    inputs.files(m23ConstraintDocs)
+
+    doLast {
+        String docs = m23ConstraintDocs.files.collect { it.getText('UTF-8') }.join('\n')
+        [
+                '`simulated:torsion_spring`',
+                'DEFER_M24',
+                'does not create a Sable backend joint',
+                'Create kinetic extra-output'
+        ].each { token ->
+            if (!docs.contains(token)) {
+                throw new GradleException("M23 torsion boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23TorsionBoundary PASS: torsion remains exact-upstream documented future work')
+    }
+}
+
+tasks.register('verifyM23SwivelBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 documents Swivel Bearing rotary ownership and defers runtime.'
+
+    inputs.files(m23ConstraintDocs)
+
+    doLast {
+        String docs = m23ConstraintDocs.files.collect { it.getText('UTF-8') }.join('\n')
+        [
+                '`simulated:swivel_bearing`',
+                '`simulated:swivel_bearing_link_block`',
+                'RotaryConstraintConfiguration',
+                'RotaryConstraintHandle',
+                'DEFER_M24'
+        ].each { token ->
+            if (!docs.contains(token)) {
+                throw new GradleException("M23 swivel boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23SwivelBoundary PASS: swivel rotary graph is inventoried and deferred')
+    }
+}
+
+tasks.register('verifyM23RopeBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 keeps rope graph structural/deferred without partial strand physics.'
+
+    inputs.files(m23ConstraintDocs)
+
+    doLast {
+        String docs = m23ConstraintDocs.files.collect { it.getText('UTF-8') }.join('\n')
+        [
+                '`simulated:rope_connector`',
+                '`simulated:rope_winch`',
+                'ServerLevelRopeManager',
+                'ServerRopeStrand',
+                'RopePhysicsObject',
+                'STRUCTURAL_ONLY',
+                'DEFER_M24'
+        ].each { token ->
+            if (!docs.contains(token)) {
+                throw new GradleException("M23 rope boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23RopeBoundary PASS: rope connector remains structural and rope physics is deferred')
+    }
+}
+
+tasks.register('verifyM23DockingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 documents Docking fixed-constraint ownership and defers runtime.'
+
+    inputs.files(m23ConstraintDocs)
+
+    doLast {
+        String docs = m23ConstraintDocs.files.collect { it.getText('UTF-8') }.join('\n')
+        [
+                '`simulated:docking_connector`',
+                '`simulated:paired_docking_connector`',
+                'FixedConstraintConfiguration',
+                'FixedConstraintHandle',
+                'DEFER_M24'
+        ].each { token ->
+            if (!docs.contains(token)) {
+                throw new GradleException("M23 docking boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23DockingBoundary PASS: docking fixed-constraint graph is inventoried and deferred')
+    }
+}
+
+tasks.register('verifyM23ConstraintPersistenceBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 Spring saves the upstream endpoint and rest-length fields.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+
+    doLast {
+        String source = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        [
+                'saveAdditional',
+                'load(final CompoundTag tag)',
+                'Controller',
+                'DesiredLength',
+                'Goal',
+                'GoalSubLevel',
+                'restoredFromSave'
+        ].each { token ->
+            if (!source.contains(token)) {
+                throw new GradleException("M23 persistence boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23ConstraintPersistenceBoundary PASS: Spring endpoint metadata survives save/load')
+    }
+}
+
+tasks.register('verifyM23ConstraintRemovalBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 removes Spring pairs cleanly and blocks disassembly while active constraints span a sublevel.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java'))
+
+    doLast {
+        String combined = [
+                'forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java',
+                'forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java',
+                'forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java'
+        ].collect { rootProject.file(it).getText('UTF-8') }.join('\n')
+        [
+                'breakPair',
+                'REMOVE_SUCCESS',
+                'findActiveSpringConstraints',
+                'activeConstraint',
+                'DISASSEMBLY_BLOCKED activeConstraints'
+        ].each { token ->
+            if (!combined.contains(token)) {
+                throw new GradleException("M23 removal boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23ConstraintRemovalBoundary PASS: active Spring constraints guard M22 disassembly')
+    }
+}
+
+tasks.register('verifyM23ConstraintFixtureBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 exposes only the Spring fixture and deferred notices for other families.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForge.java'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
+        String forge = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForge.java').getText('UTF-8')
+        [
+                'status=SPRING_GATE_READY',
+                'fixtureSpring',
+                'family=spring',
+                'inspectSpring',
+                'deferredFixture',
+                'torsion_spring',
+                'swivel_bearing',
+                'rope_connector/rope_winch',
+                'docking_connector'
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23 command boundary missing token: ${token}")
+            }
+        }
+        if (!forge.contains('M23SimulatedConstraintCommands.register')) {
+            throw new GradleException('M23 commands are not attached to the /sable tree')
+        }
+        logger.lifecycle('verifyM23ConstraintFixtureBoundary PASS: Spring fixture/status/inspect commands are registered')
+    }
+}
+
+tasks.register('verifyM23ConstraintRenderingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 does not add speculative render mixins and keeps Spring blockstates model-safe.'
+
+    inputs.file(rootProject.file('forge/src/main/resources/assets/simulated/blockstates/spring.json'))
+    inputs.files(m23ConstraintDocs)
+
+    doLast {
+        String blockstate = rootProject.file('forge/src/main/resources/assets/simulated/blockstates/spring.json').getText('UTF-8')
+        String docs = m23ConstraintDocs.files.collect { it.getText('UTF-8') }.join('\n')
+        if (!blockstate.contains('"multipart"') || !blockstate.contains('"simulated:block/spring"')) {
+            throw new GradleException('M23 Spring blockstate must tolerate facing/size properties with the static bootstrap model')
+        }
+        if (!docs.contains('No production mixins are introduced for M23') && !docs.contains('no fake handles')) {
+            throw new GradleException('M23 rendering/mixin boundary is not documented')
+        }
+        fileTree(rootProject.file('forge/src/main/resources')) { include '**/*mixin*.json' }.files.each { mixinConfig ->
+            String text = mixinConfig.getText('UTF-8')
+            if (text.toLowerCase(java.util.Locale.ROOT).contains('simulated') && text.toLowerCase(java.util.Locale.ROOT).contains('m23')) {
+                throw new GradleException("M23 must not add speculative production mixins: ${mixinConfig}")
+            }
+        }
+        logger.lifecycle('verifyM23ConstraintRenderingBoundary PASS: Spring uses static bootstrap rendering and no M23 mixin sprawl')
+    }
+}
+
+tasks.register('verifyM23RegressionBoundary') {
+    group = 'forge backport'
+    description = 'Runs M13-M22 static boundaries and verifies M21 registration counts stay unchanged.'
+
+    dependsOn tasks.named('verifyM22SimulatedAssembly')
+
+    doLast {
+        String manifest = rootProject.file('M21_SIMULATED_REGISTRY_MANIFEST.md').getText('UTF-8')
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
+        [
+                '| `minecraft:block` | 6 |',
+                '| `minecraft:item` | 11 |',
+                '| `minecraft:block_entity_type` | 2 |',
+                'M22 CLOSED / RUNTIME_PROVEN',
+                'M21 CLOSED / RUNTIME_PROVEN'
+        ].each { token ->
+            if (!manifest.contains(token) && !status.contains(token)) {
+                throw new GradleException("M23 regression status/count proof missing token: ${token}")
+            }
+        }
+        if (!commands.contains('spring=ADAPT_NOW') || !commands.contains('rope_connector=STRUCTURAL_ONLY')
+                || !commands.contains('docking_connector=DEFER_M24')) {
+            throw new GradleException('M23 status command does not preserve the explicit family boundary')
+        }
+        logger.lifecycle('verifyM23RegressionBoundary PASS: M13-M22 static boundaries preserved and M21 counts unchanged')
+    }
+}
+
+tasks.register('verifyM23SimulatedConstraints') {
+    group = 'forge backport'
+    description = 'Runs all M23 Simulated physical constraint static verifiers.'
+
+    dependsOn tasks.named('verifyM23ConstraintUpstreamBoundary')
+    dependsOn tasks.named('verifyM23ConstraintFamilyInventoryBoundary')
+    dependsOn tasks.named('verifyM23ConstraintSourceInventoryBoundary')
+    dependsOn tasks.named('verifyM23SableConstraintApiBoundary')
+    dependsOn tasks.named('verifyM23ConstraintCoordinateBoundary')
+    dependsOn tasks.named('verifyM23ConstraintIdentityBoundary')
+    dependsOn tasks.named('verifyM23SpringBoundary')
+    dependsOn tasks.named('verifyM23TorsionBoundary')
+    dependsOn tasks.named('verifyM23SwivelBoundary')
+    dependsOn tasks.named('verifyM23RopeBoundary')
+    dependsOn tasks.named('verifyM23DockingBoundary')
+    dependsOn tasks.named('verifyM23ConstraintPersistenceBoundary')
+    dependsOn tasks.named('verifyM23ConstraintRemovalBoundary')
+    dependsOn tasks.named('verifyM23ConstraintFixtureBoundary')
+    dependsOn tasks.named('verifyM23ConstraintRenderingBoundary')
+    dependsOn tasks.named('verifyM23RegressionBoundary')
+}
