@@ -61,6 +61,11 @@ public class SimAssemblyContraption {
     private int checkedBlocks;
     private int rejectedBlocks;
     private String lastRejectedReason = "none";
+    private BlockPos lastFrontierPos;
+    private String lastFrontierState = "none";
+    private BlockPos lastFrontierFromPos;
+    private String lastFrontierFromState = "none";
+    private String lastFrontierReason = "none";
 
     public SimAssemblyContraption(final BlockPos anchor) {
         this.anchor = anchor;
@@ -85,7 +90,9 @@ public class SimAssemblyContraption {
             }
         }
 
-        throw SimAssemblyException.structureTooLarge();
+        throw SimAssemblyException.structureTooLarge(pos, visited.size(), frontier.size(), maxBlocksMoved,
+                this.lastFrontierPos, this.lastFrontierState, this.lastFrontierFromPos,
+                this.lastFrontierFromState, this.lastFrontierReason);
     }
 
     protected boolean moveBlock(final Level world, final Queue<BlockPos> frontier,
@@ -203,6 +210,8 @@ public class SimAssemblyContraption {
             }
 
             if (!wasVisited && (canStick || blockAttachedTowardsFace || faceHasGlue)) {
+                this.recordFrontierAddition(offsetPos, blockState, pos, state,
+                        faceHasGlue ? "GLUE" : blockAttachedTowardsFace ? "ATTACHED_TOWARDS_FACE" : "BLOCK_STICKINESS");
                 frontier.add(offsetPos);
             }
         }
@@ -211,7 +220,9 @@ public class SimAssemblyContraption {
         if (this.blocks.size() <= SimulatedConfig.M22_MAX_BLOCKS_MOVED.get()) {
             return true;
         }
-        throw SimAssemblyException.structureTooLarge();
+        throw SimAssemblyException.structureTooLarge(pos, visited.size(), frontier.size(),
+                SimulatedConfig.M22_MAX_BLOCKS_MOVED.get(), this.lastFrontierPos, this.lastFrontierState,
+                this.lastFrontierFromPos, this.lastFrontierFromState, this.lastFrontierReason);
     }
 
     public boolean checkAndCacheGlue(final LevelAccessor level, final BlockPos blockPos, final BlockPos offsetDir) {
@@ -382,8 +393,22 @@ public class SimAssemblyContraption {
         this.lastRejectedReason = reason;
     }
 
+    private void recordFrontierAddition(final BlockPos targetPos, final BlockState targetState,
+                                        final BlockPos fromPos, final BlockState fromState,
+                                        final String attachmentReason) {
+        this.lastFrontierPos = targetPos.immutable();
+        this.lastFrontierState = targetState.toString();
+        this.lastFrontierFromPos = fromPos.immutable();
+        this.lastFrontierFromState = fromState.toString();
+        this.lastFrontierReason = attachmentReason;
+    }
+
     public Collection<BlockPos> getBlocks() {
         return this.blocks;
+    }
+
+    public Collection<SuperGlueEntity> getGlues() {
+        return this.glueCache;
     }
 
     public int getCheckedBlocks() {
@@ -396,5 +421,25 @@ public class SimAssemblyContraption {
 
     public String getLastRejectedReason() {
         return this.lastRejectedReason;
+    }
+
+    public BlockPos getLastFrontierPos() {
+        return this.lastFrontierPos;
+    }
+
+    public String getLastFrontierState() {
+        return this.lastFrontierState;
+    }
+
+    public BlockPos getLastFrontierFromPos() {
+        return this.lastFrontierFromPos;
+    }
+
+    public String getLastFrontierFromState() {
+        return this.lastFrontierFromState;
+    }
+
+    public String getLastFrontierReason() {
+        return this.lastFrontierReason;
     }
 }

@@ -1976,7 +1976,190 @@ fixture builds two small M22-assembled bodies and gives the player a Spring item
 so the actual pairing still uses normal Spring item interaction. No production
 mixins are introduced for M23.
 
-Current status: `M23 IMPLEMENTED / RUNTIME_REQUIRED`. M23 is not closed until a
-manual runtime session proves Spring creation, force response, aligned
-rendering/collision, persistence, disassembly blocking while constrained,
-constraint removal, and repeat stability.
+Runtime status entering M23.1: `M23 PARTIAL_RUNTIME_PROVEN /
+BLOCKED_BY_TEARDOWN_REGRESSION`. User evidence proved Spring force behavior,
+save/reload, relationship restoration, and active-constraint disassembly
+blocking, but Spring teardown followed by M22 disassembly corrupted the
+assembly lifecycle: body A restored incompletely and body B reassembly failed
+with a null reason/state.
+
+M23.1 fixes the teardown/disassembly lifecycle boundary without changing Spring
+force behavior. Spring endpoint removal now clears only Spring pair metadata on
+both endpoint block entities before destroying the paired endpoint, and logs
+`SABLE_M23_TEARDOWN`. Simulated body snapshots now log
+`SABLE_M23_BODY_SNAPSHOT` after assembly, after Spring connection, around Spring
+teardown, and around disassembly. M22 disassembly now refuses already-incomplete
+source block sets and Sable block movement aborts before source cleanup if the
+copy phase fails. Assembly failure paths now emit
+`SABLE_M23_REASSEMBLY_FAILURE` instead of returning an unexplained null.
+
+Runtime status entering M23.2: `M23 PARTIAL_RUNTIME_PROVEN / BLOCKED`. User
+evidence then proved that M23.1 source preservation worked: after the
+disassembly move failed, the source sublevel still had the same stored block
+count, payload count, and block-set digest. The first remaining disassembly
+failure was `PhysicsAssemblerBlockEntity.saveAdditional` writing a null
+backport-only diagnostic string (`M22LastFailure`) into `CompoundTag.putString`.
+A separate runtime crash showed the nested production Rapier jar still declared
+named `PhysicsColliderBlockGetter.getBlockEntity(BlockPos)` instead of the Forge
+1.20.1 production `BlockGetter.m_7702_(BlockPos)` method.
+
+M23.2 fixes those two blockers without changing Spring force semantics. Physics
+Assembler diagnostic strings are now presence-aware and normalized before NBT
+write/read, Create `AssemblyException` text is recovered from its component
+when the Java exception message is absent, and the failure report no longer
+prints `reason=null`. Rapier collider baking now has a positioned path for
+world block updates so `BlockPos.ZERO` BlockEntity lookups can delegate to the
+real backing level position. `RapierProductionJarMapper` now remaps inherited
+Minecraft interface method declarations, so the nested production Rapier jar can
+implement `BlockGetter.m_7702_`, `m_8055_`, `m_6425_`, `m_141928_`, and
+`m_141937_`.
+
+Runtime status entering M23.2a: `M23 PARTIAL_RUNTIME_PROVEN /
+GLOBAL_RAPIER_COLLISION_REGRESSION_BLOCKER`. User evidence proved the M23.2
+`AbstractMethodError` no longer appears, but all observed Sable physical
+objects fell through ordinary visible world blocks even though Sable body
+handles, mass, uploaded body blocks, and owned collision geometry remained
+present.
+
+M23.2a restores the Rapier world-terrain collider boundary without changing
+Spring, rendering, or Simulated constraint behavior. The M23.2 positioned
+collider path is now limited to `MovingPistonBlock`, whose 1.20.1 collision
+shape can require a real `MovingPistonBlockEntity`. Ordinary state-stable
+terrain, including `minecraft:stone`, falls back to the original
+`BlockState`-memoized `RapierVoxelColliderBakery` path, preserving stable
+voxel collider IDs for world section uploads and block changes.
+
+Current status after static M23.2a fix: `M23 IMPLEMENTED / RUNTIME_REQUIRED`.
+M23 remains not closed until a manual runtime session proves assembler
+save/disassembly/reassembly, Spring teardown after active save/reload, no stale
+Spring state, ordinary Sable/world terrain contact on plain stone, existing
+Sables supported by terrain, ordinary block updates, and Rapier piston updates
+with no `AbstractMethodError`.
+
+Runtime status entering M23.3: `M23 PARTIAL_RUNTIME_PROVEN / BLOCKED`. User
+evidence proved the remaining Spring teardown failure precisely:
+`REMOVE_SUCCESS` was emitted while the owner endpoint actor remained registered
+and both bodies still reported the same logical Spring id in
+`DISASSEMBLY_BLOCKED activeConstraints=[...]`. The partner actor was removed,
+endpoint blocks were gone, and ordinary payload block counts remained intact.
+
+M23.3 fixes only that stale ownership boundary. Spring teardown now removes the
+exact two endpoint actors from `LevelPlot.blockEntityActors`, clears pair
+metadata on live endpoint BlockEntities and any actor-map Spring instances for
+those endpoint positions, and checks the logical active-constraint id on both
+bodies before reporting success. If actor or active-constraint state remains,
+the diagnostic emits `REMOVE_PENDING` rather than false `REMOVE_SUCCESS`.
+`/sable m23 inspect spring` now labels valid Sable-to-Sable Springs with
+`constraintMode=SABLE_TO_SABLE` and labels static-world pairs as
+`STATIC_WORLD_NO_SABLE_FORCE_TEST`. `/sable m23 nudge spring_a` and
+`/sable m23 nudge spring_b` resolve the nearest two assembled Physics Assembler
+bodies and use the existing Sable physics handle to separate them for an
+unambiguous extension test.
+
+Current status after static M23.3 fix: `M23 IMPLEMENTED / RUNTIME_REQUIRED`.
+No Spring force-law, Spring persistence, Rapier terrain collision, rendering, or
+M22 block-movement semantics were changed.
+
+Runtime status entering M23.4: `M23 PARTIAL_RUNTIME_PROVEN /
+BLOCKED_BY_ASSEMBLY_SELECTION_REGRESSION`. User evidence proved M23.3 Spring
+teardown now removes both endpoint actors and both logical active-constraint
+entries before `REMOVE_SUCCESS`. The remaining blocker was ordinary terrain
+absorption during M22 reassembly: a small restored structure touching a support
+platform recursively selected the platform and failed with
+`maxBlocksMoved=2048`.
+
+M23.4 fixes the M22 assembly-selection boundary. The frozen Simulated
+`9e60263fb5cb00033f14af655a7e72cf7aebb3e2` neighbor predicate only adds
+neighbors for exact attachment semantics:
+`canStick || blockAttachedTowardsFace || faceHasGlue`. Its NeoForge service
+delegates stickiness to `BlockState.canStickTo`. The target port had widened
+that service with `|| (!stateA.isAir() && !stateB.isAir())`, making all
+ordinary non-air blocks sticky. M23.4 removes that fallback and keeps the
+upstream-shaped traversal.
+
+M23.4 also adds bounded `SABLE_M22_ASSEMBLY_SELECTION` and
+`SABLE_M22_ASSEMBLY_SELECTION_FAIL` diagnostics, an `assembly_boundary` fixture,
+and Create Super Glue preservation across assembly/disassembly. The fresh M23
+Spring fixtures now rest on ordinary unglued stone platforms while their
+payloads and the simplified target Physics Assembler are connected by Create
+Super Glue. Honey Glue remains upstream-supported but its entity graph is not
+registered in this target scope.
+
+Current status after static M23.4 fix: `M23 IMPLEMENTED / RUNTIME_REQUIRED`.
+No Spring force-law, Spring teardown, Rapier collision, rendering, or additional
+constraint family was changed.
+
+Runtime status entering M23.5: `M23 PARTIAL_RUNTIME_PROVEN /
+BLOCKED_BY_SPRING_TARGET_DISCOVERY`. User evidence showed fresh M23 Spring
+fixtures assembled/reassembled, but Spring creation logged ordinary visible
+parent-world endpoint coordinates and `/sable m23 inspect spring` returned
+`NOT_FOUND`; `/sable m23 nudge spring_a/b` still depended on nearby Physics
+Assembler body discovery and found only one body.
+
+M23.5 fixes Spring endpoint identity and test-harness discovery without
+changing Spring force law, Spring teardown, Rapier collision, rendering, or M22
+assembly-selection semantics. `SpringItem` now records the first endpoint's
+sublevel UUID, resolves direct Sable raw hits from the M11 item-on-sublevel
+bridge, has a bounded visible-to-raw fallback for Sable hits that arrive through
+parent-world context, and logs `SABLE_M23_SPRING_TARGET`. Spring
+`CREATE_SUCCESS` now reports body A/body B UUIDs, `sameBody`, and
+`constraintMode`.
+
+`/sable m23 inspect spring` now scans loaded Sable sublevels for actual active
+Spring endpoint block entities and reports authoritative endpoint raw/local/
+visible positions and body IDs. `/sable m23 nudge spring_a` and
+`/sable m23 nudge spring_b` target the two bodies from the active
+Sable-to-Sable Spring relationship rather than searching for two nearby Physics
+Assemblers. `/sable m23 inspect bodies` reports the two assembled fixture
+bodies and their Spring support positions so runtime can prove
+`sameSable=false` before Spring testing.
+
+Current status after static M23.5 fix: `M23 IMPLEMENTED / RUNTIME_REQUIRED`.
+Manual runtime must still prove the two fixture bodies are distinct Sables,
+Spring creation resolves hidden/raw Sable endpoints, inspect returns ACTIVE
+SABLE_TO_SABLE, nudge changes current length, force remains correct, and M23.3
+teardown still removes actor/active-constraint state from both bodies.
+
+Runtime status entering M23.5b: `M23 PARTIAL_RUNTIME_PROVEN /
+BLOCKED_BY_SUPER_GLUE_ROUNDTRIP`. User evidence proved M23.4 initial selection:
+each fresh Spring fixture body selected exactly six intended blocks, selected
+zero platform blocks, assembled into two distinct Sables, and retained the
+Physics Assembler. After disassembly, however, the next assembly selected only
+one smooth stone block and `assemblerPresent=false`, proving the Create Super
+Glue graph was unavailable for reassembly.
+
+M23.5b fixes only the Super Glue roundtrip across M22 assembly/disassembly.
+`SimAssemblyHelper` now captures raw Super Glue AABBs before
+`ServerLevelPlot.kickAllEntities()`, restores missing raw glue if block movement
+fails, and transforms the captured glue boxes back to parent-world coordinates
+after successful disassembly. Assembly-side glue movement now creates the
+destination glue before removing the source entity. The Spring fixture body
+inspector also rejects malformed one-block bodies before Spring targeting,
+inspect, or nudge diagnostics are treated as meaningful.
+
+Current status after static M23.5b fix: `M23 IMPLEMENTED / RUNTIME_REQUIRED`.
+M23 remains not closed until a fresh manual runtime session proves glue
+roundtrip, save/reload roundtrip, and then valid SABLE_TO_SABLE Spring
+targeting.
+
+Runtime status entering M23.6: `M23 PARTIAL_RUNTIME_PROVEN /
+BODY_COUNT_AUTHORITY_AUDIT_REQUIRED`. User evidence showed fresh fixture
+selection still reported `selectedBlockCount=6`, `selectedPlatformBlocks=0`,
+two distinct Sables, `assemblerPresent=true`, and Spring support present, but
+`/sable m23 inspect bodies` reported `bodyABlockCount=23` while body B reported
+`6`.
+
+M23.6 identifies the count source as `SimAssemblyHelper.collectBlocks`, which
+counts actual non-air `BlockState`s in loaded hidden raw plot chunks. The
+fixture body command now emits `SABLE_M23_BODY_COUNT_AUDIT` and
+`SABLE_M23_BODY_COUNT_AUDIT_BLOCKS` for candidate Physics Assembler bodies,
+including raw positions, local positions, block IDs, mass, and uploaded
+collision block count. Fixture validation now chooses nearest valid six-block
+Physics Assembler bodies instead of blindly taking the first two globally
+X-sorted assembler bodies, preventing unrelated older Sables from being
+reported as body A.
+
+Current status after static M23.6 fix: `M23 IMPLEMENTED / RUNTIME_REQUIRED`.
+M23 remains not closed until runtime confirms the audited fresh fixture bodies
+are the intended six-block bodies and any true 23-block candidate is either an
+unrelated old body or is investigated with the printed raw block list.

@@ -48,7 +48,7 @@ production graph required for basic Physics Assembler assembly/disassembly.
 The M22 implementation deliberately does not add any new registry entries. It
 activates the already runtime-proven M21 `physics_assembler` block and block
 entity. The only Forge-specific semantic adapter is the stickiness service:
-NeoForge upstream calls `BlockState.canStickTo`; the target treats ordinary
-non-air blocks as stickable for this basic lifecycle boundary while retaining
-the upstream traversal, size limit, Create movement checks, and unmovable-block
-guards.
+NeoForge upstream calls `BlockState.canStickTo`; M23.4 corrected the target to
+delegate directly to the Forge 1.20.1 `BlockState.canStickTo` hook as well. The
+former M22 non-air fallback was over-permissive and caused ordinary terrain to
+be selected by contact alone.

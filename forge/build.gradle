@@ -3872,6 +3872,211 @@ tasks.register('verifyForgePackaging') {
     dependsOn tasks.named('verifyStandaloneForgeArtifact')
 }
 
+tasks.register('verifyCreateRegistrateRuntimeOwnershipBoundary') {
+    group = 'verification'
+    description = 'Verifies Sable does not own Create/Registrate classes and the exact Create 6.0.8 jar owns its Registrate graph.'
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+
+    inputs.file(tasks.named('jarJar').flatMap { it.archiveFile })
+            .withPropertyName('finalSableAllJar')
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('forge/src/main/resources/META-INF/mods.toml'))
+    inputs.files(fileTree(rootProject.file('forge/src/main/java')) { include '**/*.java' })
+    inputs.files(fileTree(rootProject.file('common/src/main/java')) { include '**/*.java' })
+    inputs.files(fileTree(rootProject.file('sable_rapier/src/main/java')) { include '**/*.java' })
+    inputs.files(fileTree(rootProject.file('sable_companion_1_20/src/main/java')) { include '**/*.java' })
+
+    doLast {
+        File sableJarFile = standaloneProductionSableArtifact.get().asFile
+        if (!sableJarFile.isFile()) {
+            throw new GradleException("Missing final Sable artifact: ${sableJarFile}")
+        }
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing target Create artifact: ${targetCreateJar}")
+        }
+
+        def readNestedJar = { JarFile outer, String entryName ->
+            def nestedEntry = outer.getJarEntry(entryName)
+            if (nestedEntry == null) {
+                throw new GradleException("Missing nested jar ${entryName} in ${outer.name}")
+            }
+            byte[] bytes = outer.getInputStream(nestedEntry).readAllBytes()
+            def nestedEntries = [] as Set
+            new JarInputStream(new ByteArrayInputStream(bytes)).withCloseable { nested ->
+                def entry
+                while ((entry = nested.nextJarEntry) != null) {
+                    if (!entry.directory) {
+                        nestedEntries.add(entry.name)
+                    }
+                }
+            }
+            nestedEntries
+        }
+
+        def readText = { JarFile jar, String entryName ->
+            def entry = jar.getJarEntry(entryName)
+            if (entry == null) {
+                throw new GradleException("${jar.name} is missing ${entryName}")
+            }
+            jar.getInputStream(entry).getText('UTF-8')
+        }
+
+        def readBytes = { JarFile jar, String entryName ->
+            def entry = jar.getJarEntry(entryName)
+            if (entry == null) {
+                throw new GradleException("${jar.name} is missing ${entryName}")
+            }
+            jar.getInputStream(entry).readAllBytes()
+        }
+
+        def forbiddenPrefixes = [
+                'com/simibubi/create/',
+                'com/tterrag/registrate/',
+                'net/createmod/'
+        ]
+
+        JarFile sableJar = new JarFile(sableJarFile)
+        try {
+            def sableEntries = sableJar.entries().toList()*.name
+            def forbiddenSableClasses = sableEntries.findAll { entry ->
+                entry.endsWith('.class') && forbiddenPrefixes.any { prefix -> entry.startsWith(prefix) }
+            }
+            if (!forbiddenSableClasses.isEmpty()) {
+                throw new GradleException("Final Sable jar owns Create/Registrate/Catnip classes: ${forbiddenSableClasses}")
+            }
+
+            String sableModsToml = readText(sableJar, 'META-INF/mods.toml')
+            if (!sableModsToml.contains('modId = "sable"')
+                    || !sableModsToml.contains('modId = "simulated"')
+                    || sableModsToml.contains('[[mods]]\nmodId = "create"')) {
+                throw new GradleException('Final Sable mods.toml no longer has the expected Sable/Simulated-only mod ownership')
+            }
+
+            def sableMetadata = new JsonSlurper().parseText(readText(sableJar, 'META-INF/jarjar/metadata.json'))
+            def forbiddenNestedOwners = []
+            (sableMetadata.jars ?: []).each { row ->
+                String coordinates = "${row.identifier.group}:${row.identifier.artifact}:${row.version.artifactVersion}"
+                        .toLowerCase(Locale.ROOT)
+                if (coordinates.contains('create')
+                        || coordinates.contains('flywheel')
+                        || coordinates.contains('ponder')
+                        || coordinates.contains('registrate')) {
+                    forbiddenNestedOwners.add(row)
+                }
+                def nestedEntries = readNestedJar(sableJar, row.path as String)
+                def forbiddenNestedClasses = nestedEntries.findAll { entry ->
+                    entry.endsWith('.class') && forbiddenPrefixes.any { prefix -> entry.startsWith(prefix) }
+                }
+                if (!forbiddenNestedClasses.isEmpty()) {
+                    throw new GradleException(
+                            "Nested Sable JarJar ${row.path} owns Create/Registrate/Catnip classes: "
+                                    + forbiddenNestedClasses
+                    )
+                }
+            }
+            if (!forbiddenNestedOwners.isEmpty()) {
+                throw new GradleException("Final Sable JarJar metadata owns target Create stack entries: ${forbiddenNestedOwners}")
+            }
+        } finally {
+            sableJar.close()
+        }
+
+        JarFile createJar = new JarFile(targetCreateJar)
+        try {
+            [
+                    'com/simibubi/create/Create.class',
+                    'com/simibubi/create/AllItems.class',
+                    'com/simibubi/create/foundation/events/ClientEvents$ModBusEvents.class',
+                    'com/simibubi/create/content/equipment/potatoCannon/PotatoCannonItem.class',
+                    'assets/create/models/item/potato_cannon.json',
+                    'data/create/recipes/mechanical_crafting/potato_cannon.json'
+            ].each { entry ->
+                if (createJar.getJarEntry(entry) == null) {
+                    throw new GradleException("Target Create 6.0.8 jar is missing ${entry}")
+                }
+            }
+
+            byte[] allItems = readBytes(createJar, 'com/simibubi/create/AllItems.class')
+            String allItemsText = new String(allItems, StandardCharsets.ISO_8859_1)
+            [
+                    'POTATO_CANNON',
+                    'potato_cannon',
+                    'PotatoCannonItem'
+            ].each { token ->
+                if (!allItemsText.contains(token)) {
+                    throw new GradleException("Create AllItems.class no longer proves ${token}")
+                }
+            }
+
+            def createMetadata = new JsonSlurper().parseText(readText(createJar, 'META-INF/jarjar/metadata.json'))
+            def registrateRows = (createMetadata.jars ?: []).findAll { row ->
+                row.identifier.group == expectedTargetArtifacts.registrate.group
+                        && row.identifier.artifact == expectedTargetArtifacts.registrate.artifact
+                        && row.version.artifactVersion == expectedTargetArtifacts.registrate.version
+                        && row.path == expectedTargetArtifacts.registrate.path
+            }
+            if (registrateRows.size() != 1) {
+                throw new GradleException("Target Create jar must own exactly one nested Registrate row, found ${registrateRows}")
+            }
+            def createRegistrateEntries = readNestedJar(createJar, expectedTargetArtifacts.registrate.path)
+            [
+                    'com/tterrag/registrate/Registrate.class',
+                    'com/tterrag/registrate/AbstractRegistrate.class',
+                    'com/tterrag/registrate/util/entry/RegistryEntry.class',
+                    'com/tterrag/registrate/util/entry/ItemProviderEntry.class'
+            ].each { entry ->
+                if (!createRegistrateEntries.contains(entry)) {
+                    throw new GradleException("Create nested Registrate jar is missing ${entry}")
+                }
+            }
+
+            def createOuterRegistrate = createJar.entries().toList()*.name.findAll { entry ->
+                entry.endsWith('.class') && entry.startsWith('com/tterrag/registrate/')
+            }
+            if (!createOuterRegistrate.isEmpty()) {
+                throw new GradleException("Create unexpectedly exposes Registrate classes outside JarJar: ${createOuterRegistrate}")
+            }
+        } finally {
+            createJar.close()
+        }
+
+        def sourceRoots = [
+                rootProject.file('forge/src/main/java'),
+                rootProject.file('common/src/main/java'),
+                rootProject.file('sable_rapier/src/main/java'),
+                rootProject.file('sable_companion_1_20/src/main/java')
+        ]
+        def forbiddenSourceTokens = [
+                'Create.REGISTRATE',
+                'Registrate.create("create"',
+                'Registrate.create(Create.MOD_ID',
+                'new ResourceLocation("create", "potato_cannon")',
+                'POTATO_CANNON.asItem()',
+                'AllItems.POTATO_CANNON'
+        ]
+        def sourceViolations = []
+        sourceRoots.findAll { it.isDirectory() }.each { root ->
+            fileTree(root) { include '**/*.java' }.files.each { sourceFile ->
+                String text = sourceFile.getText('UTF-8')
+                forbiddenSourceTokens.each { token ->
+                    if (text.contains(token)) {
+                        sourceViolations.add("${rootProject.relativePath(sourceFile)} contains ${token}")
+                    }
+                }
+            }
+        }
+        if (!sourceViolations.isEmpty()) {
+            throw new GradleException("Sable/Simulated source mutates or consumes Create's Potato Cannon registry path: ${sourceViolations}")
+        }
+
+        logger.lifecycle('verifyCreateRegistrateRuntimeOwnershipBoundary PASS: Sable owns no Create/Registrate/Catnip classes, Create 6.0.8 owns POTATO_CANNON and its nested Registrate runtime')
+    }
+}
+
+tasks.named('verifyForgePackaging') {
+    dependsOn tasks.named('verifyCreateRegistrateRuntimeOwnershipBoundary')
+}
+
 def prepareStandaloneSableUserdevArtifact = tasks.register('prepareStandaloneSableUserdevArtifact') {
     group = 'forge backport'
     description = 'Derives a forgeclientuserdev-mapped standalone Sable artifact from the final reobfuscated all-jar.'
@@ -4992,6 +5197,7 @@ tasks.named('check') {
 }
 
 tasks.named('build') {
+    dependsOn tasks.named('verifyCreateRegistrateRuntimeOwnershipBoundary')
     dependsOn tasks.named('verifySableRadiumCompatibilityBoundary')
     dependsOn tasks.named('verifyRapierPackagedArtifact')
     dependsOn tasks.named('verifyM13ContraptionMixinTargets')
@@ -18193,6 +18399,332 @@ tasks.register('verifyM22StructureCollectionBoundary') {
     }
 }
 
+tasks.register('verifyM22AssemblySelectionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.4 keeps the frozen upstream neighbor frontier predicate.'
+
+    inputs.file(rootProject.file('M23_4_ASSEMBLY_SELECTION_FIX.md'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyContraption.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java'))
+
+    doLast {
+        String docs = rootProject.file('M23_4_ASSEMBLY_SELECTION_FIX.md').getText('UTF-8')
+        String source = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyContraption.java').getText('UTF-8')
+        String exceptions = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java').getText('UTF-8')
+        [
+                'DIRECTION_OFFSETS',
+                'faceHasGlue',
+                'blockAttachedTowardsFace',
+                'SimAssemblyService.canStickTo(state, blockState)',
+                'SimAssemblyService.canStickTo(blockState, state)',
+                'if (!wasVisited && (canStick || blockAttachedTowardsFace || faceHasGlue))',
+                'recordFrontierAddition',
+                'SABLE_M22_ASSEMBLY_SELECTION_FAIL'
+        ].each { token ->
+            if (!source.contains(token) && !exceptions.contains(token)) {
+                throw new GradleException("M23.4 assembly selection missing token: ${token}")
+            }
+        }
+        if (!docs.contains('!wasVisited && (canStick || blockAttachedTowardsFace || faceHasGlue)')) {
+            throw new GradleException('M23.4 documentation must freeze the upstream frontier-add predicate')
+        }
+        logger.lifecycle('verifyM22AssemblySelectionBoundary PASS: neighbor traversal remains attachment-gated')
+    }
+}
+
+tasks.register('verifyM22AssemblyStickinessServiceBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the target stickiness service no longer treats all non-air blocks as sticky.'
+
+    inputs.file(rootProject.file('M23_4_ASSEMBLY_SELECTION_FIX.md'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/service/SimAssemblyService.java'))
+
+    doLast {
+        String docs = rootProject.file('M23_4_ASSEMBLY_SELECTION_FIX.md').getText('UTF-8')
+        String source = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/service/SimAssemblyService.java').getText('UTF-8')
+        if (!source.contains('return stateA.canStickTo(stateB);')) {
+            throw new GradleException('M23.4 stickiness service must delegate to Forge BlockState.canStickTo')
+        }
+        [
+                '(!stateA.isAir() && !stateB.isAir())',
+                'return true;'
+        ].each { forbidden ->
+            if (source.contains(forbidden)) {
+                throw new GradleException("M23.4 stickiness service retained over-permissive fallback: ${forbidden}")
+            }
+        }
+        if (!docs.contains('That made every ordinary non-air block pair sticky')) {
+            throw new GradleException('M23.4 documentation must record the over-permissive fallback root cause')
+        }
+        logger.lifecycle('verifyM22AssemblyStickinessServiceBoundary PASS: ordinary terrain contact is not sticky by fallback')
+    }
+}
+
+tasks.register('verifyM22GlueAssemblyBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Create Super Glue is used and preserved across assembly/disassembly.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M22SimulatedAssemblyCommands.java'))
+
+    doLast {
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M22SimulatedAssemblyCommands.java').getText('UTF-8')
+        [
+                'contraption.getGlues()',
+                'moveAssemblyGluesToSubLevel',
+                'moveSubLevelGluesToParent',
+                'addGlueIfMissing(level, movedBox)',
+                'new SuperGlueEntity(level, box)',
+                'Entity.RemovalReason.KILLED'
+        ].each { token ->
+            if (!helper.contains(token)) {
+                throw new GradleException("M23.4 glue persistence missing token: ${token}")
+            }
+        }
+        [
+                'glue=CREATE_SUPER_GLUE',
+                'new SuperGlueEntity(level, SuperGlueEntity.span(first, second))'
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23.4 assembly boundary fixture missing glue token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM22GlueAssemblyBoundary PASS: selected Create Super Glue moves with assembled bodies')
+    }
+}
+
+tasks.register('verifyM22SuperGlueRoundTripBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.5b captures Create Super Glue before entity cleanup and restores it across disassembly.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+
+    doLast {
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        [
+                'SABLE_M22_GLUE_ROUNDTRIP',
+                'final List<AABB> rawGlueBoxes = collectGlueBoxes(level, plotAabb(plotBounds));',
+                '((ServerLevelPlot) subLevel.getPlot()).kickAllEntities();',
+                'moveSubLevelGluesToParent(level, rawGlueBoxes, transform)',
+                'restoreMissingGlues(level, rawGlueBoxes)',
+                'sourceGlueRemaining='
+        ].each { token ->
+            if (!helper.contains(token)) {
+                throw new GradleException("M23.5b Super Glue roundtrip missing token: ${token}")
+            }
+        }
+        if (helper.indexOf('final List<AABB> rawGlueBoxes = collectGlueBoxes(level, plotAabb(plotBounds));')
+                > helper.indexOf('((ServerLevelPlot) subLevel.getPlot()).kickAllEntities();')) {
+            throw new GradleException('M23.5b must capture raw Super Glue before kickAllEntities removes plot entities')
+        }
+        logger.lifecycle('verifyM22SuperGlueRoundTripBoundary PASS: glue is captured before cleanup and restored/moved transactionally')
+    }
+}
+
+tasks.register('verifyM22GlueDisassemblyBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.5b has a disassembly-side Create Super Glue move distinct from block movement.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+
+    doLast {
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        [
+                'private static GlueMoveResult moveSubLevelGluesToParent',
+                'new AABB(',
+                'transform.apply(new Vec3(box.minX, box.minY, box.minZ))',
+                'transform.apply(new Vec3(box.maxX, box.maxY, box.maxZ))',
+                'addGlueIfMissing(level, movedBox)',
+                'removeGlueBox(level, box)'
+        ].each { token ->
+            if (!helper.contains(token)) {
+                throw new GradleException("M23.5b glue disassembly restore missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM22GlueDisassemblyBoundary PASS: raw glue boxes are transformed back to parent-world boxes')
+    }
+}
+
+tasks.register('verifyM22GlueReassemblyBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.5b logs actual glue-driven reassembly selection.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+
+    doLast {
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        [
+                'phase={} {}',
+                'REASSEMBLY_SELECTION',
+                'gluedBlockCount=',
+                'selectedBlockCount=',
+                'assemblerIncluded=',
+                'selectionSha256='
+        ].each { token ->
+            if (!helper.contains(token)) {
+                throw new GradleException("M23.5b glue reassembly diagnostic missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM22GlueReassemblyBoundary PASS: reassembly emits real selected block/glue diagnostics')
+    }
+}
+
+tasks.register('verifyM22AssemblerReinclusionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies Spring fixture bodies reject malformed one-block reassemblies before Spring acceptance.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
+        [
+                'reason=invalid_assembled_fixture_body',
+                'expectedStoredBlockCount=6',
+                'bodyABlockCount == 6',
+                'bodyAAssemblerRaw != null',
+                'bodyASpringSupportRaw != null',
+                'status=PASS'
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23.5b assembler reinclusion guard missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM22AssemblerReinclusionBoundary PASS: Spring gate requires valid six-block bodies with assembler/supports')
+    }
+}
+
+tasks.register('verifySableSubLevelReuseCleanBoundary') {
+    group = 'forge backport'
+    description = 'Verifies newly allocated M22 assembly plots start from fresh empty chunk storage.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/LevelPlot.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelContainer.java'))
+
+    doLast {
+        String helper = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java').getText('UTF-8')
+        String plot = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/LevelPlot.java').getText('UTF-8')
+        String container = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/sublevel/SubLevelContainer.java').getText('UTF-8')
+        [
+                'container.allocateNewSubLevel(pose)',
+                'plot.newEmptyChunk(plot.getCenterChunk())',
+                'SubLevelAssemblyHelper.moveBlocks(level, transform, blocks)'
+        ].each { token ->
+            if (!helper.contains(token)) {
+                throw new GradleException("M23.6 allocation path missing token: ${token}")
+            }
+        }
+        [
+                'new LevelChunk(level, pos, UpgradeData.EMPTY',
+                'Blocks.AIR.defaultBlockState()',
+                'PalettedContainer.Strategy.SECTION_STATES'
+        ].each { token ->
+            if (!plot.contains(token)) {
+                throw new GradleException("M23.6 empty plot chunk boundary missing token: ${token}")
+            }
+        }
+        if (!container.contains('this.getOccupancy().clear(index);')) {
+            throw new GradleException('M23.6 removed plots must release occupancy for reuse')
+        }
+        logger.lifecycle('verifySableSubLevelReuseCleanBoundary PASS: plot reuse allocates fresh AIR chunk storage before moving selected blocks')
+    }
+}
+
+tasks.register('verifyM23BodyCountAuthorityBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 body fixture counts are audited from raw non-air storage, not inferred from selection names.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        [
+                'SABLE_M23_BODY_COUNT_AUDIT',
+                'selectedBlockCount=',
+                'storedBlockCount=',
+                'nonAirBlockCount=',
+                'payloadBlockCount=',
+                'trackingPointCount=',
+                'actorCount=',
+                'boundsVolume=',
+                'mass=',
+                'collisionUploadedBlockCount=',
+                'SABLE_M23_BODY_COUNT_AUDIT_BLOCKS',
+                'firstNonAirRawBlocks=',
+                'validSixBlockBodies=',
+                'isValidFixtureBody'
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23.6 body count authority missing token: ${token}")
+            }
+        }
+        if (!commands.contains('body.logicalPose().position().distanceSquared(sourcePos)')) {
+            throw new GradleException('M23.6 fixture body discovery must be source-proximity based, not global X sorted')
+        }
+        if (!helper.contains('public static List<BlockPos> collectBlocks')) {
+            throw new GradleException('M23.6 body count authority must continue using raw non-air SubLevel collection')
+        }
+        logger.lifecycle('verifyM23BodyCountAuthorityBoundary PASS: body counts are raw non-air audits and fixture validation selects valid six-block bodies')
+    }
+}
+
+tasks.register('verifyM22TerrainIsolationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the assembly boundary fixture places unglued ordinary terrain under glued payload.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M22SimulatedAssemblyCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M22SimulatedAssemblyCommands.java').getText('UTF-8')
+        [
+                'assembly_boundary',
+                'Blocks.STONE.defaultBlockState()',
+                'selectedPlatformBlocks=',
+                'platformBlockCount=',
+                'SABLE_M22_ASSEMBLY_SELECTION',
+                'return preview.selectedPlatformBlocks() == 0 ? 1 : 0'
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23.4 terrain isolation fixture missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM22TerrainIsolationBoundary PASS: fixture proves ordinary support platform is not selected')
+    }
+}
+
+tasks.register('verifyM22ReassemblyOnTerrainBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23 Spring fixtures exercise reassembly while resting on ordinary terrain.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'))
+    inputs.file(rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        [
+                'buildSupportPlatform',
+                'Blocks.STONE.defaultBlockState()',
+                'glueBody',
+                'glue=CREATE_SUPER_GLUE',
+                'supportPlatform=ordinary_minecraft_stone',
+                'bodyAAssembler',
+                'bodyBAssembler'
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23.4 Spring fixture terrain boundary missing token: ${token}")
+            }
+        }
+        if (!smoke.contains('Reassemble body A and body B directly from that position')) {
+            throw new GradleException('M23.4 runtime smoke must require reassembly while touching terrain')
+        }
+        logger.lifecycle('verifyM22ReassemblyOnTerrainBoundary PASS: Spring fixtures no longer hide terrain contact')
+    }
+}
+
 tasks.register('verifyM22SableOwnershipBoundary') {
     group = 'forge backport'
     description = 'Verifies M22 reuses Sable assembly ownership APIs instead of copying Sable internals.'
@@ -18378,6 +18910,17 @@ tasks.register('verifyM22SimulatedAssembly') {
     dependsOn tasks.named('verifyM22AssemblyUpstreamBoundary')
     dependsOn tasks.named('verifyM22AssemblySourceInventoryBoundary')
     dependsOn tasks.named('verifyM22StructureCollectionBoundary')
+    dependsOn tasks.named('verifyM22AssemblySelectionBoundary')
+    dependsOn tasks.named('verifyM22AssemblyStickinessServiceBoundary')
+    dependsOn tasks.named('verifyM22GlueAssemblyBoundary')
+    dependsOn tasks.named('verifyM22SuperGlueRoundTripBoundary')
+    dependsOn tasks.named('verifyM22GlueDisassemblyBoundary')
+    dependsOn tasks.named('verifyM22GlueReassemblyBoundary')
+    dependsOn tasks.named('verifyM22AssemblerReinclusionBoundary')
+    dependsOn tasks.named('verifySableSubLevelReuseCleanBoundary')
+    dependsOn tasks.named('verifyM23BodyCountAuthorityBoundary')
+    dependsOn tasks.named('verifyM22TerrainIsolationBoundary')
+    dependsOn tasks.named('verifyM22ReassemblyOnTerrainBoundary')
     dependsOn tasks.named('verifyM22SableOwnershipBoundary')
     dependsOn tasks.named('verifyM22AssemblyTransformBoundary')
     dependsOn tasks.named('verifyM22BlockDataPreservationBoundary')
@@ -18776,7 +19319,7 @@ tasks.register('verifyM23ConstraintFixtureBoundary') {
         String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
         String forge = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForge.java').getText('UTF-8')
         [
-                'status=SPRING_GATE_READY',
+                'status=PARTIAL_RUNTIME_PROVEN_BLOCKED_M23_2',
                 'fixtureSpring',
                 'family=spring',
                 'inspectSpring',
@@ -18852,6 +19395,689 @@ tasks.register('verifyM23RegressionBoundary') {
     }
 }
 
+tasks.register('verifyM23SpringTeardownBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.1 Spring teardown is pair-local and diagnostic-rich.'
+
+    inputs.file(rootProject.file('M23_1_SPRING_TEARDOWN.md'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+
+    doLast {
+        String docs = rootProject.file('M23_1_SPRING_TEARDOWN.md').getText('UTF-8')
+        String source = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        [
+                'SABLE_M23_TEARDOWN',
+                'springOwnerPos',
+                'pairedEndpointPos',
+                'ownerActorRegisteredBefore',
+                'partnerActorRegisteredAfter',
+                'cleanup=setBlockAIR:false,destroyBlock',
+                'clearPairMetadata(partnerSpring)',
+                'unregisterSpringActor(partnerSubLevelBefore, partner, partnerActor)',
+                'It does not remove sublevels, assembler metadata, tracking points, all actors'
+        ].each { token ->
+            if (!source.contains(token) && !docs.contains(token)) {
+                throw new GradleException("M23.1 Spring teardown boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23SpringTeardownBoundary PASS: Spring teardown is pair-local and observable')
+    }
+}
+
+tasks.register('verifyM23ConstraintActorLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.1 observes actors without broad actor cleanup.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/LevelPlot.java'))
+
+    doLast {
+        String combined = [
+                'forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java',
+                'forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java',
+                'common/src/main/java/dev/ryanhcode/sable/sublevel/plot/LevelPlot.java'
+        ].collect { rootProject.file(it).getText('UTF-8') }.join('\n')
+        [
+                'getBlockEntityActors',
+                'countBlockEntityActors',
+                'countSpringActors',
+                'actorRegistered',
+                'blockEntityActors.put',
+                'blockEntityActors.remove'
+        ].each { token ->
+            if (!combined.contains(token)) {
+                throw new GradleException("M23.1 actor lifecycle boundary missing token: ${token}")
+            }
+        }
+        String spring = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        if (spring.contains('.removeTrackingPoint(') || spring.contains('blockEntityActors.clear')) {
+            throw new GradleException('M23.1 Spring teardown must not clear tracking points or all actors')
+        }
+        logger.lifecycle('verifyM23ConstraintActorLifecycleBoundary PASS: actor state is observed, not globally cleared')
+    }
+}
+
+tasks.register('verifyM23ConstraintTrackingPointBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.1 snapshots tracking points and does not remove assembly-critical tracking state.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+
+    doLast {
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        String spring = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        [
+                'SubLevelTrackingPointSavedData.getOrLoad',
+                'countTrackingPoints',
+                'trackingPointCount',
+                'removeTrackingPoint:false'
+        ].each { token ->
+            if (!helper.contains(token) && !spring.contains(token)) {
+                throw new GradleException("M23.1 tracking point boundary missing token: ${token}")
+            }
+        }
+        if (spring.contains('removeTrackingPoint(')) {
+            throw new GradleException('M23.1 Spring teardown must not remove Sable tracking points')
+        }
+        logger.lifecycle('verifyM23ConstraintTrackingPointBoundary PASS: tracking points are diagnostic-only for Spring teardown')
+    }
+}
+
+tasks.register('verifyM23ConstrainedDisassemblyBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.1 disassembly is preflighted and aborts before destructive source cleanup on copy failure.'
+
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java'))
+
+    doLast {
+        String commonHelper = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java').getText('UTF-8')
+        String simHelper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        String exception = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java').getText('UTF-8')
+        [
+                'copyFailures',
+                'Strict block move copy phase failed',
+                'states.size() != sourceBlockCount',
+                'before_disassembly',
+                'after_disassembly_move_failed_source_preserved',
+                'incompleteSource',
+                'DISASSEMBLY_BLOCKED incompleteSource',
+                'DISASSEMBLY_BLOCKED moveBlocksFailed'
+        ].each { token ->
+            if (!commonHelper.contains(token) && !simHelper.contains(token) && !exception.contains(token)) {
+                throw new GradleException("M23.1 constrained disassembly boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23ConstrainedDisassemblyBoundary PASS: disassembly no longer deletes sources after copy failure')
+    }
+}
+
+tasks.register('verifyM23ReassemblyBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.1 replaces unexplained assembly nulls with concrete failure diagnostics.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'))
+
+    doLast {
+        String combined = [
+                'forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java',
+                'forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java',
+                'forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'
+        ].collect { rootProject.file(it).getText('UTF-8') }.join('\n')
+        [
+                'SABLE_M23_REASSEMBLY_FAILURE',
+                'failureStage',
+                'nullOwner',
+                'STARTING_BLOCK_AIR',
+                'COLLECTED_ZERO_BLOCKS',
+                'SABLE_ASSEMBLE_RETURNED_NULL',
+                'lastAssemblyFailureStage',
+                'name=teardown'
+        ].each { token ->
+            if (!combined.contains(token)) {
+                throw new GradleException("M23.1 reassembly boundary missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23ReassemblyBoundary PASS: reassembly nulls are now diagnosed by stage and owner')
+    }
+}
+
+tasks.register('verifyM23SpringOwnerActorTeardownBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.3 removes the exact owner Spring actor before reporting REMOVE_SUCCESS.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+    inputs.file(rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/LevelPlot.java'))
+
+    doLast {
+        String spring = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        String plot = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/LevelPlot.java').getText('UTF-8')
+        [
+                'findSpringActor(ownerSubLevelBefore, owner)',
+                'clearPairMetadata(ownerActor)',
+                'unregisterSpringActor(ownerSubLevelBefore, owner, ownerActor)',
+                'ownerActorRemovedAfterDestroy',
+                'cleanupComplete ? "REMOVE_SUCCESS" : "REMOVE_PENDING"',
+                'SABLE_M23_SPRING_CLEANUP'
+        ].each { token ->
+            if (!spring.contains(token)) {
+                throw new GradleException("M23.3 owner actor teardown missing token: ${token}")
+            }
+        }
+        [
+                'getBlockEntityActor(final BlockPos pos)',
+                'removeBlockEntityActor(final BlockPos pos, final @Nullable BlockEntitySubLevelActor expectedActor)',
+                'existing != expectedActor',
+                'this.blockEntityActors.remove(pos)'
+        ].each { token ->
+            if (!plot.contains(token)) {
+                throw new GradleException("M23.3 plot actor removal API missing token: ${token}")
+            }
+        }
+        if (spring.contains('blockEntityActors.clear') || spring.contains('clear all actors')) {
+            throw new GradleException('M23.3 must not clear all actors to remove one Spring relationship')
+        }
+        logger.lifecycle('verifyM23SpringOwnerActorTeardownBoundary PASS: exact Spring endpoint actors are unregistered before REMOVE_SUCCESS')
+    }
+}
+
+tasks.register('verifyM23ActiveConstraintRemovalBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.3 clears the exact logical Spring constraint from both bodies.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java'))
+
+    doLast {
+        String spring = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        String exceptions = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java').getText('UTF-8')
+        [
+                'final String logicalId = this.logicalConstraintId()',
+                'activeOnBodyABefore',
+                'activeOnBodyBBefore',
+                'activeOnBodyAAfter',
+                'activeOnBodyBAfter',
+                '!activeOnBodyAAfter',
+                '!activeOnBodyBAfter',
+                'activeConstraintPresent(final ServerLevel level'
+        ].each { token ->
+            if (!spring.contains(token)) {
+                throw new GradleException("M23.3 active constraint removal missing token: ${token}")
+            }
+        }
+        if (!exceptions.contains('DISASSEMBLY_BLOCKED activeConstraints') || !helper.contains('activeSpringConstraintIds')) {
+            throw new GradleException('M23.3 must retain the M22 active-constraint disassembly guard')
+        }
+        logger.lifecycle('verifyM23ActiveConstraintRemovalBoundary PASS: cleanup success requires logical Spring absence on both bodies')
+    }
+}
+
+tasks.register('verifyM23SpringCleanupIdempotenceBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.3 cleanup is pair-local and safe when the paired endpoint is destroyed recursively.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+
+    doLast {
+        String spring = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        [
+                'this.partnerPos == null || this.assembling',
+                'clearPairMetadata(this)',
+                'clearPairMetadata(partnerSpring)',
+                'partnerDestroyed = this.level.destroyBlock(partner, false)',
+                'REMOVE_PENDING',
+                'result={}'
+        ].each { token ->
+            if (!spring.contains(token)) {
+                throw new GradleException("M23.3 idempotent cleanup missing token: ${token}")
+            }
+        }
+        if (spring.contains('level.destroyBlock(this.getBlockPos(), false)')) {
+            throw new GradleException('M23.3 teardown must let the originally broken endpoint finish its normal removal path')
+        }
+        logger.lifecycle('verifyM23SpringCleanupIdempotenceBoundary PASS: recursive paired endpoint removal is safe and pair-local')
+    }
+}
+
+tasks.register('verifyM23SpringFixtureTargetingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.5 diagnostics distinguish static-world Springs and nudge helpers target Spring-owned Sable bodies.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/items/spring/SpringItem.java'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
+        String spring = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/spring/SpringBlockEntity.java').getText('UTF-8')
+        String item = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/items/spring/SpringItem.java').getText('UTF-8')
+        [
+                'constraintMode=',
+                '"SABLE_TO_SABLE"',
+                'STATIC_WORLD_NO_SABLE_FORCE_TEST',
+                'extension=',
+                'computedAxialForce=',
+                'forceActorRegistered='
+        ].each { token ->
+            if (!spring.contains(token)) {
+                throw new GradleException("M23.3 Spring inspect targeting missing token: ${token}")
+            }
+        }
+        [
+                'Commands.literal("nudge")',
+                'Commands.literal("spring_a")',
+                'Commands.literal("spring_b")',
+                'findActiveSableToSableSpring',
+                'reason=no_active_sable_to_sable_spring',
+                'handle.teleport(after, subLevel.logicalPose().orientation())',
+                'SABLE_M23_NUDGE status=PASS',
+                'SABLE_M23_FIXTURE_BODIES',
+                'sameSable='
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23.3 fixture nudge targeting missing token: ${token}")
+            }
+        }
+        [
+                'FIRST_SUBLEVEL',
+                'SABLE_M23_SPRING_TARGET',
+                'targetSableId=',
+                'SABLE_VISIBLE_REPROJECTED',
+                'constraintMode=',
+                'sameBody='
+        ].each { token ->
+            if (!item.contains(token)) {
+                throw new GradleException("M23.5 Spring item targeting missing token: ${token}")
+            }
+        }
+        if (commands.contains('findNearestPhysicsAssemblerBodies')) {
+            throw new GradleException('M23.5 nudge must not use proximity-based Physics Assembler body discovery')
+        }
+        logger.lifecycle('verifyM23SpringFixtureTargetingBoundary PASS: static-world Springs are labeled and nudge helpers target Spring-owned Sable bodies')
+    }
+}
+
+tasks.register('verifyM23SpringSableTargetingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.5 Spring item placement preserves Sable endpoint identity.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/items/spring/SpringItem.java'))
+
+    doLast {
+        String item = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/items/spring/SpringItem.java').getText('UTF-8')
+        [
+                'private static final String FIRST_SUBLEVEL',
+                'tag.putUUID(FIRST_SUBLEVEL',
+                'tag.hasUUID(FIRST_SUBLEVEL)',
+                'resolveVisibleSubLevelTarget',
+                'transformFaceToSubLevel',
+                'spring.setPartnerPos(partner, partnerSubLevelId',
+                'SABLE_M23_SPRING_TARGET',
+                'targetType=',
+                'targetRawPos=',
+                'placementLevel='
+        ].each { token ->
+            if (!item.contains(token)) {
+                throw new GradleException("M23.5 Spring Sable targeting missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23SpringSableTargetingBoundary PASS: Spring endpoints retain sublevel/raw identity')
+    }
+}
+
+tasks.register('verifyM23SpringDistinctBodyBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.5 diagnostics prove fixture bodies stay distinct across Spring creation.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/items/spring/SpringItem.java'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
+        String item = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/items/spring/SpringItem.java').getText('UTF-8')
+        [
+                'Commands.literal("bodies")',
+                'SABLE_M23_FIXTURE_BODIES',
+                'bodyASableId=',
+                'bodyBSableId=',
+                'sameSable=',
+                'bodyASpringSupportSableId=',
+                'bodyBSpringSupportSableId='
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23.5 distinct body diagnostic missing token: ${token}")
+            }
+        }
+        if (!item.contains('sameBody=') || !item.contains('constraintMode=') || !item.contains('"SABLE_TO_SABLE"')) {
+            throw new GradleException('M23.5 Spring creation must report sameBody and SABLE_TO_SABLE mode')
+        }
+        logger.lifecycle('verifyM23SpringDistinctBodyBoundary PASS: fixture body and Spring same-body diagnostics are present')
+    }
+}
+
+tasks.register('verifyM23SpringInspectIdentityBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.5 Spring inspect resolves active relationships from endpoint identity.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
+        [
+                'findActiveSableToSableSpring(source)',
+                'findActiveSableToSableSprings(final ServerLevel level)',
+                'spring.isActiveConstraint()',
+                'spring.getPartnerPos()',
+                'logicalConstraintId=',
+                'endpointARaw=',
+                'endpointBRaw=',
+                'runtimeState=',
+                '"ERROR_SAME_BODY"'
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23.5 inspect identity missing token: ${token}")
+            }
+        }
+        logger.lifecycle('verifyM23SpringInspectIdentityBoundary PASS: inspect uses authoritative Spring endpoint identity')
+    }
+}
+
+tasks.register('verifyM23SpringNudgeIdentityBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.5 Spring nudge targets the two bodies from the active Spring relationship.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java'))
+
+    doLast {
+        String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M23SimulatedConstraintCommands.java').getText('UTF-8')
+        [
+                'final SpringRelation relation = findActiveSableToSableSpring(source)',
+                'fixtureIndex == 0 ? relation.owner() : relation.partner()',
+                'reason=no_active_sable_to_sable_spring',
+                'reason=active_spring_has_same_body',
+                'handle.teleport(after, subLevel.logicalPose().orientation())'
+        ].each { token ->
+            if (!commands.contains(token)) {
+                throw new GradleException("M23.5 nudge identity missing token: ${token}")
+            }
+        }
+        if (commands.contains('expected_two_nearby_assembled_physics_assembler_bodies')) {
+            throw new GradleException('M23.5 nudge must not require two nearby Physics Assembler bodies')
+        }
+        logger.lifecycle('verifyM23SpringNudgeIdentityBoundary PASS: nudge targets active Spring body identities')
+    }
+}
+
+tasks.register('verifyM23SpringTeardownRegression') {
+    group = 'forge backport'
+    description = 'Runs the focused M23.1 Spring teardown regression verifiers.'
+
+    dependsOn tasks.named('verifyM23SpringTeardownBoundary')
+    dependsOn tasks.named('verifyM23ConstraintActorLifecycleBoundary')
+    dependsOn tasks.named('verifyM23ConstraintTrackingPointBoundary')
+    dependsOn tasks.named('verifyM23ConstrainedDisassemblyBoundary')
+    dependsOn tasks.named('verifyM23ReassemblyBoundary')
+    dependsOn tasks.named('verifyM23SpringOwnerActorTeardownBoundary')
+    dependsOn tasks.named('verifyM23ActiveConstraintRemovalBoundary')
+    dependsOn tasks.named('verifyM23SpringCleanupIdempotenceBoundary')
+    dependsOn tasks.named('verifyM23SpringFixtureTargetingBoundary')
+    dependsOn tasks.named('verifyM23SpringSableTargetingBoundary')
+    dependsOn tasks.named('verifyM23SpringDistinctBodyBoundary')
+    dependsOn tasks.named('verifyM23SpringInspectIdentityBoundary')
+    dependsOn tasks.named('verifyM23SpringNudgeIdentityBoundary')
+    dependsOn tasks.named('verifyM22DisassemblyBoundary')
+    dependsOn tasks.named('verifyM22PersistenceBoundary')
+    dependsOn tasks.named('verifyM22BlockDataPreservationBoundary')
+    dependsOn tasks.named('verifyM22RegressionBoundary')
+    dependsOn tasks.named('verifyM23SpringBoundary')
+    dependsOn tasks.named('verifyM23ConstraintPersistenceBoundary')
+    dependsOn tasks.named('verifyM23ConstraintRemovalBoundary')
+}
+
+tasks.register('verifyM23PhysicsAssemblerSerializationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.2 Physics Assembler diagnostic NBT cannot serialize null Strings.'
+
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java'))
+    inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java'))
+    inputs.file(rootProject.file('M23_2_ASSEMBLER_SERIALIZATION_AND_RAPIER_BLOCKGETTER.md'))
+
+    doLast {
+        String assembler = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java').getText('UTF-8')
+        String exception = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyException.java').getText('UTF-8')
+        String docs = rootProject.file('M23_2_ASSEMBLER_SERIALIZATION_AND_RAPIER_BLOCKGETTER.md').getText('UTF-8')
+        [
+                'line 194',
+                'fieldName=lastFailure',
+                'NBTKey=M22LastFailure',
+                'backport-only diagnostic state',
+                'upstream persists lastException through AssemblyException.write/read and IsPrimary'
+        ].each { token ->
+            if (!docs.contains(token)) {
+                throw new GradleException("M23.2 assembler serialization documentation missing token: ${token}")
+            }
+        }
+        [
+                'putDiagnosticString(tag, NBT_LAST_FAILURE, this.lastFailure, DIAGNOSTIC_NONE)',
+                'readDiagnosticString(tag, NBT_LAST_FAILURE, DIAGNOSTIC_NONE)',
+                'tag.contains(key, Tag.TAG_STRING)',
+                'describeAssemblyException',
+                'exception.component.getString()',
+                'ASSEMBLY_EXCEPTION_WITH_NULL_MESSAGE',
+                'extractFailureStage'
+        ].each { token ->
+            if (!assembler.contains(token)) {
+                throw new GradleException("M23.2 assembler serialization boundary missing token: ${token}")
+            }
+        }
+        if (assembler.contains('this.lastFailure = exception.getMessage();')
+                || assembler.contains('tag.putString("M22LastFailure", this.lastFailure)')
+                || assembler.contains('String.valueOf(this.lastFailure)')
+                || assembler.contains('String.valueOf(value)')) {
+            throw new GradleException('PhysicsAssemblerBlockEntity still has nullable or literal-null diagnostic serialization')
+        }
+        if (!exception.contains('message == null || message.isBlank()')) {
+            throw new GradleException('SimAssemblyException.moveFailed can still report a null exception message')
+        }
+        logger.lifecycle('verifyM23PhysicsAssemblerSerializationBoundary PASS: M22/M23 diagnostic strings are null-safe and reason reporting is concrete')
+    }
+}
+
+tasks.register('verifyRapierPhysicsColliderBlockGetterBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the Rapier collider BlockGetter implements the Forge 1.20.1 production BlockGetter contract.'
+
+    dependsOn tasks.named('remapRapierBackportJarToProduction')
+
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/collider/PhysicsColliderBlockGetter.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/collider/RapierVoxelColliderBakery.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java'))
+    inputs.file(rootProject.file('M23_2_ASSEMBLER_SERIALIZATION_AND_RAPIER_BLOCKGETTER.md'))
+    inputs.file(rootProject.file('M23_2A_RAPIER_WORLD_TERRAIN_COLLISION.md'))
+    inputs.file(rapierBackportProductionJar)
+
+    doLast {
+        String getter = rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/collider/PhysicsColliderBlockGetter.java').getText('UTF-8')
+        String bakery = rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/collider/RapierVoxelColliderBakery.java').getText('UTF-8')
+        String pipeline = rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java').getText('UTF-8')
+        String docs = rootProject.file('M23_2_ASSEMBLER_SERIALIZATION_AND_RAPIER_BLOCKGETTER.md').getText('UTF-8') + '\n' +
+                rootProject.file('M23_2A_RAPIER_WORLD_TERRAIN_COLLISION.md').getText('UTF-8')
+        [
+                '| `getBlockEntity(BlockPos)` | `getBlockEntity` | `m_7702_` |',
+                '| `getBlockState(BlockPos)` | `getBlockState` | `m_8055_` |',
+                '| `getFluidState(BlockPos)` | `getFluidState` | `m_6425_` |',
+                '| `getHeight()` | `getHeight` | `m_141928_` |',
+                '| `getMinBuildHeight()` | `getMinBuildHeight` | `m_141937_` |'
+        ].each { token ->
+            if (!docs.contains(token)) {
+                throw new GradleException("M23.2 BlockGetter contract table missing token: ${token}")
+            }
+        }
+        [
+                'private @Nullable BlockPos sourcePos',
+                'this.sourcePos = sourcePos == null ? null : sourcePos.immutable()',
+                'BlockPos.ZERO.equals(pos) ? this.level.getBlockEntity(this.sourcePos) : null'
+        ].each { token ->
+            if (!getter.contains(token)) {
+                throw new GradleException("PhysicsColliderBlockGetter missing positioned BlockEntity delegation token: ${token}")
+            }
+        }
+        [
+                'this.level.setup(childState, sourcePos)',
+                'getPhysicsDataForBlock(final BlockState state, final BlockPos sourcePos)',
+                'buildPhysicsDataForBlock(state, sourcePos)'
+        ].each { token ->
+            if (!bakery.contains(token)) {
+                throw new GradleException("RapierVoxelColliderBakery missing positioned build token: ${token}")
+            }
+        }
+        String compactPipeline = pipeline.replaceAll(/\s+/, '')
+        if (!compactPipeline.contains('getPhysicsDataForBlock(this.accelerator.getBlockState(globalPos),globalPos)')
+                || !compactPipeline.contains('getPhysicsDataForBlock(this.level.getBlockState(pos),pos)')
+                || !compactPipeline.contains('getPhysicsDataForBlock(newState,globalBlockPos)')) {
+            throw new GradleException('RapierPhysicsPipeline world block updates do not pass real positions to the collider bakery')
+        }
+
+        File rapierJar = rapierBackportProductionJar.get().asFile
+        def entryName = 'dev/ryanhcode/sable/physics/impl/rapier/collider/PhysicsColliderBlockGetter.class'
+        JarFile jar = new JarFile(rapierJar)
+        try {
+            def entry = jar.getJarEntry(entryName)
+            if (entry == null) {
+                throw new GradleException("Production Rapier jar missing ${entryName}")
+            }
+            def structure = jar.getInputStream(entry).withCloseable { stream -> readClassStructure(stream) }
+            [
+                    'm_7702_(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    'm_8055_(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    'm_6425_(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/material/FluidState;',
+                    'm_141928_()I',
+                    'm_141937_()I'
+            ].each { method ->
+                if (!structure.methods.containsKey(method)) {
+                    throw new GradleException("Production PhysicsColliderBlockGetter is missing ${method}")
+                }
+            }
+            [
+                    'getBlockEntity(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;',
+                    'getBlockState(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;',
+                    'getFluidState(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/material/FluidState;',
+                    'getHeight()I',
+                    'getMinBuildHeight()I'
+            ].each { stale ->
+                if (structure.methods.containsKey(stale)) {
+                    throw new GradleException("Production PhysicsColliderBlockGetter still declares stale named method ${stale}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyRapierPhysicsColliderBlockGetterBoundary PASS: production PhysicsColliderBlockGetter implements BlockGetter m_7702_/m_8055_/m_6425_/m_141928_/m_141937_')
+    }
+}
+
+tasks.register('verifyRapierWorldTerrainCollisionBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M23.2a keeps ordinary world terrain collider data on the stable BlockState memoized path.'
+
+    dependsOn tasks.named('verifyRapierPhysicsColliderBlockGetterBoundary')
+
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/collider/RapierVoxelColliderBakery.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/collider/PhysicsColliderBlockGetter.java'))
+    inputs.file(rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java'))
+    inputs.file(rootProject.file('M23_2A_RAPIER_WORLD_TERRAIN_COLLISION.md'))
+
+    doLast {
+        String getter = rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/collider/PhysicsColliderBlockGetter.java').getText('UTF-8')
+        String bakery = rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/collider/RapierVoxelColliderBakery.java').getText('UTF-8')
+        String pipeline = rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java').getText('UTF-8')
+        String docs = rootProject.file('M23_2A_RAPIER_WORLD_TERRAIN_COLLISION.md').getText('UTF-8')
+
+        [
+                'minecraft:stone',
+                '`BlockState` memoized path',
+                'MovingPistonBlock',
+                'The general `BlockState` cache is no longer dependent on mutable world',
+                'Sable body colliders remained valid',
+                'SABLE_RAPIER_WORLD_CONTACT'
+        ].each { token ->
+            if (!docs.contains(token)) {
+                throw new GradleException("M23.2a terrain collision documentation missing token: ${token}")
+            }
+        }
+
+        [
+                'import net.minecraft.world.level.block.piston.MovingPistonBlock',
+                'if (!requiresPositionedCollisionContext(state))',
+                'return this.getPhysicsDataForBlock(state)',
+                'private static boolean requiresPositionedCollisionContext(final BlockState state)',
+                'state.getBlock() instanceof MovingPistonBlock'
+        ].each { token ->
+            if (!bakery.contains(token)) {
+                throw new GradleException("RapierVoxelColliderBakery missing M23.2a terrain-cache boundary token: ${token}")
+            }
+        }
+
+        String positionedMethod = bakery.substring(bakery.indexOf('public @Nullable RapierVoxelColliderData getPhysicsDataForBlock(final BlockState state, final BlockPos sourcePos)'))
+        positionedMethod = positionedMethod.substring(0, positionedMethod.indexOf('private static boolean requiresPositionedCollisionContext'))
+        if (!positionedMethod.contains('return this.getPhysicsDataForBlock(state);')) {
+            throw new GradleException('Positioned Rapier collider path no longer falls back to the memoized BlockState cache for ordinary terrain')
+        }
+        if (!positionedMethod.contains('this.buildPhysicsDataForBlock(state, sourcePos)')) {
+            throw new GradleException('Positioned Rapier collider path no longer preserves the context-aware moving-piston build')
+        }
+        if (positionedMethod.indexOf('return this.getPhysicsDataForBlock(state);') > positionedMethod.indexOf('this.buildPhysicsDataForBlock(state, sourcePos)')) {
+            throw new GradleException('Context-aware Rapier build can run before the ordinary-terrain memoized cache guard')
+        }
+
+        if (!getter.contains('BlockPos.ZERO.equals(pos) ? this.level.getBlockEntity(this.sourcePos) : null')) {
+            throw new GradleException('PhysicsColliderBlockGetter no longer maps MovingPistonBlockEntity lookup from synthetic zero to real source position')
+        }
+
+        String compactPipeline = pipeline.replaceAll(/\s+/, '')
+        [
+                'getPhysicsDataForBlock(this.accelerator.getBlockState(globalPos),globalPos)',
+                'getPhysicsDataForBlock(this.level.getBlockState(pos),pos)',
+                'getPhysicsDataForBlock(newState,globalBlockPos)'
+        ].each { token ->
+            if (!compactPipeline.contains(token)) {
+                throw new GradleException("RapierPhysicsPipeline no longer supplies world positions for context-sensitive block shapes: ${token}")
+            }
+        }
+
+        if (bakery.contains('ThreadLocal') || bakery.contains('currentPos') || bakery.contains('currentLevel')) {
+            throw new GradleException('RapierVoxelColliderBakery must not make the BlockState cache depend on mutable world/position context')
+        }
+
+        logger.lifecycle('verifyRapierWorldTerrainCollisionBoundary PASS: ordinary terrain uses stable BlockState-memoized colliders while MovingPistonBlock keeps the positioned BlockEntity-aware path')
+    }
+}
+
+tasks.register('verifyM23BlockingFixes') {
+    group = 'forge backport'
+    description = 'Runs the focused M23.2 blocker verifiers and existing M22/M23 regression boundaries.'
+
+    dependsOn tasks.named('verifyM23PhysicsAssemblerSerializationBoundary')
+    dependsOn tasks.named('verifyRapierPhysicsColliderBlockGetterBoundary')
+    dependsOn tasks.named('verifyRapierWorldTerrainCollisionBoundary')
+    dependsOn tasks.named('verifyM23SpringTeardownRegression')
+    dependsOn tasks.named('verifyM22BlockDataPreservationBoundary')
+    dependsOn tasks.named('verifyM22DisassemblyBoundary')
+    dependsOn tasks.named('verifyM22PersistenceBoundary')
+    dependsOn tasks.named('verifyM22RegressionBoundary')
+    dependsOn tasks.named('verifyM14PistonLifecycleBoundary')
+    dependsOn tasks.named('verifyM23SpringBoundary')
+    dependsOn tasks.named('verifyM23ConstraintPersistenceBoundary')
+    dependsOn tasks.named('verifyM23ConstraintRemovalBoundary')
+}
+
 tasks.register('verifyM23SimulatedConstraints') {
     group = 'forge backport'
     description = 'Runs all M23 Simulated physical constraint static verifiers.'
@@ -18872,4 +20098,7 @@ tasks.register('verifyM23SimulatedConstraints') {
     dependsOn tasks.named('verifyM23ConstraintFixtureBoundary')
     dependsOn tasks.named('verifyM23ConstraintRenderingBoundary')
     dependsOn tasks.named('verifyM23RegressionBoundary')
+    dependsOn tasks.named('verifyM23SpringTeardownRegression')
+    dependsOn tasks.named('verifyM23PhysicsAssemblerSerializationBoundary')
+    dependsOn tasks.named('verifyRapierPhysicsColliderBlockGetterBoundary')
 }

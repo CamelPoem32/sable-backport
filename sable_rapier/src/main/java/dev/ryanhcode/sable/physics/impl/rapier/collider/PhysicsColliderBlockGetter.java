@@ -20,18 +20,24 @@ public final class PhysicsColliderBlockGetter implements BlockGetter {
 
     private final BlockGetter level;
     private BlockState state;
+    private @Nullable BlockPos sourcePos;
 
     public PhysicsColliderBlockGetter(final BlockGetter level) {
         this.level = level;
     }
 
     public void setup(final BlockState state) {
+        this.setup(state, null);
+    }
+
+    public void setup(final BlockState state, final @Nullable BlockPos sourcePos) {
         this.state = state;
+        this.sourcePos = sourcePos == null ? null : sourcePos.immutable();
     }
 
     @Override
     public @Nullable BlockEntity getBlockEntity(final @NotNull BlockPos pos) {
-        return null;
+        return this.sourcePos != null && BlockPos.ZERO.equals(pos) ? this.level.getBlockEntity(this.sourcePos) : null;
     }
 
     @Override

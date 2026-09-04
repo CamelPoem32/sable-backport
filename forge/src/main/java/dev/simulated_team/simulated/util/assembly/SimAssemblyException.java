@@ -18,6 +18,25 @@ public final class SimAssemblyException {
                 + SimulatedConfig.M22_MAX_BLOCKS_MOVED.get()));
     }
 
+    public static AssemblyException structureTooLarge(final BlockPos startPos, final int visitedCount,
+                                                      final int frontierCount, final int limit,
+                                                      final BlockPos firstUnexpectedPos,
+                                                      final String firstUnexpectedState,
+                                                      final BlockPos enteredFromPos,
+                                                      final String enteredFromState,
+                                                      final String attachmentReason) {
+        return new AssemblyException(Component.literal("SABLE_M22_ASSEMBLY_SELECTION_FAIL"
+                + " startPos=" + startPos.toShortString()
+                + " visitedCount=" + visitedCount
+                + " frontierCount=" + frontierCount
+                + " limit=" + limit
+                + " firstUnexpectedPos=" + describe(firstUnexpectedPos)
+                + " firstUnexpectedState=" + firstUnexpectedState
+                + " enteredFromPos=" + describe(enteredFromPos)
+                + " enteredFromState=" + enteredFromState
+                + " attachmentReason=" + attachmentReason));
+    }
+
     public static AssemblyException unmovableBlock(final BlockPos pos, final BlockState state) {
         return new AssemblyException(Component.literal("Simulated M22 cannot move "
                 + state.getBlock().builtInRegistryHolder().key().location() + " at " + pos.toShortString()));
@@ -37,5 +56,29 @@ public final class SimAssemblyException {
 
     public static AssemblyException activeConstraint(final Collection<String> logicalIds) {
         return new AssemblyException(Component.literal("DISASSEMBLY_BLOCKED activeConstraints=" + logicalIds));
+    }
+
+    public static AssemblyException incompleteSource(final int expected, final int actual) {
+        return new AssemblyException(Component.literal("DISASSEMBLY_BLOCKED incompleteSource expectedBlocks="
+                + expected + " actualBlocks=" + actual));
+    }
+
+    public static AssemblyException moveFailed(final RuntimeException exception) {
+        return new AssemblyException(Component.literal("DISASSEMBLY_BLOCKED moveBlocksFailed="
+                + exception.getClass().getSimpleName() + " message=" + describe(exception)));
+    }
+
+    public static AssemblyException assemblyFailed(final String stage, final String nullOwner) {
+        return new AssemblyException(Component.literal("ASSEMBLY_FAILED failureStage=" + stage
+                + " nullOwner=" + nullOwner));
+    }
+
+    private static String describe(final RuntimeException exception) {
+        final String message = exception.getMessage();
+        return message == null || message.isBlank() ? exception.getClass().getName() : message;
+    }
+
+    private static String describe(final BlockPos pos) {
+        return pos == null ? "none" : pos.toShortString();
     }
 }

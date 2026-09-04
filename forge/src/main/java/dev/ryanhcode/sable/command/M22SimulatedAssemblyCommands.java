@@ -6,6 +6,8 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.simibubi.create.AllBlocks;
+import com.simibubi.create.content.contraptions.AssemblyException;
+import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import dev.ryanhcode.sable.api.command.SableCommandHelper;
 import dev.ryanhcode.sable.api.command.SubLevelArgumentType;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
@@ -16,10 +18,12 @@ import dev.simulated_team.simulated.content.blocks.physics_assembler.PhysicsAsse
 import dev.simulated_team.simulated.index.SimulatedBlocks;
 import dev.simulated_team.simulated.index.SimulatedConfig;
 import dev.simulated_team.simulated.util.SimAssemblyHelper;
+import dev.simulated_team.simulated.util.assembly.SimAssemblyContraption;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Items;
@@ -31,7 +35,13 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import org.joml.Vector3d;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Set;
 
 public final class M22SimulatedAssemblyCommands {
 
@@ -72,8 +82,12 @@ public final class M22SimulatedAssemblyCommands {
     }
 
     private static int fixture(final CommandSourceStack source, final String name) {
+        if ("assembly_boundary".equals(name)) {
+            return fixtureAssemblyBoundary(source);
+        }
         if (!"basic_assembly".equals(name)) {
-            send(source, "SABLE_M22_FIXTURE status=FAIL unknownFixture=" + name + " expected=basic_assembly");
+            send(source, "SABLE_M22_FIXTURE status=FAIL unknownFixture=" + name
+                    + " expected=basic_assembly|assembly_boundary");
             return 0;
         }
 
@@ -111,6 +125,61 @@ public final class M22SimulatedAssemblyCommands {
                 + " shaftPos=" + shaftPos.toShortString()
                 + " trigger=right_click_physics_assembler");
         return 1;
+    }
+
+    private static int fixtureAssemblyBoundary(final CommandSourceStack source) {
+        final ServerLevel level = source.getLevel();
+        final BlockPos origin = BlockPos.containing(source.getPosition()).offset(4, 1, 0);
+        final Set<BlockPos> platform = new HashSet<>();
+
+        for (int x = -3; x <= 3; x++) {
+            for (int z = -3; z <= 3; z++) {
+                final BlockPos platformPos = origin.offset(x, -1, z);
+                platform.add(platformPos);
+                level.setBlock(platformPos, Blocks.STONE.defaultBlockState(), 3);
+            }
+        }
+
+        final BlockPos assemblerPos = origin.above();
+        final BlockPos center = origin;
+        final BlockPos east = origin.east();
+        final BlockPos west = origin.west();
+        final BlockPos north = origin.north();
+        final BlockPos south = origin.south();
+
+        level.setBlock(center, Blocks.SMOOTH_STONE.defaultBlockState(), 3);
+        level.setBlock(east, Blocks.COPPER_BLOCK.defaultBlockState(), 3);
+        level.setBlock(west, Blocks.CUT_COPPER.defaultBlockState(), 3);
+        level.setBlock(north, Blocks.AMETHYST_BLOCK.defaultBlockState(), 3);
+        level.setBlock(south, Blocks.CHEST.defaultBlockState().setValue(ChestBlock.FACING, Direction.SOUTH), 3);
+        level.setBlock(assemblerPos, SimulatedBlocks.PHYSICS_ASSEMBLER.get().defaultBlockState(), 3);
+        glue(level, center, east);
+        glue(level, center, west);
+        glue(level, center, north);
+        glue(level, center, south);
+        glue(level, center, assemblerPos);
+
+        final BlockEntity chest = level.getBlockEntity(south);
+        if (chest instanceof final ChestBlockEntity chestBlockEntity) {
+            chestBlockEntity.setItem(0, Items.EMERALD.getDefaultInstance());
+            chestBlockEntity.setChanged();
+        }
+
+        final SelectionPreview preview = previewAssemblySelection(level, center, platform);
+        send(source, "SABLE_M22_FIXTURE status=PASS name=assembly_boundary"
+                + " assemblerPos=" + assemblerPos.toShortString()
+                + " payloadOrigin=" + center.toShortString()
+                + " supportPlatform=ordinary_minecraft_stone"
+                + " glue=CREATE_SUPER_GLUE"
+                + " trigger=right_click_physics_assembler");
+        send(source, "SABLE_M22_ASSEMBLY_SELECTION startPos=" + center.toShortString()
+                + " gluedBlockCount=5"
+                + " selectedBlockCount=" + preview.selectedBlockCount()
+                + " platformBlockCount=" + platform.size()
+                + " selectedPlatformBlocks=" + preview.selectedPlatformBlocks()
+                + " selectionBounds=" + preview.selectionBounds()
+                + " selectionSha256=" + preview.selectionSha256());
+        return preview.selectedPlatformBlocks() == 0 ? 1 : 0;
     }
 
     private static int inspect(final CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
@@ -195,6 +264,66 @@ public final class M22SimulatedAssemblyCommands {
             }
         }
         return count;
+    }
+
+    private static void glue(final ServerLevel level, final BlockPos first, final BlockPos second) {
+        level.addFreshEntity(new SuperGlueEntity(level, SuperGlueEntity.span(first, second)));
+    }
+
+    private static SelectionPreview previewAssemblySelection(final ServerLevel level, final BlockPos start,
+                                                             final Set<BlockPos> platform) {
+        final SimAssemblyContraption contraption = new SimAssemblyContraption(null);
+        try {
+            contraption.searchMovedStructure(level, start);
+        } catch (final AssemblyException exception) {
+            return new SelectionPreview(0, 0, "failed:" + exception.getMessage(), "failed");
+        }
+        int selectedPlatformBlocks = 0;
+        for (final BlockPos selected : contraption.getBlocks()) {
+            if (platform.contains(selected)) {
+                selectedPlatformBlocks++;
+            }
+        }
+        return new SelectionPreview(contraption.getBlocks().size(), selectedPlatformBlocks,
+                describeBounds(contraption.getBlocks()), selectionDigest(level, contraption.getBlocks()));
+    }
+
+    private static String describeBounds(final Collection<BlockPos> positions) {
+        if (positions.isEmpty()) {
+            return "empty";
+        }
+        final int minX = positions.stream().map(BlockPos::getX).min(Comparator.naturalOrder()).orElse(0);
+        final int minY = positions.stream().map(BlockPos::getY).min(Comparator.naturalOrder()).orElse(0);
+        final int minZ = positions.stream().map(BlockPos::getZ).min(Comparator.naturalOrder()).orElse(0);
+        final int maxX = positions.stream().map(BlockPos::getX).max(Comparator.naturalOrder()).orElse(0);
+        final int maxY = positions.stream().map(BlockPos::getY).max(Comparator.naturalOrder()).orElse(0);
+        final int maxZ = positions.stream().map(BlockPos::getZ).max(Comparator.naturalOrder()).orElse(0);
+        return minX + "," + minY + "," + minZ + "->" + maxX + "," + maxY + "," + maxZ;
+    }
+
+    private static String selectionDigest(final ServerLevel level, final Collection<BlockPos> positions) {
+        try {
+            final MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            positions.stream()
+                    .sorted(Comparator.comparingLong(BlockPos::asLong))
+                    .forEach(pos -> digest.update((pos.toShortString() + "|"
+                            + level.getBlockState(pos) + "\n").getBytes(StandardCharsets.UTF_8)));
+            return toHex(digest.digest());
+        } catch (final NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
+    }
+
+    private static String toHex(final byte[] bytes) {
+        final StringBuilder result = new StringBuilder(bytes.length * 2);
+        for (final byte value : bytes) {
+            result.append(String.format("%02x", value));
+        }
+        return result.toString();
+    }
+
+    private record SelectionPreview(int selectedBlockCount, int selectedPlatformBlocks,
+                                    String selectionBounds, String selectionSha256) {
     }
 
     private static void send(final CommandSourceStack source, final String message) {

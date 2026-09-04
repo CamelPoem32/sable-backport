@@ -3261,3 +3261,360 @@ Expected for M23:
 
 Do not require torsion, swivel, rope/winch, docking, sensors, Aeronautics, or
 multiplayer qualification in M23.
+
+## M23.1 Spring Teardown Runtime Sequence
+
+M23.1 must be tested manually. Codex must not launch Minecraft.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world.
+/sable m23 status
+/sable m23 fixture spring teardown
+Right-click the printed bodyAAssembler.
+Right-click the printed bodyBAssembler.
+Use the Spring item on the printed bodyASpringSupport outward face.
+Use the Spring item on the printed bodyBSpringSupport outward face.
+/sable m23 inspect spring
+Wait briefly and verify the Spring pulls.
+Save and quit.
+Reload the same world.
+/sable m23 inspect spring
+Attempt normal M22 disassembly and verify DISASSEMBLY_BLOCKED activeConstraints.
+Break exactly one Spring endpoint.
+/sable m22 inspect @n
+Disassemble body A normally.
+Verify every expected A block restored, including the named chest item.
+Disassemble body B normally.
+Verify every expected B block restored, including the Create shaft.
+Reassemble body A.
+Reassemble body B.
+Verify neither reports ASSEMBLY_FAILED or null.
+Disassemble both again.
+Verify no missing or duplicate blocks.
+/sable m22 fixture basic_assembly
+Assemble, nudge, save/reload, disassemble, and reassemble once without Spring.
+```
+
+Expected for M23.1:
+
+- `SABLE_M23_TEARDOWN` prints both endpoints, Sable ids, handle validity, actor
+  registration before/after, block states before/after, and confirms cleanup is
+  limited to paired Spring endpoint destruction and Spring metadata clearing.
+- `SABLE_M23_BODY_SNAPSHOT` shows stable stored block counts and block-set
+  digests until intentional Spring endpoint removal changes only Spring blocks.
+- If a source body is already incomplete before disassembly, M22 reports
+  `DISASSEMBLY_BLOCKED incompleteSource` and preserves the source sublevel.
+- If any block copy fails during restore, M22 reports
+  `DISASSEMBLY_BLOCKED moveBlocksFailed` and does not delete the source block
+  set.
+- Reassembly failures report `SABLE_M23_REASSEMBLY_FAILURE` with a concrete
+  `failureStage` and `nullOwner`; accepted runtime must show no such failure.
+
+## M23.2 Assembler Serialization And Rapier BlockGetter Runtime Sequence
+
+M23.2 must be tested manually. Codex must not launch Minecraft.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world.
+/sable m23 status
+/sable m23 fixture spring teardown
+Right-click the printed bodyAAssembler.
+Right-click the printed bodyBAssembler.
+Save and quit before adding a Spring.
+Reload the same world.
+Confirm the log has no PhysicsAssemblerBlockEntity exception trying to write state.
+Disassemble both bodies normally.
+Reassemble both bodies normally.
+Verify neither reports reason=null.
+/sable m23 fixture spring teardown
+Right-click the printed bodyAAssembler.
+Right-click the printed bodyBAssembler.
+Use the Spring item on the printed bodyASpringSupport outward face.
+Use the Spring item on the printed bodyBSpringSupport outward face.
+Wait briefly and verify the Spring pulls.
+Save and quit.
+Reload the same world.
+/sable m23 inspect spring
+Attempt normal M22 disassembly and verify DISASSEMBLY_BLOCKED activeConstraints.
+Break exactly one Spring endpoint.
+/sable m23 inspect spring
+Verify runtimeState=NOT_FOUND or no active constraint/actor state remains.
+Disassemble body A normally and verify every expected block restores.
+Disassemble body B normally and verify every expected block restores.
+Verify the chest canary and Create shaft are present.
+Reassemble body A.
+Reassemble body B.
+Verify neither reports reason=null.
+Disassemble both again and verify no missing or duplicate blocks.
+On an assembled Sable, break and place ordinary blocks.
+Exercise a piston or moving-piston update if present in the local test setup.
+Verify no AbstractMethodError from PhysicsColliderBlockGetter.
+```
+
+Expected for M23.2:
+
+- Physics Assembler save/load and disassembly no longer throw from
+  `CompoundTag.putString`.
+- `SABLE_M22_ASSEMBLER status=FAIL` always includes a concrete reason if a real
+  assembly failure occurs.
+- The M23.1 moveBlocks source-preservation guard remains intact.
+- Spring force, save/reload, active-disassembly blocking, and endpoint removal
+  remain unchanged.
+- Rapier block-update collision does not throw
+  `PhysicsColliderBlockGetter` / `BlockGetter.m_7702_` `AbstractMethodError`.
+
+## M23.2a Rapier World Terrain Collision Runtime Sequence
+
+M23.2a must be tested manually. Codex must not launch Minecraft.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world.
+Create one tiny M22 Sable body above a large plain minecraft:stone platform.
+Release it downward, nudge it downward, or let gravity act.
+Verify the body rests on stone and does not penetrate or fall through.
+Verify/log SABLE_RAPIER_WORLD_CONTACT with body collider present, terrain collider present, and contact pair present.
+Load several existing Sables that were stable before M23.2.
+Verify they remain supported by visible ordinary terrain.
+Place and break ordinary stone near or on an assembled Sable.
+Verify no terrain collision loss and no server crash.
+Exercise one piston or moving-piston update.
+Verify no PhysicsColliderBlockGetter / BlockGetter.m_7702_ AbstractMethodError.
+Resume the M23.2 Spring teardown sequence only after the plain-stone gate passes.
+```
+
+Expected for M23.2a:
+
+- `minecraft:stone` uses the stable `BlockState`-memoized Rapier collider path.
+- `MovingPistonBlock` keeps the positioned BlockEntity-aware path needed by the
+  Forge 1.20.1 `BlockGetter` contract.
+- Sable body colliders remain valid and parent-world terrain colliders are
+  present, non-empty, correctly located, and contact-compatible.
+- No Spring force, Spring persistence, rendering, or M23.1 transaction-safety
+  behavior changes.
+
+## M23.3 Spring Owner Actor Teardown Runtime Sequence
+
+M23.3 must be tested manually with a fresh fixture. Codex must not launch
+Minecraft.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world in a fresh area away from damaged prior fixtures.
+/sable m23 fixture spring teardown
+Right-click the printed bodyAAssembler.
+Right-click the printed bodyBAssembler.
+Use the Spring item on the printed bodyASpringSupport outward face.
+Use the Spring item on the printed bodyBSpringSupport outward face.
+/sable m23 inspect spring
+Verify constraintMode=SABLE_TO_SABLE and both body handles valid.
+Attempt normal M22 disassembly and verify DISASSEMBLY_BLOCKED activeConstraints.
+Break exactly one Spring endpoint.
+/sable m23 inspect spring
+Verify runtimeState=NOT_FOUND or no active Spring remains.
+Check the log for SABLE_M23_SPRING_CLEANUP result=SUCCESS.
+Verify actorCountAfterA=0, actorCountAfterB=0, activeOnBodyAAfter=false, activeOnBodyBAfter=false.
+Disassemble both bodies normally.
+Reassemble both bodies.
+Connect Spring again.
+/sable m23 nudge spring_a -2 0 0
+/sable m23 nudge spring_b 2 0 0
+/sable m23 inspect spring
+Verify currentLength > restLength and observe real restoring motion.
+Save and quit with Spring active.
+Reload the same world.
+/sable m23 inspect spring
+Break one Spring endpoint.
+Verify SABLE_M23_SPRING_CLEANUP result=SUCCESS again.
+Disassemble both bodies normally.
+Verify no stale activeConstraints, no block loss, and no duplication.
+```
+
+Expected for M23.3:
+
+- `REMOVE_SUCCESS` appears only after both endpoint actors and the logical
+  active-constraint id are absent from both bodies.
+- `REMOVE_PENDING` appears if cleanup has not truly completed.
+- Static-world Spring pairs are labeled
+  `STATIC_WORLD_NO_SABLE_FORCE_TEST` and do not count as M23 Spring acceptance.
+- `spring_a` / `spring_b` nudge helpers target real assembled Sables through
+  the existing physics handle.
+
+## M23.4 Assembly Selection Runtime Sequence
+
+M23.4 must be tested manually with a fresh fixture. Codex must not launch
+Minecraft.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world in a fresh area.
+/sable m22 fixture assembly_boundary
+Verify SABLE_M22_ASSEMBLY_SELECTION selectedPlatformBlocks=0.
+Right-click the printed Physics Assembler.
+Verify no maxBlocksMoved failure and the ordinary stone platform remains in the parent world.
+Disassemble normally so the payload restores touching the ordinary platform.
+Right-click the restored Physics Assembler again.
+Verify reassembly succeeds and selected platform blocks remain 0.
+/sable m23 fixture spring basic
+Verify both bodies visibly rest on ordinary support platforms.
+Right-click bodyAAssembler.
+Right-click bodyBAssembler.
+Verify neither reports maxBlocksMoved.
+Verify both support platforms remain in the parent world.
+Connect Spring normally.
+/sable m23 inspect spring
+Verify constraintMode=SABLE_TO_SABLE.
+Break exactly one Spring endpoint.
+/sable m23 inspect spring
+Verify runtimeState=NOT_FOUND is expected after successful removal.
+Disassemble both bodies normally.
+Verify blocks restore onto/against the ordinary platforms.
+Reassemble body A and body B directly from that position.
+Verify neither absorbs its platform and no block loss or duplication occurs.
+Only after this, resume the force/nudge test.
+```
+
+Expected for M23.4:
+
+- Ordinary stone touching ordinary stone is not an assembly ownership signal.
+- Create Super Glue connects the intended payload and simplified Physics
+  Assembler.
+- Unglued support terrain is never selected by the M22 assembler.
+- Create Super Glue selected for the body is moved into the Sable on assembly
+  and restored to parent-world coordinates on disassembly.
+- M23.3 Spring teardown remains unchanged: `NOT_FOUND` after endpoint removal is
+  expected.
+
+## M23.5 Spring Sable Targeting Runtime Sequence
+
+M23.5 must be tested manually with a fresh fixture. Codex must not launch
+Minecraft.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world in a fresh area.
+/sable m23 fixture spring basic
+Right-click bodyAAssembler.
+Right-click bodyBAssembler.
+/sable m23 inspect bodies
+Verify bodyASableId and bodyBSableId are present and sameSable=false.
+Use the Spring item on bodyASpringSupport outward face.
+Use the Spring item on bodyBSpringSupport outward face.
+Verify SABLE_M23_SPRING_TARGET reports SABLE_RAW or SABLE_VISIBLE_REPROJECTED, not STATIC_WORLD.
+Verify CREATE_SUCCESS reports constraintMode=SABLE_TO_SABLE and sameBody=false.
+/sable m23 inspect spring
+Verify runtimeState=ACTIVE, bodyA/bodyB match the two fixture Sable UUIDs, and both handles are valid.
+/sable m23 nudge spring_a -2 0 0
+/sable m23 inspect spring
+Verify currentLength changed.
+/sable m23 nudge spring_b 2 0 0
+/sable m23 inspect spring
+Verify currentLength > restLength by about 2 blocks and observe restoring motion.
+Break exactly one Spring endpoint.
+/sable m23 inspect spring
+Verify runtimeState=NOT_FOUND is expected after successful removal.
+Disassemble both bodies normally.
+Verify no stale activeConstraints, no block loss, and no duplication.
+```
+
+Expected for M23.5:
+
+- Spring endpoints created on assembled Sables use raw hidden Sable positions
+  and preserve sublevel UUID identity.
+- Inspect discovers the active Spring from real endpoint state, not proximity.
+- Nudge targets the bodies referenced by the active Spring relationship.
+- Static-world Spring pairs do not count as M23 Sable Spring acceptance.
+- M23.3 teardown, M23.4 assembly selection, Rapier collision, and Spring force
+  equations remain unchanged.
+
+## M23.5b Super Glue Roundtrip Runtime Sequence
+
+M23.5b must be tested manually with a fresh fixture. Codex must not launch
+Minecraft.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world in a fresh area.
+/sable m23 fixture spring basic
+Verify SABLE_M22_ASSEMBLY_SELECTION selectedBlockCount=6 and selectedPlatformBlocks=0.
+Right-click bodyAAssembler once.
+Right-click bodyBAssembler once.
+/sable m23 inspect bodies
+Verify status=PASS, sameSable=false, bodyABlockCount=6, bodyBBlockCount=6.
+Do not place Spring yet.
+Disassemble body A normally.
+Disassemble body B normally.
+Verify SABLE_M22_GLUE_ROUNDTRIP AFTER_DISASSEMBLY restoredGlueCount=5 for each body.
+Right-click bodyAAssembler again.
+Right-click bodyBAssembler again.
+/sable m23 inspect bodies
+Verify both bodies are again six-block Sables with assembler and Spring support present.
+Save and quit while both six-block bodies are assembled.
+Reload the world.
+Disassemble both bodies.
+Reassemble both bodies.
+/sable m23 inspect bodies
+Verify status=PASS again and no one-block Sables are created.
+Only now place the Spring and continue the M23.5 SABLE_TO_SABLE targeting sequence.
+```
+
+Expected for M23.5b:
+
+- Create Super Glue selected during assembly is present inside the Sable raw
+  plot after assembly.
+- Raw Super Glue is captured before sublevel entity cleanup during disassembly.
+- Restored parent-world Super Glue has visible AABBs equivalent to the original
+  glue graph.
+- Reassembly selection returns the original six-block body with
+  `assemblerPresent=true`.
+- M23.4 terrain isolation remains intact and Spring targeting is not judged
+  until valid six-block Sables exist.
+
+## M23.6 Body Count Audit Runtime Sequence
+
+M23.6 must be tested manually with a fresh fixture. Codex must not launch
+Minecraft.
+
+Shortest manual sequence:
+
+```text
+Open the existing test world in a fresh area.
+/sable m23 fixture spring basic
+Verify SABLE_M22_ASSEMBLY_SELECTION selectedBlockCount=6 and selectedPlatformBlocks=0.
+Right-click bodyAAssembler once.
+Right-click bodyBAssembler once.
+/sable m23 inspect bodies
+Check SABLE_M23_BODY_COUNT_AUDIT for each candidate Physics Assembler body.
+Verify the accepted SABLE_M23_FIXTURE_BODIES line reports status=PASS,
+bodyABlockCount=6, bodyBBlockCount=6, and sameSable=false.
+If any audit candidate reports nonAirBlockCount=23, inspect
+SABLE_M23_BODY_COUNT_AUDIT_BLOCKS and confirm whether it is an unrelated old
+body or a real stale raw plot.
+Verify collisionUploadedBlockCount and mass match the accepted six-block bodies.
+```
+
+Expected for M23.6:
+
+- `bodyABlockCount` and `bodyBBlockCount` are raw non-air SubLevel storage
+  counts for the audited candidate bodies.
+- Accepted fixture bodies are nearest valid six-block Physics Assembler bodies,
+  not unrelated older Sables elsewhere in the world.
+- Any true 23-block candidate prints raw block IDs and positions for follow-up
+  root-cause analysis.
+- M23.4 selection remains `selectedBlockCount=6` and `selectedPlatformBlocks=0`.

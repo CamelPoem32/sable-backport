@@ -11,6 +11,7 @@ import dev.simulated_team.simulated.index.SimulatedBlockEntityTypes;
 import dev.simulated_team.simulated.index.SimulatedConfig;
 import dev.simulated_team.simulated.util.SimAssemblyHelper;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -23,14 +24,29 @@ import org.joml.Vector3d;
 
 public class PhysicsAssemblerBlockEntity extends BlockEntity {
 
+    private static final String STATE_PARENT_WORLD = "PARENT_WORLD";
+    private static final String DIAGNOSTIC_NONE = "none";
+    private static final String NBT_PRIMARY_ASSEMBLER = "M22PrimaryAssembler";
+    private static final String NBT_LIFECYCLE_STATE = "M22LifecycleState";
+    private static final String NBT_LAST_FAILURE = "M22LastFailure";
+    private static final String NBT_CANDIDATE_BLOCKS = "M22CandidateBlocks";
+    private static final String NBT_ACCEPTED_BLOCKS = "M22AcceptedBlocks";
+    private static final String NBT_REJECTED_BLOCKS = "M22RejectedBlocks";
+    private static final String NBT_BLOCK_ENTITY_COUNT = "M22BlockEntityCount";
+    private static final String NBT_VISIBLE_DELTA_AFTER_ASSEMBLY = "M22VisibleDeltaAfterAssembly";
+    private static final String NBT_LAST_DISASSEMBLY_RESULT = "M23LastDisassemblyResult";
+    private static final String NBT_LAST_ASSEMBLY_FAILURE_STAGE = "M23LastAssemblyFailureStage";
+
     private boolean primaryAssembler;
-    private String lastLifecycleState = "PARENT_WORLD";
-    private String lastFailure = "none";
+    private String lastLifecycleState = STATE_PARENT_WORLD;
+    private String lastFailure = DIAGNOSTIC_NONE;
     private int lastCandidateBlocks;
     private int lastAcceptedBlocks;
     private int lastRejectedBlocks;
     private int lastBlockEntityCount;
     private double lastVisibleDeltaAfterAssembly;
+    private String lastDisassemblyResult = DIAGNOSTIC_NONE;
+    private String lastAssemblyFailureStage = DIAGNOSTIC_NONE;
 
     public PhysicsAssemblerBlockEntity(final BlockPos pos, final BlockState state) {
         super(SimulatedBlockEntityTypes.PHYSICS_ASSEMBLER.get(), pos, state);
@@ -54,7 +70,8 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
                         + this.lastLifecycleState), true);
             }
         } catch (final AssemblyException exception) {
-            this.lastFailure = exception.getMessage();
+            this.lastFailure = describeAssemblyException(exception);
+            this.lastAssemblyFailureStage = extractFailureStage(this.lastFailure);
             this.lastLifecycleState = "FAILED";
             this.setChanged();
             if (player != null) {
@@ -81,7 +98,9 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
         this.lastVisibleDeltaAfterAssembly = result.visibleDeltaAfterAssembly();
         this.lastBlockEntityCount = countBlockEntities(level, result.subLevel());
         this.lastLifecycleState = "ASSEMBLED";
-        this.lastFailure = "none";
+        this.lastFailure = DIAGNOSTIC_NONE;
+        this.lastAssemblyFailureStage = DIAGNOSTIC_NONE;
+        this.lastDisassemblyResult = DIAGNOSTIC_NONE;
         this.setChanged();
 
         Sable.LOGGER.info("SABLE_M22_ASSEMBLY_TRANSFORM parentAnchor={} localAnchor={} rawAnchor={} visibleOrigin={} visibleDeltaAfterAssembly={}",
@@ -96,18 +115,21 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
         final BlockPos goal = SimAssemblyHelper.currentVisibleBlockPos(subLevel, this.getBlockPos());
         final SimAssemblyHelper.DisassemblyResult result =
                 SimAssemblyHelper.disassembleSubLevel(level, subLevel, this.getBlockPos(), goal,
-                        SimAssemblyHelper.rotationFrom90DegRots(0));
+                        SimAssemblyHelper.rotationFrom90DegRots(0), this.lastAcceptedBlocks);
         this.lastAcceptedBlocks = result.restoredBlockCount();
         this.lastBlockEntityCount = result.restoredBlockEntityCount();
         this.lastLifecycleState = "DISASSEMBLED";
         this.primaryAssembler = false;
-        this.lastFailure = "none";
+        this.lastFailure = DIAGNOSTIC_NONE;
+        this.lastDisassemblyResult = "restoredBlockCount=" + result.restoredBlockCount()
+                + " restoredBlockEntityCount=" + result.restoredBlockEntityCount()
+                + " oldSableRemoved=" + result.oldSableRemoved();
         this.setChanged();
     }
 
     protected void setParent(final Level level) {
         final SubLevel subLevel = Sable.HELPER.getContaining(level, this.getBlockPos());
-        this.lastLifecycleState = subLevel instanceof ServerSubLevel ? "ASSEMBLED" : "PARENT_WORLD";
+        this.lastLifecycleState = subLevel instanceof ServerSubLevel ? "ASSEMBLED" : STATE_PARENT_WORLD;
         this.setChanged();
     }
 
@@ -117,6 +139,8 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
             final MassData mass = serverSubLevel.getMassTracker();
             final SubLevelPhysicsSystem physicsSystem = SubLevelPhysicsSystem.get(serverSubLevel.getLevel());
             final RigidBodyHandle handle = physicsSystem == null ? null : physicsSystem.getPhysicsHandle(serverSubLevel);
+            final SimAssemblyHelper.BodySnapshot snapshot = SimAssemblyHelper.snapshotBody(
+                    serverSubLevel.getLevel(), serverSubLevel, this.lastAcceptedBlocks);
             return "state=ASSEMBLED sableId=" + serverSubLevel.getUniqueId()
                     + " blockCount=" + SimAssemblyHelper.collectBlocks(serverSubLevel.getLevel(), serverSubLevel).size()
                     + " blockEntityCount=" + countBlockEntities(serverSubLevel.getLevel(), serverSubLevel)
@@ -127,7 +151,15 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
                     + " bodyRegistered=" + (physicsSystem != null && physicsSystem.getPipeline().isBodyRegistered(serverSubLevel))
                     + " collisionGeometryPresent=" + (physicsSystem != null && physicsSystem.hasUploadedCollisionGeometry(serverSubLevel))
                     + " serializationReady=" + (serverSubLevel.getLastSerializationPointer() != null)
-                    + " handleValid=" + (handle != null && handle.isValid());
+                    + " handleValid=" + (handle != null && handle.isValid())
+                    + " activeConstraintCount=" + SimAssemblyHelper.activeSpringConstraintIds(serverSubLevel.getLevel(), serverSubLevel).size()
+                    + " springActorCount=" + SimAssemblyHelper.countSpringActors(serverSubLevel)
+                    + " trackingPointCount=" + snapshot.trackingPointCount()
+                    + " storedBlockCount=" + snapshot.storedBlockCount()
+                    + " assemblerPresent=" + snapshot.assemblerPresent()
+                    + " disassemblyEligible=" + SimAssemblyHelper.activeSpringConstraintIds(serverSubLevel.getLevel(), serverSubLevel).isEmpty()
+                    + " lastDisassemblyResult=" + this.lastDisassemblyResult
+                    + " lastAssemblyFailureStage=" + this.lastAssemblyFailureStage;
         }
 
         return "state=" + this.lastLifecycleState
@@ -137,7 +169,9 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
                 + " rejectedBlocks=" + this.lastRejectedBlocks
                 + " blockEntityCount=" + this.lastBlockEntityCount
                 + " visibleDeltaAfterAssembly=" + this.lastVisibleDeltaAfterAssembly
-                + " lastFailure=" + this.lastFailure;
+                + " lastFailure=" + this.lastFailure
+                + " lastDisassemblyResult=" + this.lastDisassemblyResult
+                + " lastAssemblyFailureStage=" + this.lastAssemblyFailureStage;
     }
 
     private static int countBlockEntities(final ServerLevel level, final SubLevel subLevel) {
@@ -167,26 +201,72 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
     @Override
     protected void saveAdditional(final CompoundTag tag) {
         super.saveAdditional(tag);
-        tag.putBoolean("M22PrimaryAssembler", this.primaryAssembler);
-        tag.putString("M22LifecycleState", this.lastLifecycleState);
-        tag.putString("M22LastFailure", this.lastFailure);
-        tag.putInt("M22CandidateBlocks", this.lastCandidateBlocks);
-        tag.putInt("M22AcceptedBlocks", this.lastAcceptedBlocks);
-        tag.putInt("M22RejectedBlocks", this.lastRejectedBlocks);
-        tag.putInt("M22BlockEntityCount", this.lastBlockEntityCount);
-        tag.putDouble("M22VisibleDeltaAfterAssembly", this.lastVisibleDeltaAfterAssembly);
+        tag.putBoolean(NBT_PRIMARY_ASSEMBLER, this.primaryAssembler);
+        putDiagnosticString(tag, NBT_LIFECYCLE_STATE, this.lastLifecycleState, STATE_PARENT_WORLD);
+        putDiagnosticString(tag, NBT_LAST_FAILURE, this.lastFailure, DIAGNOSTIC_NONE);
+        tag.putInt(NBT_CANDIDATE_BLOCKS, this.lastCandidateBlocks);
+        tag.putInt(NBT_ACCEPTED_BLOCKS, this.lastAcceptedBlocks);
+        tag.putInt(NBT_REJECTED_BLOCKS, this.lastRejectedBlocks);
+        tag.putInt(NBT_BLOCK_ENTITY_COUNT, this.lastBlockEntityCount);
+        tag.putDouble(NBT_VISIBLE_DELTA_AFTER_ASSEMBLY, this.lastVisibleDeltaAfterAssembly);
+        putDiagnosticString(tag, NBT_LAST_DISASSEMBLY_RESULT, this.lastDisassemblyResult, DIAGNOSTIC_NONE);
+        putDiagnosticString(tag, NBT_LAST_ASSEMBLY_FAILURE_STAGE, this.lastAssemblyFailureStage, DIAGNOSTIC_NONE);
     }
 
     @Override
     public void load(final CompoundTag tag) {
         super.load(tag);
-        this.primaryAssembler = tag.getBoolean("M22PrimaryAssembler");
-        this.lastLifecycleState = tag.getString("M22LifecycleState");
-        this.lastFailure = tag.getString("M22LastFailure");
-        this.lastCandidateBlocks = tag.getInt("M22CandidateBlocks");
-        this.lastAcceptedBlocks = tag.getInt("M22AcceptedBlocks");
-        this.lastRejectedBlocks = tag.getInt("M22RejectedBlocks");
-        this.lastBlockEntityCount = tag.getInt("M22BlockEntityCount");
-        this.lastVisibleDeltaAfterAssembly = tag.getDouble("M22VisibleDeltaAfterAssembly");
+        this.primaryAssembler = tag.getBoolean(NBT_PRIMARY_ASSEMBLER);
+        this.lastLifecycleState = readDiagnosticString(tag, NBT_LIFECYCLE_STATE, STATE_PARENT_WORLD);
+        this.lastFailure = readDiagnosticString(tag, NBT_LAST_FAILURE, DIAGNOSTIC_NONE);
+        this.lastCandidateBlocks = tag.getInt(NBT_CANDIDATE_BLOCKS);
+        this.lastAcceptedBlocks = tag.getInt(NBT_ACCEPTED_BLOCKS);
+        this.lastRejectedBlocks = tag.getInt(NBT_REJECTED_BLOCKS);
+        this.lastBlockEntityCount = tag.getInt(NBT_BLOCK_ENTITY_COUNT);
+        this.lastVisibleDeltaAfterAssembly = tag.getDouble(NBT_VISIBLE_DELTA_AFTER_ASSEMBLY);
+        this.lastDisassemblyResult = readDiagnosticString(tag, NBT_LAST_DISASSEMBLY_RESULT, DIAGNOSTIC_NONE);
+        this.lastAssemblyFailureStage = readDiagnosticString(tag, NBT_LAST_ASSEMBLY_FAILURE_STAGE, DIAGNOSTIC_NONE);
+    }
+
+    private static void putDiagnosticString(final CompoundTag tag, final String key,
+                                            @Nullable final String value, final String defaultValue) {
+        final String normalized = normalizeDiagnosticString(value, defaultValue);
+        if (!normalized.isEmpty()) {
+            tag.putString(key, normalized);
+        }
+    }
+
+    private static String readDiagnosticString(final CompoundTag tag, final String key, final String defaultValue) {
+        return tag.contains(key, Tag.TAG_STRING)
+                ? normalizeDiagnosticString(tag.getString(key), defaultValue)
+                : defaultValue;
+    }
+
+    private static String normalizeDiagnosticString(@Nullable final String value, final String defaultValue) {
+        return value == null ? defaultValue : value;
+    }
+
+    private static String describeAssemblyException(final AssemblyException exception) {
+        final String message = exception.getMessage();
+        if (message != null && !message.isBlank()) {
+            return message;
+        }
+        if (exception.component != null) {
+            final String componentText = exception.component.getString();
+            if (!componentText.isBlank()) {
+                return componentText;
+            }
+        }
+        return "ASSEMBLY_EXCEPTION_WITH_NULL_MESSAGE exceptionClass=" + exception.getClass().getName();
+    }
+
+    private static String extractFailureStage(final String failure) {
+        if (failure.contains("failureStage=")) {
+            return failure.substring(failure.indexOf("failureStage="));
+        }
+        if (failure.startsWith("DISASSEMBLY_BLOCKED")) {
+            return failure;
+        }
+        return "seeLastFailure";
     }
 }

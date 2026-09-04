@@ -331,9 +331,11 @@ public class SubLevelAssemblyHelper {
         final List<BlockState> states = new ArrayList<>();
 
         BlockPos firstBlock = null;
+        int sourceBlockCount = 0;
         Vector2i chunkBoundsMin = null;
         Vector2i chunkBoundsMax = null;
         for (final BlockPos block : blocks) {
+            sourceBlockCount++;
             if (firstBlock == null) {
                 firstBlock = block;
             }
@@ -362,6 +364,7 @@ public class SubLevelAssemblyHelper {
             }
         }
 
+        int copyFailures = 0;
         SableAssemblyPlatform.INSTANCE.setIgnoreOnPlace(resultingLevel, true);
         for (final BlockPos block : blocks) {
             final BlockState state = accelerator.getBlockState(block);
@@ -418,10 +421,16 @@ public class SubLevelAssemblyHelper {
 
                 level.onBlockStateChange(newPos, airState, state);
             } catch (final Exception e) {
+                copyFailures++;
                 Sable.LOGGER.error("Failed to move block {} at {} to {}", state, block, newPos, e);
             }
         }
         SableAssemblyPlatform.INSTANCE.setIgnoreOnPlace(resultingLevel, false);
+
+        if (copyFailures > 0 || states.size() != sourceBlockCount) {
+            throw new IllegalStateException("Strict block move copy phase failed: sourceBlocks="
+                    + sourceBlockCount + " copiedBlocks=" + states.size() + " copyFailures=" + copyFailures);
+        }
 
         int i = 0;
         for (final BlockPos untransformed : blocks) {

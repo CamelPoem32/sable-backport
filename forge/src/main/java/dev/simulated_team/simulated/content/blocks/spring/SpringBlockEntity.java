@@ -11,10 +11,13 @@ import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import dev.simulated_team.simulated.index.SimulatedBlockEntityTypes;
+import dev.simulated_team.simulated.index.SimulatedBlocks;
 import dev.simulated_team.simulated.index.SimulatedConfig;
+import dev.simulated_team.simulated.util.SimAssemblyHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -322,14 +325,193 @@ public class SpringBlockEntity extends BlockEntity implements BlockEntitySubLeve
         if (this.level == null || this.level.isClientSide || this.partnerPos == null || this.assembling) {
             return;
         }
-        final BlockPos partner = this.partnerPos;
+        final ServerLevel serverLevel = (ServerLevel) this.level;
+        final BlockPos owner = this.worldPosition.immutable();
+        final BlockPos partner = this.partnerPos.immutable();
+        final SubLevel ownerSubLevelBefore = Sable.HELPER.getContaining(this.level, this.worldPosition);
+        final SubLevel partnerSubLevelBefore = Sable.HELPER.getContaining(this.level, partner);
+        final SpringBlockEntity partnerSpring = this.level.getBlockEntity(partner) instanceof final SpringBlockEntity spring
+                ? spring
+                : null;
+        final SpringBlockEntity ownerActor = findSpringActor(ownerSubLevelBefore, owner);
+        final SpringBlockEntity partnerActor = findSpringActor(partnerSubLevelBefore, partner);
         final String logicalId = this.logicalConstraintId();
-        this.partnerPos = null;
-        if (this.level.getBlockEntity(partner) instanceof SpringBlockEntity) {
-            this.level.destroyBlock(partner, false);
+        final BlockPos controllerEndpoint = this.controller
+                ? owner
+                : partnerSpring != null && partnerSpring.controller ? partner : owner;
+        final BlockPos followerEndpoint = controllerEndpoint.equals(owner) ? partner : owner;
+        final String actorOwner = controllerEndpoint.toShortString();
+        final int actorCountBeforeA = countSpringActors(ownerSubLevelBefore);
+        final int actorCountBeforeB = partnerSubLevelBefore == ownerSubLevelBefore
+                ? actorCountBeforeA
+                : countSpringActors(partnerSubLevelBefore);
+        final boolean activeOnBodyABefore = activeConstraintPresent(serverLevel, ownerSubLevelBefore, logicalId);
+        final boolean activeOnBodyBBefore = activeConstraintPresent(serverLevel, partnerSubLevelBefore, logicalId);
+        if (ownerSubLevelBefore instanceof final ServerSubLevel serverOwnerBefore) {
+            SimAssemblyHelper.logBodySnapshot((ServerLevel) this.level, serverOwnerBefore, "before_spring_teardown", 0);
         }
-        Sable.LOGGER.info("SABLE_M23_CONSTRAINT phase=REMOVE_SUCCESS family=spring logicalId={} owner={}",
+        if (partnerSubLevelBefore instanceof final ServerSubLevel serverPartnerBefore
+                && serverPartnerBefore != ownerSubLevelBefore) {
+            SimAssemblyHelper.logBodySnapshot((ServerLevel) this.level, serverPartnerBefore, "before_spring_teardown", 0);
+        }
+        final SpringTeardownSnapshot ownerBefore = this.teardownSnapshot(this.worldPosition);
+        final SpringTeardownSnapshot partnerBefore = this.teardownSnapshot(partner);
+
+        clearPairMetadata(this);
+        clearPairMetadata(ownerActor);
+        clearPairMetadata(partnerSpring);
+        clearPairMetadata(partnerActor);
+        final boolean ownerActorRemovedBeforeDestroy = unregisterSpringActor(ownerSubLevelBefore, owner, ownerActor);
+        final boolean partnerActorRemovedBeforeDestroy = unregisterSpringActor(partnerSubLevelBefore, partner, partnerActor);
+
+        boolean partnerDestroyed = false;
+        if (partnerSpring != null && this.level.getBlockState(partner).is(SimulatedBlocks.SPRING.get())) {
+            partnerDestroyed = this.level.destroyBlock(partner, false);
+        }
+        final boolean ownerActorRemovedAfterDestroy = unregisterSpringActor(ownerSubLevelBefore, owner, null);
+        final boolean partnerActorRemovedAfterDestroy = unregisterSpringActor(partnerSubLevelBefore, partner, null);
+        this.setChanged();
+        final SpringTeardownSnapshot ownerAfter = this.teardownSnapshot(this.worldPosition);
+        final SpringTeardownSnapshot partnerAfter = this.teardownSnapshot(partner);
+        final SubLevel ownerSubLevelAfter = Sable.HELPER.getContaining(this.level, this.worldPosition);
+        final SubLevel partnerSubLevelAfter = Sable.HELPER.getContaining(this.level, partner);
+        final int actorCountAfterA = countSpringActors(ownerSubLevelAfter);
+        final int actorCountAfterB = partnerSubLevelAfter == ownerSubLevelAfter
+                ? actorCountAfterA
+                : countSpringActors(partnerSubLevelAfter);
+        final boolean activeOnBodyAAfter = activeConstraintPresent(serverLevel, ownerSubLevelAfter, logicalId);
+        final boolean activeOnBodyBAfter = activeConstraintPresent(serverLevel, partnerSubLevelAfter, logicalId);
+        final boolean cleanupComplete = !ownerAfter.actorRegistered()
+                && !partnerAfter.actorRegistered()
+                && !activeOnBodyAAfter
+                && !activeOnBodyBAfter;
+        if (ownerSubLevelAfter instanceof final ServerSubLevel serverOwnerAfter) {
+            SimAssemblyHelper.logBodySnapshot((ServerLevel) this.level, serverOwnerAfter, "after_spring_teardown", 0);
+        }
+        if (partnerSubLevelAfter instanceof final ServerSubLevel serverPartnerAfter
+                && serverPartnerAfter != ownerSubLevelAfter) {
+            SimAssemblyHelper.logBodySnapshot((ServerLevel) this.level, serverPartnerAfter, "after_spring_teardown", 0);
+        }
+        Sable.LOGGER.info("SABLE_M23_TEARDOWN springOwnerPos={} pairedEndpointPos={} ownerSableId={} partnerSableId={} logicalConstraintId={} physicsHandleValidBefore={} physicsHandleValidAfter={} ownerActorRegisteredBefore={} ownerActorRegisteredAfter={} partnerActorRegisteredBefore={} partnerActorRegisteredAfter={} ownerBlockStateBefore={} ownerBlockStateAfter={} partnerBlockStateBefore={} partnerBlockStateAfter={} cleanup=setBlockAIR:false,destroyBlock:{},removeBlockEntity:false,removeTrackingPoint:false,removeActor:{},removeSableBlock:false,removeParentWorldBlock:false",
+                this.worldPosition.toShortString(),
+                partner.toShortString(),
+                ownerBefore.sableId(),
+                partnerBefore.sableId(),
+                logicalId,
+                ownerBefore.physicsHandleValid() || partnerBefore.physicsHandleValid(),
+                ownerAfter.physicsHandleValid() || partnerAfter.physicsHandleValid(),
+                ownerBefore.actorRegistered(),
+                ownerAfter.actorRegistered(),
+                partnerBefore.actorRegistered(),
+                partnerAfter.actorRegistered(),
+                ownerBefore.blockState(),
+                ownerAfter.blockState(),
+                partnerBefore.blockState(),
+                partnerAfter.blockState(),
+                partnerDestroyed,
+                ownerActorRemovedBeforeDestroy || ownerActorRemovedAfterDestroy
+                        || partnerActorRemovedBeforeDestroy || partnerActorRemovedAfterDestroy);
+        Sable.LOGGER.info("SABLE_M23_SPRING_CLEANUP logicalId={} controllerEndpoint={} followerEndpoint={} actorOwner={} actorCountBeforeA={} actorCountBeforeB={} actorCountAfterA={} actorCountAfterB={} activeOnBodyABefore={} activeOnBodyBBefore={} activeOnBodyAAfter={} activeOnBodyBAfter={} ownerBlockPresentAfter={} partnerBlockPresentAfter={} ownerActorRemovedBeforeDestroy={} partnerActorRemovedBeforeDestroy={} ownerActorRemovedAfterDestroy={} partnerActorRemovedAfterDestroy={} result={}",
+                logicalId,
+                controllerEndpoint.toShortString(),
+                followerEndpoint.toShortString(),
+                actorOwner,
+                actorCountBeforeA,
+                actorCountBeforeB,
+                actorCountAfterA,
+                actorCountAfterB,
+                activeOnBodyABefore,
+                activeOnBodyBBefore,
+                activeOnBodyAAfter,
+                activeOnBodyBAfter,
+                isSpringBlockPresent(owner),
+                isSpringBlockPresent(partner),
+                ownerActorRemovedBeforeDestroy,
+                partnerActorRemovedBeforeDestroy,
+                ownerActorRemovedAfterDestroy,
+                partnerActorRemovedAfterDestroy,
+                cleanupComplete ? "SUCCESS" : "PENDING");
+        Sable.LOGGER.info("SABLE_M23_CONSTRAINT phase={} family=spring logicalId={} owner={}",
+                cleanupComplete ? "REMOVE_SUCCESS" : "REMOVE_PENDING",
                 logicalId, this.worldPosition.toShortString());
+    }
+
+    private static void clearPairMetadata(final @Nullable SpringBlockEntity spring) {
+        if (spring == null) {
+            return;
+        }
+        spring.partnerPos = null;
+        spring.partnerSubLevel = null;
+        spring.ticksWithoutPartner = 0;
+        spring.snappingTime = 0.0D;
+        spring.forceTotal = null;
+        spring.partnerForceTotal = null;
+        spring.setChanged();
+    }
+
+    private static @Nullable SpringBlockEntity findSpringActor(final @Nullable SubLevel subLevel, final BlockPos pos) {
+        if (!(subLevel instanceof ServerSubLevel)) {
+            return null;
+        }
+        final Object direct = subLevel.getPlot().getBlockEntityActor(pos);
+        if (direct instanceof final SpringBlockEntity spring) {
+            return spring;
+        }
+        for (final Object actor : subLevel.getPlot().getBlockEntityActors()) {
+            if (actor instanceof final SpringBlockEntity spring && spring.getBlockPos().equals(pos)) {
+                return spring;
+            }
+        }
+        return null;
+    }
+
+    private static boolean unregisterSpringActor(final @Nullable SubLevel subLevel, final BlockPos pos,
+                                                 final @Nullable SpringBlockEntity expectedActor) {
+        if (!(subLevel instanceof ServerSubLevel)) {
+            return false;
+        }
+        return subLevel.getPlot().removeBlockEntityActor(pos, expectedActor);
+    }
+
+    private static int countSpringActors(final @Nullable SubLevel subLevel) {
+        if (subLevel instanceof final ServerSubLevel serverSubLevel) {
+            return SimAssemblyHelper.countSpringActors(serverSubLevel);
+        }
+        return 0;
+    }
+
+    private static boolean activeConstraintPresent(final ServerLevel level, final @Nullable SubLevel subLevel,
+                                                   final String logicalId) {
+        return subLevel instanceof final ServerSubLevel serverSubLevel
+                && SimAssemblyHelper.activeSpringConstraintIds(level, serverSubLevel).contains(logicalId);
+    }
+
+    private boolean isSpringBlockPresent(final BlockPos pos) {
+        return this.level != null && this.level.getBlockState(pos).is(SimulatedBlocks.SPRING.get());
+    }
+
+    private SpringTeardownSnapshot teardownSnapshot(final BlockPos pos) {
+        if (this.level == null) {
+            return new SpringTeardownSnapshot("null", false, false, "null");
+        }
+        final SubLevel subLevel = Sable.HELPER.getContaining(this.level, pos);
+        boolean handleValid = false;
+        boolean actorRegistered = false;
+        if (subLevel instanceof final ServerSubLevel serverSubLevel) {
+            final RigidBodyHandle handle = RigidBodyHandle.of(serverSubLevel);
+            handleValid = handle != null && handle.isValid();
+            for (final Object actor : serverSubLevel.getPlot().getBlockEntityActors()) {
+                if (actor instanceof final SpringBlockEntity spring && spring.getBlockPos().equals(pos)) {
+                    actorRegistered = true;
+                    break;
+                }
+            }
+        }
+        return new SpringTeardownSnapshot(
+                subLevel == null ? "static_world" : subLevel.getUniqueId().toString(),
+                handleValid,
+                actorRegistered,
+                this.level.getBlockState(pos).toString());
     }
 
     @Override
@@ -360,22 +542,35 @@ public class SpringBlockEntity extends BlockEntity implements BlockEntitySubLeve
         final boolean handleB = partner instanceof final ServerSubLevel partnerServer
                 && RigidBodyHandle.of(partnerServer) != null
                 && RigidBodyHandle.of(partnerServer).isValid();
+        final boolean sableToSable = owner instanceof ServerSubLevel && partner instanceof ServerSubLevel;
+        final boolean staticWorld = owner == null && partner == null;
+        final String constraintMode = sableToSable ? "SABLE_TO_SABLE" : "STATIC_WORLD";
+        final String runtimeState = staticWorld && this.getPairedSpring() != null
+                ? "STATIC_WORLD_NO_SABLE_FORCE_TEST"
+                : this.getPairedSpring() == null ? "WAITING_FOR_ENDPOINT" : "ACTIVE";
+        final double extension = this.lastCurrentLength - this.desiredLength;
+        final double computedAxialForce = extension * HOOKE_STIFFNESS;
         return "family=spring ownerPos=" + this.worldPosition.toShortString()
+                + " constraintMode=" + constraintMode
                 + " ownerSable=" + (owner == null ? "static_world" : owner.getUniqueId())
                 + " logicalConstraintId=" + this.logicalConstraintId()
                 + " bodyA=" + (owner == null ? "static_world" : owner.getUniqueId())
                 + " bodyB=" + (partner == null ? "static_world_or_unresolved" : partner.getUniqueId())
                 + " bodyAHandleValid=" + handleA
                 + " bodyBHandleValid=" + handleB
+                + " forceActorRegistered=" + (owner instanceof final ServerSubLevel ownerServer
+                        && findSpringActor(ownerServer, this.worldPosition) != null)
                 + " physicsConstraintHandleValid=force_actor"
                 + " endpointALocal=" + this.getCenter()
                 + " endpointBLocal=" + this.partnerPos
                 + " created=" + (this.partnerPos != null)
                 + " restoredFromSave=" + this.restoredFromSave
                 + " removalPending=false"
-                + " runtimeState=" + (this.getPairedSpring() == null ? "WAITING_FOR_ENDPOINT" : "ACTIVE")
+                + " runtimeState=" + runtimeState
                 + " restLength=" + this.desiredLength
                 + " currentLength=" + this.lastCurrentLength
+                + " extension=" + extension
+                + " computedAxialForce=" + computedAxialForce
                 + " stiffness=" + HOOKE_STIFFNESS
                 + " damping=" + POINT_DAMPING;
     }
@@ -465,5 +660,9 @@ public class SpringBlockEntity extends BlockEntity implements BlockEntitySubLeve
 
     private static double clamp(final double value, final double min, final double max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private record SpringTeardownSnapshot(String sableId, boolean physicsHandleValid,
+                                          boolean actorRegistered, String blockState) {
     }
 }

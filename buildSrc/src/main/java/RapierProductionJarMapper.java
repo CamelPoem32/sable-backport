@@ -80,16 +80,22 @@ public final class RapierProductionJarMapper {
                 if (sourceEntry.getName().endsWith(".class")) {
                     ClassReader reader = new ClassReader(bytes);
                     CountingRemapper remapper = new CountingRemapper(mappings, hierarchy);
-                    ClassWriter writer = new ClassWriter(0);
-                    ClassVisitor visitor = new ClassRemapper(writer, remapper);
+                    ClassNode remappedNode = new ClassNode();
+                    ClassVisitor visitor = new ClassRemapper(remappedNode, remapper);
                     reader.accept(visitor, 0);
+                    int declarationRemaps =
+                            remapInheritedMinecraftMethodDeclarations(remappedNode, mappings, hierarchy);
+                    ClassWriter writer = new ClassWriter(0);
+                    remappedNode.accept(writer);
                     SamNameRemapResult samResult = remapInvokedynamicSamNames(
                             writer.toByteArray(), mappings, hierarchy);
-                    if (remapper.changed() || samResult.changed()) {
+                    if (remapper.changed() || samResult.changed() || declarationRemaps > 0) {
                         transformedClasses++;
                     }
                     memberReferenceRemaps += remapper.memberReferenceRemaps;
+                    memberReferenceRemaps += declarationRemaps;
                     inheritedMemberReferenceRemaps += remapper.inheritedMemberReferenceRemaps;
+                    inheritedMemberReferenceRemaps += declarationRemaps;
                     invokedynamicHandleRemaps += remapper.handleRemaps;
                     invokedynamicSamNameRemaps += samResult.remaps;
                     inheritedMemberReferenceRemaps += samResult.inheritedRemaps;
@@ -114,6 +120,58 @@ public final class RapierProductionJarMapper {
                 report.productionMinecraftMemberReferences, report.unresolvedMinecraftMemberReferences,
                 report.totalInvokedynamicSites, report.lambdaMetafactorySites,
                 report.minecraftLambdaMetafactorySites);
+    }
+
+    private static int remapInheritedMinecraftMethodDeclarations(ClassNode node, MappingSet mappings,
+                                                                 ClassHierarchy hierarchy) {
+        List<String> supertypes = directAndTransitiveSupertypes(node, hierarchy);
+        if (supertypes.isEmpty()) {
+            return 0;
+        }
+
+        int remaps = 0;
+        for (Object methodObject : node.methods) {
+            org.objectweb.asm.tree.MethodNode method = (org.objectweb.asm.tree.MethodNode) methodObject;
+            if (method.name.startsWith("<")) {
+                continue;
+            }
+
+            String mappedName = null;
+            String declaringOwner = null;
+            for (String supertype : supertypes) {
+                MemberMapping mapped = mappings.mapMethodName(supertype, method.name, method.desc, hierarchy);
+                if (!mapped.name.equals(method.name) && isMinecraftOwner(mapped.declaringOwner)) {
+                    if (mappedName != null && !mappedName.equals(mapped.name)) {
+                        throw new IllegalStateException("Conflicting inherited Minecraft method mappings for "
+                                + node.name + "." + method.name + method.desc + ": "
+                                + declaringOwner + " -> " + mappedName + ", "
+                                + mapped.declaringOwner + " -> " + mapped.name);
+                    }
+                    mappedName = mapped.name;
+                    declaringOwner = mapped.declaringOwner;
+                }
+            }
+
+            if (mappedName != null) {
+                method.name = mappedName;
+                remaps++;
+            }
+        }
+        return remaps;
+    }
+
+    private static List<String> directAndTransitiveSupertypes(ClassNode node, ClassHierarchy hierarchy) {
+        Set<String> supertypes = new LinkedHashSet<>();
+        if (node.superName != null) {
+            supertypes.add(node.superName);
+            supertypes.addAll(hierarchy.supertypes(node.superName));
+        }
+        for (Object interfaceObject : node.interfaces) {
+            String owner = (String) interfaceObject;
+            supertypes.add(owner);
+            supertypes.addAll(hierarchy.supertypes(owner));
+        }
+        return new ArrayList<>(supertypes);
     }
 
     public static ReferenceReport referenceReport(File jar, File mappingsFile) throws IOException {

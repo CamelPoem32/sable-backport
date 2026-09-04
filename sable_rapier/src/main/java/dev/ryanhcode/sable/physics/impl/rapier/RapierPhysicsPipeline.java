@@ -349,7 +349,8 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
                     for (int by = 0; by < 16; by++) {
                         final BlockPos globalPos = new BlockPos(bx, by, bz).offset(sectionPos.minBlockX(), sectionPos.minBlockY(), sectionPos.minBlockZ());
                         final VoxelNeighborhoodState state = VoxelNeighborhoodState.getState(this.accelerator, globalPos, chunk);
-                        final RapierVoxelColliderData colliderData = this.colliderBakery.getPhysicsDataForBlock(this.accelerator.getBlockState(globalPos));
+                        final RapierVoxelColliderData colliderData = this.colliderBakery.getPhysicsDataForBlock(
+                                this.accelerator.getBlockState(globalPos), globalPos);
 
                         final int index = bx + (bz << 4) + (by << 8);
 
@@ -395,7 +396,8 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
         for (final Direction dir : Direction.values()) {
             final BlockPos pos = globalBlockPos.relative(dir);
             final VoxelNeighborhoodState state = VoxelNeighborhoodState.getState(this.accelerator, pos, null);
-            final RapierVoxelColliderData colliderData = this.colliderBakery.getPhysicsDataForBlock(this.level.getBlockState(pos));
+            final RapierVoxelColliderData colliderData = this.colliderBakery.getPhysicsDataForBlock(
+                    this.level.getBlockState(pos), pos);
 
             final int colliderValue = colliderData == null ? 0 : colliderData.handle() + 1;
             Rapier3D.changeBlock(this.scene.handle(), pos.getX(), pos.getY(), pos.getZ(), packBlockState(state, colliderValue));
@@ -403,7 +405,7 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
 
         // do it for the block without offset
         final VoxelNeighborhoodState state = VoxelNeighborhoodState.getState(this.accelerator, globalBlockPos, null);
-        final RapierVoxelColliderData colliderData = this.colliderBakery.getPhysicsDataForBlock(newState);
+        final RapierVoxelColliderData colliderData = this.colliderBakery.getPhysicsDataForBlock(newState, globalBlockPos);
 
         final int colliderValue = colliderData == null ? 0 : colliderData.handle() + 1;
         Rapier3D.changeBlock(this.scene.handle(), x, y, z, packBlockState(state, colliderValue));

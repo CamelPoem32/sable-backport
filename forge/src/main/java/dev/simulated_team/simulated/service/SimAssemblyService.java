@@ -8,6 +8,6 @@ public final class SimAssemblyService {
     }
 
     public static boolean canStickTo(final BlockState stateA, final BlockState stateB) {
-        return stateA.canStickTo(stateB) || (!stateA.isAir() && !stateB.isAir());
+        return stateA.canStickTo(stateB);
     }
 }

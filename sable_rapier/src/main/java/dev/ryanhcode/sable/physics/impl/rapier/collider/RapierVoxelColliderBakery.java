@@ -11,6 +11,7 @@ import dev.ryanhcode.sable.physics.impl.rapier.Rapier3D;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.piston.MovingPistonBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.NotNull;
@@ -25,8 +26,8 @@ import java.util.function.Function;
  * @author RyanH
  */
 public class RapierVoxelColliderBakery {
-    private final @NotNull BlockGetter level;
-    private final Function<BlockState, RapierVoxelColliderData> blockPhysicsDataBuilder = Util.memoize(this::buildPhysicsDataForBlock);
+    private final @NotNull PhysicsColliderBlockGetter level;
+    private final Function<BlockState, RapierVoxelColliderData> blockPhysicsDataBuilder = Util.memoize((BlockState state) -> buildPhysicsDataForBlock(state));
 
     /**
      * Creates a new level collider for the given level
@@ -51,6 +52,12 @@ public class RapierVoxelColliderBakery {
      * @return the physics data ID for the block at the given position, or null for empty
      */
     private @NotNull RapierVoxelColliderData buildPhysicsDataForBlock(final BlockState childState) {
+        return this.buildPhysicsDataForBlock(childState, null);
+    }
+
+    private @NotNull RapierVoxelColliderData buildPhysicsDataForBlock(final BlockState childState,
+                                                                      final @Nullable BlockPos sourcePos) {
+        this.level.setup(childState, sourcePos);
         final boolean liquid = VoxelNeighborhoodState.isLiquid(childState);
 
         final double friction = PhysicsBlockPropertyHelper.getFriction(childState);
@@ -97,5 +104,21 @@ public class RapierVoxelColliderBakery {
     public @Nullable RapierVoxelColliderData getPhysicsDataForBlock(final BlockState state) {
         final RapierVoxelColliderData data = this.blockPhysicsDataBuilder.apply(state);
         return data == RapierVoxelColliderData.EMPTY ? null : data;
+    }
+
+    /**
+     * Builds uncached physics data for a block whose collision shape may need the real BlockEntity at its position.
+     */
+    public @Nullable RapierVoxelColliderData getPhysicsDataForBlock(final BlockState state, final BlockPos sourcePos) {
+        if (!requiresPositionedCollisionContext(state)) {
+            return this.getPhysicsDataForBlock(state);
+        }
+
+        final RapierVoxelColliderData data = this.buildPhysicsDataForBlock(state, sourcePos);
+        return data == RapierVoxelColliderData.EMPTY ? null : data;
+    }
+
+    private static boolean requiresPositionedCollisionContext(final BlockState state) {
+        return state.getBlock() instanceof MovingPistonBlock;
     }
 }

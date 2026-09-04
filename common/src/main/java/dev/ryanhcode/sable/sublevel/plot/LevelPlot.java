@@ -435,6 +435,19 @@ public abstract class LevelPlot {
         return this.blockEntityActors.values();
     }
 
+    public @Nullable BlockEntitySubLevelActor getBlockEntityActor(final BlockPos pos) {
+        return this.blockEntityActors.get(pos);
+    }
+
+    public boolean removeBlockEntityActor(final BlockPos pos, final @Nullable BlockEntitySubLevelActor expectedActor) {
+        final BlockEntitySubLevelActor existing = this.blockEntityActors.get(pos);
+        if (existing == null || (expectedActor != null && existing != expectedActor)) {
+            return false;
+        }
+        this.blockEntityActors.remove(pos);
+        return true;
+    }
+
     public Collection<BlockEntitySubLevelReactionWheel> getBlockEntityReactionWheels() {
         return this.blockEntityReactionWheels.values();
     }
