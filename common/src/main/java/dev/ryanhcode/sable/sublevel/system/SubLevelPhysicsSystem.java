@@ -23,6 +23,7 @@ import dev.ryanhcode.sable.physics.config.PhysicsConfigData;
 import dev.ryanhcode.sable.physics.config.block_properties.PhysicsBlockPropertyHelper;
 import dev.ryanhcode.sable.physics.config.dimension_physics.DimensionPhysicsData;
 import dev.ryanhcode.sable.platform.SableEventPublishPlatform;
+import dev.ryanhcode.sable.diagnostic.RotaryPipelineTraceRegistry;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.plot.LevelPlot;
@@ -208,6 +209,15 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
     @Override
     public void onSubLevelRemoved(final SubLevel subLevel, final SubLevelRemovalReason reason) {
         if (subLevel instanceof final ServerSubLevel serverSubLevel) {
+            final RotaryPipelineTraceRegistry.RemovalRecord removal = RotaryPipelineTraceRegistry.recordBodyRemoval(
+                    this.level, this.level.getGameTime(), serverSubLevel.getUniqueId(), serverSubLevel.getRuntimeId(),
+                    SubLevelPhysicsSystem.class.getName(), "onSubLevelRemoved", "sublevel_" + reason.name().toLowerCase());
+            if (removal != null) {
+                Sable.LOGGER.info("SABLE_ROTARY_BODY_REMOVAL bodyHandle={} bodyUUID={} removalOwnerClass={}"
+                                + " removalOwnerMethod={} reason={} gameTime={} sequence={}",
+                        removal.bodyHandle(), removal.bodyUuid(), removal.ownerClass(), removal.ownerMethod(),
+                        removal.reason(), removal.gameTime(), removal.sequence());
+            }
             this.pipeline.remove(serverSubLevel);
             this.uploadedCollisionSections.removeInt(serverSubLevel.getUniqueId());
             this.uploadedCollisionBlocks.removeInt(serverSubLevel.getUniqueId());
@@ -226,7 +236,9 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
         final ServerSubLevelContainer container = (ServerSubLevelContainer) sidelessContainer;
         this.tickPunchCooldowns();
 
+        this.pipeline.recordDiagnosticLifecyclePhase(RotaryPipelineTraceRegistry.PRE_PHYSICS_SYSTEM_TICK);
         this.ticketManager.update(this.level, container, this, this.pipeline, 1.0 / 20.0);
+        this.pipeline.recordDiagnosticLifecyclePhase(RotaryPipelineTraceRegistry.AFTER_BODY_UPDATE_QUEUE);
 
         for (final ServerSubLevel subLevel : container.getAllSubLevels()) {
             subLevel.updateLastPose();
@@ -291,6 +303,7 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
             // we must therefore process removals every physics tick
             container.processSubLevelRemovals();
             this.updateAllPoses(container);
+            this.traceRotaryPostSableSyncPreCleanup(container);
 
             SableEventPublishPlatform.INSTANCE.postPhysicsTick(this, substepTimeStep);
         }
@@ -354,6 +367,121 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
         serverSubLevel.latestAngularVelocity.mul(20.0);
     }
 
+    private void traceRotaryPostSableSyncPreCleanup(final ServerSubLevelContainer container) {
+        final RotaryPipelineTraceRegistry.TraceState trace = RotaryPipelineTraceRegistry.get(this.level);
+        if (trace == null) {
+            return;
+        }
+
+        final ServerSubLevel bodyA = container.getSubLevel(trace.bodyAUuid()) instanceof final ServerSubLevel subLevelA ? subLevelA : null;
+        final ServerSubLevel bodyB = container.getSubLevel(trace.bodyBUuid()) instanceof final ServerSubLevel subLevelB ? subLevelB : null;
+        if (bodyA != null) {
+            bodyA.updateBoundingBox();
+        }
+        if (bodyB != null) {
+            bodyB.updateBoundingBox();
+        }
+
+        final boolean logicalPoseFiniteA = finiteLogicalPose(bodyA);
+        final boolean logicalPoseFiniteB = finiteLogicalPose(bodyB);
+        final boolean logicalPosePlausibleA = plausibleLogicalPose(bodyA);
+        final boolean logicalPosePlausibleB = plausibleLogicalPose(bodyB);
+        final boolean boundsPlausibleA = plausibleBounds(bodyA);
+        final boolean boundsPlausibleB = plausibleBounds(bodyB);
+        final RotaryPipelineTraceRegistry.PhaseSnapshot snapshot = RotaryPipelineTraceRegistry.recordPostSableSync(
+                this.level, this.level.getGameTime(),
+                bodyA != null && !bodyA.isRemoved(), bodyB != null && !bodyB.isRemoved(),
+                bodyA == null ? "unavailable" : bodyA.logicalPose().toString(),
+                bodyB == null ? "unavailable" : bodyB.logicalPose().toString(),
+                logicalPoseFiniteA, logicalPoseFiniteB,
+                logicalPosePlausibleA, logicalPosePlausibleB,
+                visibleBounds(bodyA), visibleBounds(bodyB),
+                boundsPlausibleA, boundsPlausibleB);
+        if (snapshot == null) {
+            return;
+        }
+
+        Sable.LOGGER.info("SABLE_ROTARY_PIPELINE phase=POST_SABLE_SYNC_PRE_CLEANUP"
+                        + " sequence={} gameTime={} canarySessionId={}"
+                        + " bodyAUuid={} bodyBUuid={}"
+                        + " bodyAHandle={} bodyBHandle={}"
+                        + " jointHandle={} jointHandleValid={}"
+                        + " rapierTranslationA={} rapierTranslationB={}"
+                        + " rapierRotationA={} rapierRotationB={}"
+                        + " logicalPoseA={} logicalPoseB={}"
+                        + " logicalOrientationA={} logicalOrientationB={}"
+                        + " rotationPointA={} rotationPointB={}"
+                        + " transformedVisibleBoundsMinA={} transformedVisibleBoundsMaxA={}"
+                        + " transformedVisibleBoundsMinB={} transformedVisibleBoundsMaxB={}"
+                        + " finiteRapierA={} finiteRapierB={}"
+                        + " finiteSableA={} finiteSableB={}"
+                        + " logicalPosePlausibleA={} logicalPosePlausibleB={}"
+                        + " boundsPlausibleA={} boundsPlausibleB={}"
+                        + " firstFailureClassification={}",
+                snapshot.sequence(), snapshot.gameTime(), trace.canarySessionId(),
+                trace.bodyAUuid(), trace.bodyBUuid(),
+                trace.bodyAId(), trace.bodyBId(),
+                trace.constraintHandle(), snapshot.jointHandleValid(),
+                snapshot.rapierTranslationA(), snapshot.rapierTranslationB(),
+                snapshot.rapierRotationA(), snapshot.rapierRotationB(),
+                bodyA == null ? "missing" : bodyA.logicalPose().position(),
+                bodyB == null ? "missing" : bodyB.logicalPose().position(),
+                bodyA == null ? "missing" : bodyA.logicalPose().orientation(),
+                bodyB == null ? "missing" : bodyB.logicalPose().orientation(),
+                bodyA == null ? "missing" : bodyA.logicalPose().rotationPoint(),
+                bodyB == null ? "missing" : bodyB.logicalPose().rotationPoint(),
+                bodyA == null ? "missing" : "(" + bodyA.boundingBox().minX() + "," + bodyA.boundingBox().minY() + "," + bodyA.boundingBox().minZ() + ")",
+                bodyA == null ? "missing" : "(" + bodyA.boundingBox().maxX() + "," + bodyA.boundingBox().maxY() + "," + bodyA.boundingBox().maxZ() + ")",
+                bodyB == null ? "missing" : "(" + bodyB.boundingBox().minX() + "," + bodyB.boundingBox().minY() + "," + bodyB.boundingBox().minZ() + ")",
+                bodyB == null ? "missing" : "(" + bodyB.boundingBox().maxX() + "," + bodyB.boundingBox().maxY() + "," + bodyB.boundingBox().maxZ() + ")",
+                snapshot.rapierFiniteA(), snapshot.rapierFiniteB(),
+                logicalPoseFiniteA, logicalPoseFiniteB,
+                logicalPosePlausibleA, logicalPosePlausibleB,
+                boundsPlausibleA, boundsPlausibleB,
+                trace.firstFailureClassification());
+    }
+
+    private static String visibleBounds(final ServerSubLevel subLevel) {
+        if (subLevel == null) {
+            return "unavailable";
+        }
+        return "[(" + subLevel.boundingBox().minX() + "," + subLevel.boundingBox().minY() + ","
+                + subLevel.boundingBox().minZ() + ")->(" + subLevel.boundingBox().maxX() + ","
+                + subLevel.boundingBox().maxY() + "," + subLevel.boundingBox().maxZ() + ")]";
+    }
+
+    private static boolean plausibleLogicalPose(final ServerSubLevel subLevel) {
+        if (!finiteLogicalPose(subLevel)) {
+            return false;
+        }
+        final double y = subLevel.logicalPose().position().y();
+        return y >= SableConfig.SUB_LEVEL_REMOVE_MIN.getAsDouble()
+                && y <= SableConfig.SUB_LEVEL_REMOVE_MAX.getAsDouble();
+    }
+
+    private static boolean finiteLogicalPose(final ServerSubLevel subLevel) {
+        if (subLevel == null) {
+            return false;
+        }
+        return Double.isFinite(subLevel.logicalPose().position().x())
+                && Double.isFinite(subLevel.logicalPose().position().y())
+                && Double.isFinite(subLevel.logicalPose().position().z())
+                && Double.isFinite(subLevel.logicalPose().orientation().x())
+                && Double.isFinite(subLevel.logicalPose().orientation().y())
+                && Double.isFinite(subLevel.logicalPose().orientation().z())
+                && Double.isFinite(subLevel.logicalPose().orientation().w());
+    }
+
+    private static boolean plausibleBounds(final ServerSubLevel subLevel) {
+        if (subLevel == null) {
+            return false;
+        }
+        return Double.isFinite(subLevel.boundingBox().minY())
+                && Double.isFinite(subLevel.boundingBox().maxY())
+                && subLevel.boundingBox().minY() >= SableConfig.SUB_LEVEL_REMOVE_MIN.getAsDouble()
+                && subLevel.boundingBox().maxY() <= SableConfig.SUB_LEVEL_REMOVE_MAX.getAsDouble();
+    }
+
     /**
      * Attempts to recover a sub-level that the pipeline messed up the state for (ex. NaNs)
      * Will remove and re-add it to the pipeline.
@@ -411,6 +539,7 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
         }
 
         if (recreateBody && bodyWasRegistered) {
+            this.pipeline.recordDiagnosticLifecyclePhase(RotaryPipelineTraceRegistry.BEFORE_BODY_RECREATE);
             this.pipeline.remove(serverSubLevel);
             this.uploadedCollisionSections.removeInt(serverSubLevel.getUniqueId());
             this.uploadedCollisionBlocks.removeInt(serverSubLevel.getUniqueId());
@@ -418,6 +547,11 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
 
         if (recreateBody || !bodyWasRegistered) {
             this.pipeline.add(serverSubLevel, serverSubLevel.logicalPose());
+            if (recreateBody && bodyWasRegistered) {
+                RotaryPipelineTraceRegistry.recordBodyRecreated(this.level, serverSubLevel.getUniqueId(),
+                        serverSubLevel.getRuntimeId(), serverSubLevel.getRuntimeId(), phase);
+                this.pipeline.recordDiagnosticLifecyclePhase(RotaryPipelineTraceRegistry.AFTER_BODY_RECREATE_IF_ANY);
+            }
         } else {
             this.pipeline.onStatsChanged(serverSubLevel);
         }
@@ -425,6 +559,7 @@ public class SubLevelPhysicsSystem implements SubLevelObserver {
         serverSubLevel.updateBoundingBox();
 
         final CollisionGeometryUpload collisionUpload = this.uploadExistingSubLevelCollisionGeometry(serverSubLevel);
+        this.pipeline.recordDiagnosticLifecyclePhase(RotaryPipelineTraceRegistry.AFTER_COLLIDER_UPDATE);
 
         serverSubLevel.updateMergedMassData(1.0f);
         this.pipeline.onStatsChanged(serverSubLevel);

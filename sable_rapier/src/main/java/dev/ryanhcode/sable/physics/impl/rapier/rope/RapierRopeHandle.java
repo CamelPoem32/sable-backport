@@ -1,5 +1,6 @@
 package dev.ryanhcode.sable.physics.impl.rapier.rope;
 
+import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.physics.object.rope.RopeHandle;
 import dev.ryanhcode.sable.physics.impl.rapier.Rapier3D;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
@@ -22,7 +23,11 @@ public record RapierRopeHandle(long sceneHandle, long handle) implements RopeHan
             coordinates[i * 3 + 2] = point.z;
         }
 
-        final long handle = Rapier3D.createRope(sceneHandle, pointRadius, points.get(0).distance(points.get(1)), coordinates, points.size());
+        final double constructorLength = points.get(0).distance(points.get(1));
+        final long handle = Rapier3D.createRope(sceneHandle, pointRadius, constructorLength, coordinates, points.size());
+        Sable.LOGGER.info("SABLE_ROPE_BACKEND_CONSTRUCT_JAVA sceneHandle={} ropeHandle={} pointRadius={} actualConstructorLengthArgument={} segmentCount={} anyInternalNodeCount={} firstPoint={} lastPoint={}",
+                sceneHandle, handle, pointRadius, constructorLength, Math.max(0, points.size() - 1),
+                Math.max(0, points.size() - 2), points.get(0), points.get(points.size() - 1));
         return new RapierRopeHandle(sceneHandle, handle);
     }
 

@@ -4,6 +4,7 @@ import com.simibubi.create.content.contraptions.AssemblyException;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.physics.mass.MassData;
+import dev.ryanhcode.sable.command.M24SimulatedSystemsCommands;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
@@ -83,6 +84,7 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
 
     private void assemble(final ServerLevel level) throws AssemblyException {
         this.primaryAssembler = true;
+        final BlockPos parentAssemblerPos = this.getBlockPos().immutable();
         final BlockPos toAssemble = this.getBlockPos().below();
         final SimAssemblyHelper.AssemblyResult result =
                 SimAssemblyHelper.assembleFromSingleBlock(level, this.getBlockPos(), toAssemble, true);
@@ -102,6 +104,7 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
         this.lastAssemblyFailureStage = DIAGNOSTIC_NONE;
         this.lastDisassemblyResult = DIAGNOSTIC_NONE;
         this.setChanged();
+        M24SimulatedSystemsCommands.onM22AssemblyCreated(level, parentAssemblerPos, result.subLevel());
 
         Sable.LOGGER.info("SABLE_M22_ASSEMBLY_TRANSFORM parentAnchor={} localAnchor={} rawAnchor={} visibleOrigin={} visibleDeltaAfterAssembly={}",
                 this.getBlockPos().toShortString(),

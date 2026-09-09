@@ -18,6 +18,7 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
 import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.Pose3d;
+import dev.ryanhcode.sable.diagnostic.RotaryPipelineTraceRegistry;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundChangeSubLevelNamePacket;
 import dev.ryanhcode.sable.network.tcp.SablePacketSink;
 import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
@@ -227,7 +228,22 @@ public class ServerSubLevel extends SubLevel implements PhysicsPipelineBody {
         final BoundingBox3dc bounds = this.boundingBox();
 
         if (!this.isRemoved() && (bounds.minY() < SableConfig.SUB_LEVEL_REMOVE_MIN.getAsDouble() || bounds.maxY() > SableConfig.SUB_LEVEL_REMOVE_MAX.getAsDouble())) {
-            Sable.LOGGER.info("Sub-level {} has an extreme Y coordinate range, removing", this);
+            final String rotaryVisibleBounds = "[(" + bounds.minX() + "," + bounds.minY() + "," + bounds.minZ() + ")->("
+                    + bounds.maxX() + "," + bounds.maxY() + "," + bounds.maxZ() + ")]";
+            final RotaryPipelineTraceRegistry.PhaseSnapshot rotaryTrace = RotaryPipelineTraceRegistry.recordSafetyRemoval(
+                    this.getLevel(), this.getLevel().getGameTime(), this.getUniqueId(), this.getRuntimeId(),
+                    this.logicalPose().toString(), rotaryVisibleBounds);
+            if (rotaryTrace != null) {
+                Sable.LOGGER.info("SABLE_ROTARY_PIPELINE phase=SAFETY_REMOVAL"
+                                + " sequence={} gameTime={} bodyUuid={} bodyHandle={}"
+                                + " logicalPose={} visibleBounds={} firstFailureClassification={}",
+                        rotaryTrace.sequence(), rotaryTrace.gameTime(), this.getUniqueId(), this.getRuntimeId(),
+                        this.logicalPose(), rotaryVisibleBounds,
+                        RotaryPipelineTraceRegistry.firstFailureClassification(this.getLevel()));
+            }
+            Sable.LOGGER.info("Sub-level {} has an extreme Y coordinate range, removing: minY={} maxY={} limitMin={} limitMax={} logicalPose={} plotBounds={}",
+                    this, bounds.minY(), bounds.maxY(), SableConfig.SUB_LEVEL_REMOVE_MIN.getAsDouble(),
+                    SableConfig.SUB_LEVEL_REMOVE_MAX.getAsDouble(), this.logicalPose(), this.getPlot().getBoundingBox());
             this.markRemoved();
             return;
         }

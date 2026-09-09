@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=down": { "model": "simulated:block/docking_connector" },
+    "facing=east": { "model": "simulated:block/docking_connector" },
+    "facing=north": { "model": "simulated:block/docking_connector" },
+    "facing=south": { "model": "simulated:block/docking_connector" },
+    "facing=up": { "model": "simulated:block/docking_connector" },
+    "facing=west": { "model": "simulated:block/docking_connector" }
+  }
+}

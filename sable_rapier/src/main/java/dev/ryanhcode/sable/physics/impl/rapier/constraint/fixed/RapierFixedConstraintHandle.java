@@ -3,6 +3,7 @@ package dev.ryanhcode.sable.physics.impl.rapier.constraint.fixed;
 import dev.ryanhcode.sable.api.physics.PhysicsPipelineBody;
 import dev.ryanhcode.sable.api.physics.constraint.FixedConstraintConfiguration;
 import dev.ryanhcode.sable.api.physics.constraint.FixedConstraintHandle;
+import dev.ryanhcode.sable.diagnostic.RotaryPipelineTraceRegistry;
 import dev.ryanhcode.sable.physics.impl.rapier.Rapier3D;
 import dev.ryanhcode.sable.physics.impl.rapier.constraint.RapierConstraintHandle;
 import net.minecraft.server.level.ServerLevel;
@@ -30,6 +31,9 @@ public class RapierFixedConstraintHandle extends RapierConstraintHandle implemen
                 config.orientation().z(),
                 config.orientation().w()
         );
+        RotaryPipelineTraceRegistry.attachConstraintHandle(serverLevel,
+                bodyA == null ? -1 : Rapier3D.getID(bodyA),
+                bodyB == null ? -1 : Rapier3D.getID(bodyB), handle);
 
         return new RapierFixedConstraintHandle(sceneHandle, handle);
     }

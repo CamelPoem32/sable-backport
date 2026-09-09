@@ -11,6 +11,8 @@ public final class SimulatedConfig {
     public static final ForgeConfigSpec.DoubleValue M22_DISASSEMBLY_MAX_VELOCITY;
     public static final ForgeConfigSpec.DoubleValue M22_DISASSEMBLY_MAX_ANGULAR_VELOCITY;
     public static final ForgeConfigSpec.BooleanValue ENABLE_M23_SPRING_CONSTRAINTS;
+    public static final ForgeConfigSpec.BooleanValue ENABLE_M24_SIMULATED_SYSTEMS;
+    public static final ForgeConfigSpec.DoubleValue M24_PAIRING_RANGE;
     public static final ForgeConfigSpec CLIENT_SPEC;
     public static final ForgeConfigSpec.BooleanValue EXPECT_STATIC_CLIENT_BOOTSTRAP;
 
@@ -35,6 +37,12 @@ public final class SimulatedConfig {
         common.push("m23");
         ENABLE_M23_SPRING_CONSTRAINTS = common.comment("Allows the M23 Simulated Spring physical constraint canary.")
                 .define("enableSpringConstraints", true);
+        common.pop();
+        common.push("m24");
+        ENABLE_M24_SIMULATED_SYSTEMS = common.comment("Allows the M24 remaining Simulated physical systems and onboard foundation.")
+                .define("enableRemainingPhysicalSystems", true);
+        M24_PAIRING_RANGE = common.comment("Maximum visible range for automatic M24 test-fixture endpoint pairing.")
+                .defineInRange("pairingRange", 12.0D, 1.0D, 64.0D);
         common.pop();
         COMMON_SPEC = common.build();
 

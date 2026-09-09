@@ -24,6 +24,26 @@ public final class SimulatedItems {
             () -> SimulatedBlocks.blockItem(SimulatedBlocks.REDSTONE_MAGNET));
     public static final RegistryObject<Item> WHITE_SYMMETRIC_SAIL = REGISTER.register("white_symmetric_sail",
             () -> SimulatedBlocks.blockItem(SimulatedBlocks.WHITE_SYMMETRIC_SAIL));
+    public static final RegistryObject<Item> TORSION_SPRING = REGISTER.register("torsion_spring",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.TORSION_SPRING));
+    public static final RegistryObject<Item> SWIVEL_BEARING = REGISTER.register("swivel_bearing",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.SWIVEL_BEARING));
+    public static final RegistryObject<Item> SWIVEL_BEARING_LINK_BLOCK = REGISTER.register("swivel_bearing_link_block",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.SWIVEL_BEARING_LINK_BLOCK));
+    public static final RegistryObject<Item> ROPE_WINCH = REGISTER.register("rope_winch",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.ROPE_WINCH));
+    public static final RegistryObject<Item> DOCKING_CONNECTOR = REGISTER.register("docking_connector",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.DOCKING_CONNECTOR));
+    public static final RegistryObject<Item> PAIRED_DOCKING_CONNECTOR = REGISTER.register("paired_docking_connector",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.PAIRED_DOCKING_CONNECTOR));
+    public static final RegistryObject<Item> ALTITUDE_SENSOR = REGISTER.register("altitude_sensor",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.ALTITUDE_SENSOR));
+    public static final RegistryObject<Item> VELOCITY_SENSOR = REGISTER.register("velocity_sensor",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.VELOCITY_SENSOR));
+    public static final RegistryObject<Item> OPTICAL_SENSOR = REGISTER.register("optical_sensor",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.OPTICAL_SENSOR));
+    public static final RegistryObject<Item> STEERING_WHEEL = REGISTER.register("steering_wheel",
+            () -> SimulatedBlocks.blockItem(SimulatedBlocks.STEERING_WHEEL));
 
     public static final RegistryObject<Item> CONTRAPTION_DIAGRAM = REGISTER.register("contraption_diagram",
             () -> new Item(new Item.Properties()));

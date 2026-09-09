@@ -13,7 +13,7 @@ mod rope;
 mod scene;
 mod voxel_collider;
 
-use jni::objects::{JClass, JDoubleArray, JIntArray};
+use jni::objects::{JClass, JDoubleArray, JIntArray, JLongArray};
 use jni::sys::{jboolean, jdouble, jint, jlong};
 use jni::{JNIEnv, JavaVM};
 use rapier3d::glamx::{DVec3, Quat};
@@ -714,6 +714,50 @@ pub extern "system" fn Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_rem
             true,
         );
     })
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_getDiagnosticMembership<
+    'local,
+>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    body_a_id: jint,
+    body_b_id: jint,
+    joint_id: jlong,
+    store: JLongArray<'local>,
+) {
+    with_handle(handle, |scene| {
+        let sable_data = scene.sable_data.read().unwrap();
+        let sim_data = scene.sim_data.read().unwrap();
+
+        let body_a = sable_data.rigid_bodies.get(&(body_a_id as LevelColliderID));
+        let body_b = sable_data.rigid_bodies.get(&(body_b_id as LevelColliderID));
+        let (logical_joint_present, solver_joint_present) = sable_data
+            .joint_set
+            .diagnostic_membership(joint_id, &sim_data.impulse_joint_set);
+        let pack_handle = |body: Option<&rapier3d::dynamics::RigidBodyHandle>| -> jlong {
+            body.map_or(-1, |handle| {
+                let (index, generation) = handle.0.into_raw_parts();
+                ((generation as jlong) << 32) | index as jlong
+            })
+        };
+
+        let values: [jlong; 10] = [
+            body_a.is_some() as jlong,
+            body_a.is_some_and(|body| sim_data.rigid_body_set.contains(*body)) as jlong,
+            pack_handle(body_a),
+            body_b.is_some() as jlong,
+            body_b.is_some_and(|body| sim_data.rigid_body_set.contains(*body)) as jlong,
+            pack_handle(body_b),
+            logical_joint_present as jlong,
+            solver_joint_present as jlong,
+            sim_data.rigid_body_set.len() as jlong,
+            sim_data.impulse_joint_set.len() as jlong,
+        ];
+        env.set_long_array_region(&store, 0, &values).unwrap();
+    });
 }
 
 pub fn insert_block_octree(

@@ -113,6 +113,7 @@ $RECYCLE.BIN/
 
 .gradle
 build/
+.tools/
 
 # Ignore Gradle GUI config
 gradle-app.setting
@@ -139,3 +140,4 @@ forge/logs/
 macos/*.dmg
 
 **/.intentionally-empty-file.o
+*crate

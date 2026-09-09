@@ -268,6 +268,13 @@ public interface PhysicsPipeline {
     }
 
     /**
+     * Records a backend-specific diagnostic lifecycle boundary when supported.
+     * This has no effect on physics state.
+     */
+    default void recordDiagnosticLifecyclePhase(final String phase) {
+    }
+
+    /**
      * "Wakes up" a physics pipeline body, indicating environmental or other changes have occurred that should resume physics if idled or sleeping
      *
      * @param body the physics pipeline body to wake up

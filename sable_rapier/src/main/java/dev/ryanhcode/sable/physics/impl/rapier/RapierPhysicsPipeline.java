@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.physics.impl.rapier;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.SableConfig;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
 import dev.ryanhcode.sable.api.physics.PhysicsPipelineBody;
 import dev.ryanhcode.sable.api.physics.constraint.*;
@@ -23,6 +24,7 @@ import dev.ryanhcode.sable.physics.impl.rapier.constraint.free.RapierFreeConstra
 import dev.ryanhcode.sable.physics.impl.rapier.constraint.generic.RapierGenericConstraintHandle;
 import dev.ryanhcode.sable.physics.impl.rapier.constraint.rotary.RapierRotaryConstraintHandle;
 import dev.ryanhcode.sable.physics.impl.rapier.rope.RapierRopeHandle;
+import dev.ryanhcode.sable.diagnostic.RotaryPipelineTraceRegistry;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.plot.LevelPlot;
@@ -148,7 +150,9 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
     @Override
     public void prePhysicsTicks() {
         final double timeStep = 1.0 / 20.0;
+        this.traceRotaryLifecycle(RotaryPipelineTraceRegistry.PRE_CONSTRAINT_MAINTENANCE, true);
         Rapier3D.tick(this.scene.handle(), timeStep);
+        this.traceRotaryLifecycle(RotaryPipelineTraceRegistry.AFTER_CONSTRAINT_MAINTENANCE, true);
     }
 
     /**
@@ -159,7 +163,9 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
     @Override
     public void physicsTick(final double timeStep) {
         this.updateContraptionPoses();
+        this.traceRotaryPipeline("PRE_SOLVER");
         Rapier3D.step(this.scene.handle(), timeStep);
+        this.traceRotaryPipeline("POST_RAPIER_SOLVER");
 
         for (final PhysicsPipelineBody queuedWakeUp : this.queuedWakeUps) {
             if (queuedWakeUp.isRemoved()) {
@@ -186,6 +192,11 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
     @Override
     public void tick() {
         this.accelerator.clearCache();
+    }
+
+    @Override
+    public void recordDiagnosticLifecyclePhase(final String phase) {
+        this.traceRotaryLifecycle(phase, true);
     }
 
     /**
@@ -217,8 +228,34 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
      */
     @Override
     public void remove(final ServerSubLevel subLevel) {
+        final RotaryPipelineTraceRegistry.TraceState trace = RotaryPipelineTraceRegistry.get(this.level);
+        final DiagnosticMembership before = trace == null ? null : this.readDiagnosticMembership(trace);
+        final RotaryPipelineTraceRegistry.RemovalRecord removal = RotaryPipelineTraceRegistry.recordBodyRemoval(
+                this.level, this.level.getGameTime(), subLevel.getUniqueId(), Rapier3D.getID(subLevel),
+                RapierPhysicsPipeline.class.getName(), "remove", "backend_sublevel_remove");
+        if (removal != null) {
+            Sable.LOGGER.info("SABLE_ROTARY_BODY_REMOVAL bodyHandle={} bodyUUID={} removalOwnerClass={}"
+                            + " removalOwnerMethod={} reason={} gameTime={} sequence={}",
+                    removal.bodyHandle(), removal.bodyUuid(), removal.ownerClass(), removal.ownerMethod(),
+                    removal.reason(), removal.gameTime(), removal.sequence());
+        }
         Rapier3D.removeSubLevel(this.scene.handle(), Rapier3D.getID(subLevel));
         this.activeSubLevels.remove(Rapier3D.getID(subLevel));
+        if (trace != null && before != null && before.solverJointPresent()) {
+            final DiagnosticMembership after = this.readDiagnosticMembership(trace);
+            if (!after.solverJointPresent()) {
+                final RotaryPipelineTraceRegistry.RemovalRecord jointRemoval = RotaryPipelineTraceRegistry.recordJointRemoval(
+                        this.level, this.level.getGameTime(), trace.constraintHandle(),
+                        RapierPhysicsPipeline.class.getName(), "remove",
+                        "rapier_cascade_after_tracked_body_remove");
+                if (jointRemoval != null) {
+                    Sable.LOGGER.info("SABLE_ROTARY_JOINT_REMOVAL jointHandle={} ownerClass={} ownerMethod={}"
+                                    + " reason={} gameTime={} sequence={}",
+                            jointRemoval.jointHandle(), jointRemoval.ownerClass(), jointRemoval.ownerMethod(),
+                            jointRemoval.reason(), jointRemoval.gameTime(), jointRemoval.sequence());
+                }
+            }
+        }
     }
 
     /**
@@ -585,9 +622,12 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
             throw new IllegalArgumentException("Unsupported constraint configuration: " + configuration.getClass().getName());
         }
 
+        this.traceRotaryLifecycle(RotaryPipelineTraceRegistry.POST_JOINT_INSERT, constraint != null);
         if (!constraint.isValid()) {
             return null;
         }
+
+        this.traceRotaryLifecycle(RotaryPipelineTraceRegistry.AFTER_CONSTRAINT_REGISTRATION, true);
 
         return constraint;
     }
@@ -626,6 +666,156 @@ public class RapierPhysicsPipeline implements PhysicsPipeline {
     private Vector3d readAngularVelocity(final PhysicsPipelineBody body, final Vector3d dest) {
         Rapier3D.getAngularVelocity(this.scene.handle(), Rapier3D.getID(body), this.poseCache);
         return dest.set(this.poseCache);
+    }
+
+    private void traceRotaryPipeline(final String phase) {
+        final RotaryPipelineTraceRegistry.TraceState trace = RotaryPipelineTraceRegistry.get(this.level);
+        if (trace == null || this.scene == null) {
+            return;
+        }
+        final DiagnosticMembership membership = this.readDiagnosticMembership(trace);
+        final RapierBodyTrace bodyA = this.readRapierBodyTrace(trace.bodyAId(), membership.rigidBodySetContainsA());
+        final RapierBodyTrace bodyB = this.readRapierBodyTrace(trace.bodyBId(), membership.rigidBodySetContainsB());
+        final ServerSubLevel subLevelA = this.activeSubLevels.get(trace.bodyAId());
+        final ServerSubLevel subLevelB = this.activeSubLevels.get(trace.bodyBId());
+        final boolean jointHandleValid = membership.solverJointPresent();
+        String linearImpulse = "unavailable";
+        String angularImpulse = "unavailable";
+        if (jointHandleValid) {
+            Rapier3D.getConstraintImpulses(this.scene.handle(), trace.constraintHandle(), this.poseCache);
+            linearImpulse = "(" + this.poseCache[0] + "," + this.poseCache[1] + "," + this.poseCache[2] + ")";
+            angularImpulse = "(" + this.poseCache[3] + "," + this.poseCache[4] + "," + this.poseCache[5] + ")";
+        }
+
+        final RotaryPipelineTraceRegistry.PhaseSnapshot snapshot = RotaryPipelineTraceRegistry.recordRapierPhase(
+                this.level, phase, this.level.getGameTime(),
+                trace.bodyAId(), trace.bodyBId(), trace.constraintHandle(), jointHandleValid,
+                bodyA.present(), bodyB.present(),
+                bodyA.translation(), bodyB.translation(),
+                bodyA.rotation(), bodyB.rotation(),
+                bodyA.linearVelocity(), bodyB.linearVelocity(),
+                bodyA.angularVelocity(), bodyB.angularVelocity(),
+                bodyA.finite(), bodyB.finite(), bodyA.plausible(), bodyB.plausible(),
+                subLevelA != null && !subLevelA.isRemoved(), subLevelB != null && !subLevelB.isRemoved(),
+                subLevelA == null ? "unavailable" : subLevelA.logicalPose().toString(),
+                subLevelB == null ? "unavailable" : subLevelB.logicalPose().toString(),
+                "unavailable", "unavailable",
+                linearImpulse, angularImpulse);
+        if (snapshot == null) {
+            return;
+        }
+
+        Sable.LOGGER.info("SABLE_ROTARY_PIPELINE phase={}"
+                        + " sequence={} gameTime={} canarySessionId={}"
+                        + " bodyAUuid={} bodyBUuid={}"
+                        + " bodyAHandle={} bodyBHandle={}"
+                        + " jointHandle={} jointHandleValid={}"
+                        + " rapierTranslationA={} rapierTranslationB={}"
+                        + " rapierRotationA={} rapierRotationB={}"
+                        + " rapierLinearVelocityA={} rapierLinearVelocityB={}"
+                        + " rapierAngularVelocityA={} rapierAngularVelocityB={}"
+                        + " sleepingA=unavailable sleepingB=unavailable"
+                        + " localAnchorA={} localAnchorB={}"
+                        + " localAxisA={} localAxisB={}"
+                        + " jointLinearImpulse={} jointAngularImpulse={}"
+                        + " finiteA={} finiteB={} plausibleA={} plausibleB={}"
+                        + " firstFailureClassification={}",
+                phase,
+                snapshot.sequence(), snapshot.gameTime(), trace.canarySessionId(),
+                trace.bodyAUuid(), trace.bodyBUuid(),
+                trace.bodyAId(), trace.bodyBId(),
+                trace.constraintHandle(), jointHandleValid,
+                bodyA.translation(), bodyB.translation(),
+                bodyA.rotation(), bodyB.rotation(),
+                bodyA.linearVelocity(), bodyB.linearVelocity(),
+                bodyA.angularVelocity(), bodyB.angularVelocity(),
+                trace.localAnchorA(), trace.localAnchorB(),
+                trace.localAxisA(), trace.localAxisB(),
+                snapshot.jointLinearImpulse(), snapshot.jointAngularImpulse(),
+                bodyA.finite(), bodyB.finite(), bodyA.plausible(), bodyB.plausible(),
+                trace.firstFailureClassification());
+    }
+
+    private void traceRotaryLifecycle(final String phase, final boolean javaConstraintHandlePresent) {
+        final RotaryPipelineTraceRegistry.TraceState trace = RotaryPipelineTraceRegistry.get(this.level);
+        if (trace == null || this.scene == null) {
+            return;
+        }
+        final DiagnosticMembership membership = this.readDiagnosticMembership(trace);
+        final ServerSubLevel bodyA = this.activeSubLevels.get(trace.bodyAId());
+        final ServerSubLevel bodyB = this.activeSubLevels.get(trace.bodyBId());
+        final RotaryPipelineTraceRegistry.LifecycleSnapshot snapshot = RotaryPipelineTraceRegistry.recordLifecyclePhase(
+                this.level, phase, this.level.getGameTime(),
+                bodyA != null && !bodyA.isRemoved(), bodyB != null && !bodyB.isRemoved(),
+                this.activeSubLevels.containsKey(trace.bodyAId()), this.activeSubLevels.containsKey(trace.bodyBId()),
+                membership.rigidBodyMapContainsA(), membership.rigidBodyMapContainsB(),
+                membership.rigidBodySetContainsA(), membership.rigidBodySetContainsB(),
+                membership.nativeBodyHandleA(), membership.nativeBodyHandleB(),
+                javaConstraintHandlePresent && trace.constraintHandle() >= 0,
+                membership.logicalJointPresent(), membership.solverJointPresent(),
+                membership.rigidBodyCount(), membership.jointCount());
+        if (snapshot != null) {
+            Sable.LOGGER.info("SABLE_ROTARY_LIFECYCLE {}", snapshot.summary());
+        }
+    }
+
+    private DiagnosticMembership readDiagnosticMembership(final RotaryPipelineTraceRegistry.TraceState trace) {
+        final long[] membership = new long[10];
+        Rapier3D.getDiagnosticMembership(this.scene.handle(), trace.bodyAId(), trace.bodyBId(),
+                trace.constraintHandle(), membership);
+        return new DiagnosticMembership(membership[0] != 0, membership[1] != 0, membership[2],
+                membership[3] != 0, membership[4] != 0, membership[5],
+                membership[6] != 0, membership[7] != 0, (int) membership[8], (int) membership[9]);
+    }
+
+    private RapierBodyTrace readRapierBodyTrace(final int bodyId, final boolean rigidBodySetContains) {
+        if (!rigidBodySetContains) {
+            return RapierBodyTrace.missing();
+        }
+
+        final double[] pose = new double[7];
+        final double[] linear = new double[3];
+        final double[] angular = new double[3];
+        Rapier3D.getPose(this.scene.handle(), bodyId, pose);
+        Rapier3D.getLinearVelocity(this.scene.handle(), bodyId, linear);
+        Rapier3D.getAngularVelocity(this.scene.handle(), bodyId, angular);
+        final boolean finite = finite(pose) && finite(linear) && finite(angular);
+        final boolean plausible = finite
+                && Math.abs(pose[1]) <= Math.max(Math.abs(SableConfig.SUB_LEVEL_REMOVE_MIN.getAsDouble()),
+                Math.abs(SableConfig.SUB_LEVEL_REMOVE_MAX.getAsDouble()));
+        return new RapierBodyTrace(
+                "(" + pose[0] + "," + pose[1] + "," + pose[2] + ")",
+                "(" + pose[3] + "," + pose[4] + "," + pose[5] + "," + pose[6] + ")",
+                "(" + linear[0] + "," + linear[1] + "," + linear[2] + ")",
+                "(" + angular[0] + "," + angular[1] + "," + angular[2] + ")",
+                finite,
+                plausible,
+                true);
+    }
+
+    private static boolean finite(final double[] values) {
+        for (final double value : values) {
+            if (!Double.isFinite(value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private record RapierBodyTrace(String translation, String rotation, String linearVelocity,
+                                   String angularVelocity, boolean finite, boolean plausible, boolean present) {
+        private static RapierBodyTrace missing() {
+            return new RapierBodyTrace("unavailable", "unavailable", "unavailable", "unavailable",
+                    false, false, false);
+        }
+    }
+
+    private record DiagnosticMembership(boolean rigidBodyMapContainsA, boolean rigidBodySetContainsA,
+                                        long nativeBodyHandleA,
+                                        boolean rigidBodyMapContainsB, boolean rigidBodySetContainsB,
+                                        long nativeBodyHandleB,
+                                        boolean logicalJointPresent, boolean solverJointPresent,
+                                        int rigidBodyCount, int jointCount) {
     }
 
     private void updateContraptionPoses() {

@@ -2163,3 +2163,207 @@ Current status after static M23.6 fix: `M23 IMPLEMENTED / RUNTIME_REQUIRED`.
 M23 remains not closed until runtime confirms the audited fresh fixture bodies
 are the intended six-block bodies and any true 23-block candidate is either an
 unrelated old body or is investigated with the printed raw block list.
+
+User runtime evidence after M23.6 closes M23 as `M23 CLOSED / RUNTIME_PROVEN`.
+The proven M23 facts are: Spring creation PASS, real restoring force PASS,
+save/reload with active Spring PASS, active Spring disassembly guard PASS,
+Spring endpoint teardown removes both actors and active constraints PASS, M22
+disassembly/reassembly after teardown PASS, Create Super Glue roundtrip PASS,
+six-block fixture body count PASS, distinct-body Sable targeting PASS, nudge
+identity PASS, and Rapier world-terrain collision PASS. M21 and M22 remain
+closed/frozen and the M20 Crushing Wheels entity-processing issue remains the
+only accepted earlier deferred issue.
+
+## M24 Simulated Remaining Physical Systems And Onboard Foundation
+
+M24 ports the remaining ordinary Simulated physical system foundation from
+frozen Simulated commit `9e60263fb5cb00033f14af655a7e72cf7aebb3e2` without
+starting Aeronautics. The system and source decisions are documented in
+`M24_SIMULATED_SYSTEM_MATRIX.md` and `M24_SIMULATED_PORT_MATRIX.md`.
+
+The target Forge registration graph now includes the upstream IDs for
+`torsion_spring`, `swivel_bearing`, `swivel_bearing_link_block`, `rope_winch`,
+`docking_connector`, `paired_docking_connector`, `altitude_sensor`,
+`velocity_sensor`, `optical_sensor`, and `steering_wheel`. The existing
+`rope_connector` block has been upgraded from M21 structural-only to a
+block-entity-backed M24 rope endpoint while preserving its registry ID and item.
+
+Swivel uses the backported Sable `RotaryConstraintConfiguration` and
+`RotaryConstraintHandle`. Docking uses `FixedConstraintConfiguration`. Rope and
+winch use `RopePhysicsObject` and `RopeHandle`. Torsion Spring is kept as a
+registered structural/onboard Create-kinetic foundation because the frozen
+Simulated class is a Create `KineticBlockEntity`/`ExtraKinetics` output, not a
+Sable backend joint. Onboard sensors expose bounded redstone diagnostics from
+visible Sable pose/velocity/raycast state. Steering Wheel is input-only; no
+Aeronautics control authority is implemented.
+
+New `/sable m24` commands provide `status`, `fixture torsion basic`,
+`fixture swivel basic`, `fixture rope basic`, `fixture winch basic`,
+`fixture docking basic`, and `inspect <family>`. The fixtures create ordinary
+glued M22-compatible bodies resting on ordinary stone platforms; users still
+assemble them through the normal Physics Assembler lifecycle.
+
+Current status after static M24 implementation: `M24 IMPLEMENTED /
+RUNTIME_REQUIRED`. Codex did not launch Minecraft. Runtime must still prove the
+five M24 fixture families, active-constraint disassembly blocking, save/reload,
+removal cleanup, and onboard sensor signals before M24 can close.
+
+Runtime status entering M24.1: `M24 IMPLEMENTED / RUNTIME_REQUIRED /
+SHARED_FIXTURE_BODY_BLOCKER`. User evidence showed M24 status loaded, but
+`/sable m24 fixture swivel basic` followed by normal Physics Assembler
+interactions caused both intended structures to disappear visually and lose
+collision. Swivel inspect then reported a partial/static-world endpoint state
+instead of a real two-body rotary constraint.
+
+M24.1 repairs the shared fixture/body/endpoint command architecture used by the
+torsion, swivel, rope, winch, and docking fixtures. `/sable m24 bodies` now
+validates the two expected fixture bodies from authoritative sublevel storage:
+stored blocks, Physics Assembler inclusion, endpoint inclusion, distinct Sable
+IDs, registered body state, and uploaded collision geometry. Fixture creation
+also emits `SABLE_M24_ASSEMBLY_SELECTION` for each body, and assembled-body
+inspection emits `SABLE_M24_BODY_LIFECYCLE`. Constraint-backed M24 endpoint
+inspection no longer reports `READY` for `STATIC_WORLD` or `PARTIAL` ownership;
+it reports `WAITING_FOR_VALID_BODIES`, `PARTIAL_ENDPOINT_RESOLUTION`,
+`WAITING_FOR_BACKEND`, `ERROR_SAME_BODY`, or `ACTIVE`.
+
+Current status after static M24.1 fix: `M24 IMPLEMENTED / RUNTIME_REQUIRED`.
+The corrective pass does not change Spring force law, Spring teardown, Rapier
+terrain collision, M22 glue traversal, or M22 disassembly semantics. Runtime
+must still prove the shared body gate and then each applicable M24 family before
+M24 can close.
+
+Runtime status entering M24.2: `M24 IMPLEMENTED / RUNTIME_REQUIRED /
+CONSTRAINT_FRAME_BLOCKER`. The previous M24.1 report had
+`artifactFresh=false`, so no M24.1 runtime closure evidence exists. User
+runtime evidence from the current artifact proved M24 fixture assembly
+selection was correct and produced real six-block Sables, but Swivel backend
+constraint creation immediately drove both connected Sables into Sable's
+extreme-coordinate safety removal path.
+
+M24.2 repairs the shared backend frame boundary for Swivel, Docking, Rope, and
+Winch. The audit in `M24_2_CONSTRAINT_FRAME_AUDIT.md` records that Sable
+Rotary/Fixed configurations validate raw plot-space anchors while Rapier
+converts them to body-local anchors through center-of-mass subtraction, and
+that Rope must use visible scene-space points with raw plot-space attachment
+anchors. The generic M24 backend now derives upstream-style Swivel face
+anchors, Docking tip anchors, Docking relative orientation, visible rope
+points, and raw rope attachments. It emits `SABLE_M24_CONSTRAINT_FRAME`
+diagnostics, rejects non-finite or unsatisfied rigid-joint frames before
+backend creation, and reports `ACTIVE` only after first-step validation.
+`/sable m24 status` now prints `implementationRevision=M24.2`.
+
+Current status after static M24.2 fix: `M24 IMPLEMENTED / RUNTIME_REQUIRED`.
+No Spring force/targeting/teardown, Rapier terrain collision,
+PhysicsColliderBlockGetter, or M22/M23 proven lifecycle behavior was changed.
+Runtime testing requires a freshly packaged artifact with the M24.2 marker.
+
+Runtime status entering M24.3: `M24 IMPLEMENTED / RUNTIME_REQUIRED`.
+User runtime evidence from the M24.2 source corrected the earlier Swivel
+hypothesis: Swivel endpoint anchors were aligned, and the old
+`FIRST_STEP_VALIDATED` diagnostic was sampling before the actual Rapier
+solver/pose-sync boundary. Rope and Winch showed delayed violent motion after
+initial zero-motion samples, and Docking showed lifecycle asymmetry rather
+than an obvious physical-frame failure.
+
+M24.3 repairs exact family runtime semantics that had been collapsed into the
+generic M24 placeholder. Swivel now uses upstream-equivalent passive friction
+unless a target angle is explicitly present, instead of applying a stiff
+generic servo in the basic fixture state. Rope/Winch now initialize from
+frozen-upstream visible-distance rope segmentation and first-segment extension
+instead of forcing a fixed length. Docking active-constraint visibility is
+symmetric for both connected bodies, preserving the M22 guard rather than
+weakening it. M24 post-create diagnostics now sample after actual solver
+ticks (`AFTER_PHYSICS_STEP_1`, `2`, `5`, and for ropes `20`), and
+`ServerSubLevel` logs the exact extreme Y min/max, logical pose, and plot
+bounds before safety removal.
+
+`/sable m24 status` now prints `implementationRevision=M24.3`. No Spring
+force/targeting/teardown, Rapier terrain collision, M22 glue selection, or
+M22 disassembly transaction behavior was changed.
+
+Runtime status entering M24.4: `M24 IMPLEMENTED / RUNTIME_REQUIRED`.
+User runtime evidence classified Swivel as a backend-primitive suspect after
+excellent pre-create frame diagnostics still led to immediate post-handle
+extreme-coordinate removal. Rope and Winch showed an apparent
+`5.375 -> 0.375` length mismatch, Docking core physics was stable but still
+needed lifecycle qualification, and Torsion required exact upstream semantic
+qualification.
+
+M24.4 adds a Simulated-free `/sable m24 backend_canary rotary` command to
+isolate Sable/Rapier rotary handle creation from Swivel gameplay. Swivel fixture
+endpoints now match frozen upstream's bearing-to-link relationship and plate
+offset. Rope/Winch diagnostics now distinguish first-segment extension from
+total configured rope length: for a `5.375` block rope, `0.375` is the upstream
+short segment and the neutral total is `5.375`. `/sable m24 bodies` records
+authoritative fixture Sable UUIDs after first resolution so moving Rope/Winch
+bodies are not lost by stale spatial lookup. Collision upload bookkeeping is
+reported separately from authoritative body-handle validity.
+
+`/sable m24 status` now prints `implementationRevision=M24.4`. Docking Fixed
+backend creation, Spring force/targeting/teardown, Rapier terrain collision,
+M22 glue selection, and M22/M23 proven lifecycle behavior were not modified.
+Current status after static M24.4 fix: `M24 IMPLEMENTED / RUNTIME_REQUIRED`.
+
+Runtime status entering M24.4a: `M24 IMPLEMENTED / RUNTIME_REQUIRED /
+COMMAND_HARNESS_BLOCKER`. After a manual M24.4 build, the M24 command tree was
+present but fixture commands could appear to do nothing, and `/sable m24
+bodies` could fail to provide useful state. This pass is scoped to command and
+fixture harness execution only.
+
+`/sable m24 status` now prints `implementationRevision=M24.4a`. Fixture
+commands emit `SABLE_M24_FIXTURE_TRACE` through command receipt, origin
+resolution, cleanup, platform placement, body placement, glue creation, state
+storage, and completion. Fixture creation is explicitly independent of resolved
+Sable UUIDs; a fresh fixture is `PARENT_FIXTURE_READY` with both body IDs
+unresolved until the user assembles the Physics Assemblers.
+
+`/sable m24 bodies` now reports every lifecycle state explicitly:
+`no_active_fixture`, `WAITING`, `PARTIAL`, or `PASS`. A new `/sable m24 cleanup`
+command removes only parent-world M24 fixture blocks/glue tracked by the test
+harness and does not delete user Sables or production constraint registries.
+Current status after static M24.4a fix: `M24 IMPLEMENTED / RUNTIME_REQUIRED`.
+
+Runtime status entering M24.5: `M24 IMPLEMENTED / RUNTIME_REQUIRED /
+ROTARY_BACKEND_BLOCKER / ROPE_BACKEND_CANARY_REQUIRED`. The pure
+`/sable m24 backend_canary rotary` runtime gate proved the Rotary primitive
+failed below Simulated: two ordinary M22/Sable bodies with coincident visible
+anchors were pushed to multi-million-coordinate poses immediately after handle
+creation. M24.5 fixes the target Sable/Rapier boundary by initializing the
+Rapier revolute joint with body-local anchors and both local axes at insertion
+time, matching the frame that the existing joint tick updater already applies.
+
+Rope length semantics remain frozen from M24.4: configured total length and
+backend current length begin equal. M24.5 adds `/sable m24 backend_canary rope`
+to isolate RopePhysicsObject/RopeHandle from Simulated Rope Connector/Winch and
+initializes rope attachment joints with the requested raw attachment converted
+to body-local space at insertion time. This addresses the first-step impulse
+boundary without rewriting rope length, Winch target, or force semantics.
+
+Fixture body identity is now captured at M22 assembly completion through
+`M24SimulatedSystemsCommands.onM22AssemblyCreated`, before M24 endpoint
+auto-pairing can create a backend handle. `/sable m24 bodies` reports last-known
+UUIDs and `bodyPresent=false` if a backend failure removes a body, instead of
+collapsing that state to `unresolved`.
+
+`/sable m24 status` now prints `implementationRevision=M24.5`. Docking Fixed
+physics, Spring force/targeting/teardown, Rapier terrain collision, M22 glue
+selection, and M22/M23 runtime-proven lifecycle behavior were not modified.
+Current status after static M24.5 fix: `M24 IMPLEMENTED / RUNTIME_REQUIRED`.
+
+### M24 Closure
+
+Manual runtime acceptance through M24.12 closes the remaining ordinary
+Simulated physical-system foundation as `M24 CLOSED / RUNTIME_PROVEN`.
+
+| Family | Final disposition | Accepted runtime evidence |
+| --- | --- | --- |
+| Swivel Bearing | `RUNTIME_PROVEN` | Stable active Rotary constraint, intended hinge behavior, and no body loss. |
+| Rope Connector | `RUNTIME_PROVEN` | Stable physical connection with correct visible rendering. |
+| Rope Winch | `RUNTIME_PROVEN` | Real Create kinetic RPM changes rope length correctly, including stop and reverse. |
+| Docking Connector | `RUNTIME_PROVEN` | Stable FixedConstraint, real redstone falling-edge disconnect, no immediate re-pair, and successful post-disconnect disassembly. |
+| Torsion Spring | `RUNTIME_PROVEN` | Create kinetic/ExtraKinetics behavior and final dynamic rendering work without missing-texture geometry. |
+
+The earlier M24.x `RUNTIME_REQUIRED` entries above are chronological records of
+their then-current gates and are superseded by this closure. M21-M24 are now
+frozen as the completed Simulated/Sable foundation. M25 Aeronautics bootstrap
+and lift is the next milestone and has not started.

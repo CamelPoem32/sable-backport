@@ -3618,3 +3618,339 @@ Expected for M23.6:
 - Any true 23-block candidate prints raw block IDs and positions for follow-up
   root-cause analysis.
 - M23.4 selection remains `selectedBlockCount=6` and `selectedPlatformBlocks=0`.
+
+## M24 Simulated Systems Runtime Sequence
+
+M24 must be tested manually. Codex must not launch Minecraft.
+
+Shortest manual sequence:
+
+```text
+Start Minecraft and reach the title screen.
+Open the existing test world in a fresh area.
+/sable m24 status
+/sable m24 fixture swivel basic
+Right-click both printed Physics Assemblers.
+/sable m24 inspect swivel
+Verify constraintMode=SABLE_TO_SABLE, active=true, and both handles are valid.
+Attempt normal disassembly while active and verify DISASSEMBLY_BLOCKED.
+Break one swivel endpoint, then disassemble both bodies.
+/sable m24 fixture rope basic
+Assemble both bodies, wait for pairing, /sable m24 inspect rope.
+Verify rope active=true, then break one endpoint and disassemble both bodies.
+/sable m24 fixture winch basic
+Assemble both bodies, /sable m24 inspect winch, toggle/redstone the winch once, then break endpoint and disassemble.
+/sable m24 fixture docking basic
+Assemble both bodies, /sable m24 inspect docking, verify fixed constraint active, then break endpoint and disassemble.
+/sable m24 fixture torsion basic
+Assemble both bodies, /sable m24 inspect torsion, verify structural/onboard diagnostics and no invented Aeronautics control.
+Place altitude_sensor, velocity_sensor, optical_sensor, and steering_wheel on a small glued M22 body.
+Assemble it and verify /sable m24 inspect altitude|velocity|optical|steering reports onboard diagnostics.
+Save and quit with one active M24 constraint fixture assembled.
+Reload and verify /sable m24 inspect <family> still resolves coherently.
+Remove the endpoint and verify both bodies disassemble/reassemble without block loss.
+```
+
+Expected for M24:
+
+- M21, M22, and M23 remain closed/runtime-proven.
+- `simulated:torsion_spring`, `swivel_bearing`, `swivel_bearing_link_block`,
+  `rope_connector`, `rope_winch`, `docking_connector`,
+  `paired_docking_connector`, `altitude_sensor`, `velocity_sensor`,
+  `optical_sensor`, and `steering_wheel` are registered with assets and block
+  entity types where applicable.
+- Swivel creates a Sable rotary constraint between two distinct Sables.
+- Docking creates a Sable fixed constraint between two distinct Sables and does
+  not merge bodies.
+- Rope/winch create a Sable rope object between two distinct Sables.
+- Torsion remains a structural/onboard Create-kinetic foundation, not an
+  invented Sable constraint.
+- Onboard sensors use visible Sable coordinates and do not leak hidden plot
+  coordinates.
+- Active M24 constraints block M22 disassembly until endpoint removal clears the
+  exact relationship.
+
+## M24.1 Shared Fixture Body Runtime Sequence
+
+M24.1 must be tested manually. Codex must not launch Minecraft.
+
+Run this shared body gate first:
+
+```text
+/sable m24 fixture swivel basic
+Right-click body A Physics Assembler.
+Right-click body B Physics Assembler.
+/sable m24 bodies
+```
+
+Expected before any Swivel/Rope/Docking behavior is judged:
+
+- `SABLE_M24_ASSEMBLY_SELECTION` reported `selectedPlatformBlocks=0`,
+  `assemblerIncluded=true`, and `endpointIncluded=true` for both bodies.
+- `/sable m24 bodies` reports `status=PASS`, `sameSable=false`,
+  `storedBlockCount=6` for both bodies, `assemblerPresent=true`,
+  `endpointPresent=true`, `bodyRegistered=true`, and
+  `collisionGeometryPresent=true`.
+- Both bodies are visible and collidable in runtime. Static verification cannot
+  prove client rendering.
+
+Then continue:
+
+```text
+/sable m24 inspect swivel
+Create/activate Swivel using the normal endpoint semantics.
+/sable m24 inspect swivel
+Save and quit.
+Reload.
+/sable m24 inspect swivel
+Break/disconnect one endpoint.
+Disassemble and reassemble both bodies.
+```
+
+Repeat the same shortened pattern for rope, winch, docking, torsion, and onboard
+sensor blocks. A SABLE_TO_SABLE fixture must fail loudly with
+`WAITING_FOR_VALID_BODIES` or `PARTIAL_ENDPOINT_RESOLUTION` if either endpoint
+resolves to `static_world`; it must not count as M24 runtime acceptance.
+
+## M24.2 Constraint Frame Runtime Sequence
+
+M24.2 may be tested only from a freshly packaged artifact whose
+`/sable m24 status` output contains `implementationRevision=M24.2`. Codex must
+not launch Minecraft.
+
+First test Swivel only:
+
+```text
+/sable m24 status
+/sable m24 fixture swivel basic
+Right-click body A Physics Assembler.
+Right-click body B Physics Assembler.
+/sable m24 bodies
+Create/activate Swivel using normal endpoint semantics.
+Wait several physics ticks.
+/sable m24 bodies
+/sable m24 inspect swivel
+```
+
+Expected for Swivel:
+
+- Before connection, `/sable m24 bodies` reports two distinct six-block Sables
+  with `bodyRegistered=true` and `collisionGeometryPresent=true`.
+- `SABLE_M24_CONSTRAINT_FRAME phase=BEFORE_CREATE` reports raw plot anchors,
+  visible anchors, body-local magnitudes, and a small
+  `computedBackendAnchorError`.
+- Constraint creation reports `BACKEND_CREATED`, then
+  `FIRST_STEP_VALIDATED`, then inspect may report `ACTIVE`.
+- No sublevel is removed by the extreme-coordinate safety boundary.
+
+Only after Swivel passes, run the same isolated fixture pattern for Rope,
+Winch, and Docking. Rope must show visible scene-space rope points and raw
+Sable attachment anchors. Docking must show fixed-constraint tip anchors with a
+small initial error. Torsion remains a structural/onboard Create-kinetic gate,
+not a backend joint.
+## M24.3 Ordered Runtime Smoke
+
+Run only with an artifact whose `/sable m24 status` reports
+`implementationRevision=M24.3`.
+
+Gate 1, Swivel:
+
+1. `/sable m24 fixture swivel basic`
+2. Assemble body A and body B normally.
+3. `/sable m24 bodies`
+4. Connect Swivel normally.
+5. Wait 5 seconds.
+6. `/sable m24 bodies`
+7. `/sable m24 inspect swivel`
+
+Expected: both original Sable UUIDs still exist, positions/velocities are
+finite, collision remains present, no extreme-coordinate removal occurs, and
+Swivel reaches ACTIVE only after post-solver validation.
+
+Gate 2, Rope:
+
+1. `/sable m24 fixture rope basic`
+2. Assemble both bodies and create the rope.
+3. Wait without controls.
+4. `/sable m24 bodies`
+5. `/sable m24 inspect rope`
+
+Expected: the rope remains stable at its initial visible length. Diagnostics
+should show upstream-style first-segment extension rather than a fixed fallback
+length.
+
+Gate 3, Winch:
+
+1. `/sable m24 fixture winch basic`
+2. Assemble both bodies and create a stable rope first.
+3. Verify no violent impulse with no kinetic command.
+4. Then test a real Create kinetic drive.
+
+Expected: target length changes gradually only when driven.
+
+Gate 4, Docking:
+
+1. `/sable m24 fixture docking basic`
+2. Assemble both bodies and dock normally.
+3. Verify both bodies obey the same active-constraint disassembly lifecycle.
+4. Disconnect/remove according to normal semantics.
+
+Expected: no controller-only stale active constraint.
+
+Gate 5, Torsion:
+
+Use a fixture with the upstream-required Create kinetic/preload input. A
+stationary equilibrium fixture alone is inconclusive.
+
+## M24.4 Ordered Runtime Smoke
+
+Run only with an artifact whose `/sable m24 status` reports
+`implementationRevision=M24.4`. Codex must not launch Minecraft.
+
+Gate 1, Rotary backend isolation:
+
+1. `/sable m24 backend_canary rotary`
+2. Wait at least 20 ticks.
+3. `/sable m24 backend_canary rotary inspect`
+
+Expected: the same two UUIDs remain present, both body handles are valid, the
+rotary handle is valid, transforms/velocities are finite, and no
+extreme-coordinate removal occurs. If this canary explodes, debug Sable/Rapier
+Rotary before Swivel.
+
+Gate 2, Swivel:
+
+1. `/sable m24 fixture swivel basic`
+2. Assemble body A and body B normally.
+3. `/sable m24 bodies`
+4. Create Swivel normally.
+5. Wait at least 5 seconds.
+6. `/sable m24 bodies`
+7. `/sable m24 inspect swivel`
+
+Expected: body B endpoint is `swivel_bearing_link_block`, both body UUIDs stay
+stable, no extreme-coordinate removal occurs, and Swivel reaches ACTIVE only
+after post-solver validation.
+
+Gate 3, Rope:
+
+1. `/sable m24 fixture rope basic`
+2. Assemble both bodies and create Rope.
+3. Inspect the log line `SABLE_M24_ROPE_DEBUG`.
+4. Wait 5 seconds.
+5. `/sable m24 bodies`
+6. `/sable m24 inspect rope`
+
+Expected: `firstSegmentExtension` may be fractional, but
+`configuredLength`, `storedConfiguredLength`, and `backendCurrentLength` are
+total rope lengths and start with near-zero `initialConstraintError`.
+
+Gate 4, Winch:
+
+Run Winch only after Rope is stable. With no Create kinetic drive, the rope
+starts at its neutral total length. With real Create kinetic input, target
+length changes gradually rather than jumping at creation.
+
+Gate 5, Docking:
+
+Dock, verify both assemblers are blocked while connected, save/reload,
+disconnect through normal endpoint removal/interaction, then disassemble and
+reassemble both bodies. Fixed backend physics should remain unchanged from the
+runtime-proven core behavior.
+
+Gate 6, Torsion:
+
+Qualify against frozen upstream Create-kinetic/onboard semantics. Do not treat
+a stationary equilibrium fixture as a missing backend-joint failure by itself.
+
+## M24.4a Command Harness Smoke
+
+Run only with an artifact whose `/sable m24 status` reports
+`implementationRevision=M24.4a`. This is command-only harness acceptance; do
+not begin physical Swivel/Rope/Winch/Docking qualification until these pass.
+
+1. `/sable m24 status`
+2. `/sable m24 cleanup`
+3. `/sable m24 bodies`
+4. `/sable m24 fixture swivel basic`
+5. `/sable m24 bodies`
+6. Repeat cleanup/spawn/bodies for `rope`, `winch`, `docking`, and `torsion`.
+7. `/sable m24 backend_canary rotary`
+8. `/sable m24 backend_canary rotary inspect`
+
+Expected command behavior:
+
+- `status` prints `implementationRevision=M24.4a`.
+- `cleanup` always prints explicit output.
+- `bodies` with no fixture prints `status=FAIL reason=no_active_fixture`.
+- each fixture prints `SABLE_M24_FIXTURE_TRACE` and final
+  `SABLE_M24_FIXTURE status=PASS`.
+- after spawning but before assembly, `bodies` prints `status=WAITING` with
+  unresolved Sable UUIDs and parent-world assembler/component presence.
+- backend canary either creates its self-contained test or reports an explicit
+  failure reason; it must not be silent.
+
+## M24.5 Rotary/Rope Backend Smoke
+
+Run only with an artifact whose `/sable m24 status` reports
+`implementationRevision=M24.5`. Codex must not launch Minecraft.
+
+Gate 1, pure Rotary primitive:
+
+1. `/sable m24 status`
+2. `/sable m24 backend_canary rotary`
+3. Wait 5 seconds.
+4. `/sable m24 backend_canary rotary inspect`
+
+Expected: the same two body UUIDs are still present, both handles remain valid,
+the Rotary backend handle remains valid, visible positions remain finite and
+ordinary, and no extreme-coordinate removal occurs. If this fails, stop before
+testing Swivel.
+
+Gate 2, Swivel after Rotary canary pass:
+
+1. `/sable m24 cleanup`
+2. `/sable m24 fixture swivel basic`
+3. Assemble body A.
+4. `/sable m24 bodies`
+5. Assemble body B; auto-pair is expected.
+6. `/sable m24 bodies`
+7. `/sable m24 inspect swivel`
+
+Expected: body UUIDs are captured at assembly completion. If Rotary still
+removes the bodies, `/sable m24 bodies` must report the last-known UUIDs with
+`bodyPresent=false`, not `unresolved`.
+
+Gate 3, pure Rope primitive:
+
+1. `/sable m24 backend_canary rope`
+2. Wait 5 seconds.
+3. `/sable m24 backend_canary rope inspect`
+
+Expected: configured length and backend current length start equal; bodies and
+rope handle remain valid after physics steps. If this fails, stop before
+gameplay Rope or Winch.
+
+Gate 4, Rope/Winch only after pure Rope passes:
+
+Use fresh isolated `rope` and then `winch` fixtures. Verify no sudden first-step
+impulse, and only then test Winch target changes from real Create kinetic input.
+
+Docking Fixed remains the known-good control and should be qualified for
+save/reload/disconnect without changing Fixed physics.
+
+## M24 Final Runtime Acceptance
+
+Manual runtime acceptance is complete for the M24.12 artifact.
+
+| Family | Final disposition | Runtime acceptance |
+| --- | --- | --- |
+| Swivel Bearing | `RUNTIME_PROVEN` | Stable active Rotary constraint, correct hinge behavior, and no body loss. |
+| Rope Connector | `RUNTIME_PROVEN` | Stable physical connection and correct connection rendering. |
+| Rope Winch | `RUNTIME_PROVEN` | Real Create kinetic RPM changes rope length; stop and reverse both work. |
+| Docking Connector | `RUNTIME_PROVEN` | FixedConstraint works; real redstone falling edge disconnects; no immediate re-pair; both bodies disassemble afterward. |
+| Torsion Spring | `RUNTIME_PROVEN` | Create kinetic/ExtraKinetics mechanics and the final dynamic renderer work without missing-texture geometry. |
+
+Final milestone status: `M24 CLOSED / RUNTIME_PROVEN`. No additional M24
+runtime gate remains for these five families. M21-M24 are frozen as the
+completed Simulated/Sable foundation; M25 is next and is not started here.

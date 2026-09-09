@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=down": { "model": "simulated:block/steering_wheel" },
+    "facing=east": { "model": "simulated:block/steering_wheel" },
+    "facing=north": { "model": "simulated:block/steering_wheel" },
+    "facing=south": { "model": "simulated:block/steering_wheel" },
+    "facing=up": { "model": "simulated:block/steering_wheel" },
+    "facing=west": { "model": "simulated:block/steering_wheel" }
+  }
+}

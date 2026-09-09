@@ -1,6 +1,21 @@
 {
   "variants": {
-    "": {
+    "facing=down": {
+      "model": "simulated:block/rope_connector"
+    },
+    "facing=east": {
+      "model": "simulated:block/rope_connector"
+    },
+    "facing=north": {
+      "model": "simulated:block/rope_connector"
+    },
+    "facing=south": {
+      "model": "simulated:block/rope_connector"
+    },
+    "facing=up": {
+      "model": "simulated:block/rope_connector"
+    },
+    "facing=west": {
       "model": "simulated:block/rope_connector"
     }
   }

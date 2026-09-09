@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=down": { "model": "simulated:block/optical_sensor" },
+    "facing=east": { "model": "simulated:block/optical_sensor" },
+    "facing=north": { "model": "simulated:block/optical_sensor" },
+    "facing=south": { "model": "simulated:block/optical_sensor" },
+    "facing=up": { "model": "simulated:block/optical_sensor" },
+    "facing=west": { "model": "simulated:block/optical_sensor" }
+  }
+}

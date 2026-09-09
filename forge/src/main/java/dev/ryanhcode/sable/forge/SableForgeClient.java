@@ -26,6 +26,8 @@ final class SableForgeClient {
         SableForgeTargetRuntimeSmoke.install();
         SableForgeStandaloneRuntimeSmoke.install();
         SableForgeClientRenderEvents.register();
+        SableForgeM24PartialModels.register(modBus);
+        SableForgeM24ConnectionVisuals.register(modBus);
         ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, SableClientConfig.SPEC);
 
         modBus.<ModConfigEvent.Loading>addListener(event -> SableClientConfig.onUpdate(false));

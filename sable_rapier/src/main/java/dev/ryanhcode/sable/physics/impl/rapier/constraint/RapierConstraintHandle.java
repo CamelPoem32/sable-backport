@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.physics.impl.rapier.constraint;
 
 import dev.ryanhcode.sable.api.physics.constraint.ConstraintJointAxis;
+import dev.ryanhcode.sable.diagnostic.RotaryPipelineTraceRegistry;
 import dev.ryanhcode.sable.physics.impl.rapier.Rapier3D;
 import org.jetbrains.annotations.ApiStatus;
 import org.joml.Vector3d;
@@ -36,6 +37,8 @@ public abstract class RapierConstraintHandle {
     }
 
     public void remove() {
+        RotaryPipelineTraceRegistry.recordJointRemovalByHandle(this.handle,
+                RapierConstraintHandle.class.getName(), "remove", "explicit_constraint_handle_remove");
         Rapier3D.removeConstraint(this.sceneHandle, this.handle);
     }
 

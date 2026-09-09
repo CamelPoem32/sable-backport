@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=down": { "model": "simulated:block/rope_winch" },
+    "facing=east": { "model": "simulated:block/rope_winch" },
+    "facing=north": { "model": "simulated:block/rope_winch" },
+    "facing=south": { "model": "simulated:block/rope_winch" },
+    "facing=up": { "model": "simulated:block/rope_winch" },
+    "facing=west": { "model": "simulated:block/rope_winch" }
+  }
+}

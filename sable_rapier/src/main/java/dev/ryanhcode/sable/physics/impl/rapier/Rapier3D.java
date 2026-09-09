@@ -157,6 +157,16 @@ public final class Rapier3D {
     static native void removeSubLevel(final long sceneHandle, int id);
 
     /**
+     * Reads backend ownership without dereferencing a possibly removed body or joint.
+     * Layout: body-map A, rigid-body-set A, backend handle A, body-map B,
+     * rigid-body-set B, backend handle B, logical joint, solver joint,
+     * rigid-body count, solver-joint count.
+     */
+    @ApiStatus.Internal
+    static native void getDiagnosticMembership(final long sceneHandle, int bodyAId, int bodyBId,
+                                               long jointHandle, long[] store);
+
+    /**
      * All poses are formatted in a double array as:
      * [x, y, z, qx, qy, qz, qw]
      */

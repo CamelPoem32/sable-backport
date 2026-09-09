@@ -18,6 +18,7 @@ import dev.ryanhcode.sable.sublevel.storage.SubLevelRemovalReason;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import dev.ryanhcode.sable.sublevel.tracking_points.SubLevelTrackingPointSavedData;
 import dev.simulated_team.simulated.content.blocks.physics_assembler.PhysicsAssemblerBlockEntity;
+import dev.simulated_team.simulated.content.blocks.m24.M24ActiveConstraintProvider;
 import dev.simulated_team.simulated.content.blocks.spring.SpringBlockEntity;
 import dev.simulated_team.simulated.index.SimulatedBlocks;
 import dev.simulated_team.simulated.index.SimulatedConfig;
@@ -451,7 +452,7 @@ public final class SimAssemblyHelper {
 
     private static void throwDisassemblyExceptions(final ServerLevel level, final ServerSubLevel subLevel)
             throws AssemblyException {
-        final List<String> activeConstraints = findActiveSpringConstraints(level, subLevel);
+        final List<String> activeConstraints = findActiveSimulatedConstraints(level, subLevel);
         if (!activeConstraints.isEmpty()) {
             throw SimAssemblyException.activeConstraint(activeConstraints);
         }
@@ -480,6 +481,18 @@ public final class SimAssemblyHelper {
             if (level.getBlockEntity(block) instanceof final SpringBlockEntity spring
                     && spring.isActiveConstraint()) {
                 active.add(spring.logicalConstraintId());
+            }
+        }
+        return active;
+    }
+
+    private static List<String> findActiveSimulatedConstraints(final ServerLevel level, final ServerSubLevel subLevel) {
+        final ObjectArrayList<String> active = new ObjectArrayList<>();
+        active.addAll(findActiveSpringConstraints(level, subLevel));
+        for (final BlockPos block : collectBlocks(level, subLevel)) {
+            if (level.getBlockEntity(block) instanceof final M24ActiveConstraintProvider constraint
+                    && constraint.simulated$hasActiveConstraint()) {
+                active.add(constraint.simulated$getLogicalConstraintId());
             }
         }
         return active;

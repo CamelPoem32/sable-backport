@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=down": { "model": "simulated:block/swivel_bearing" },
+    "facing=east": { "model": "simulated:block/swivel_bearing" },
+    "facing=north": { "model": "simulated:block/swivel_bearing" },
+    "facing=south": { "model": "simulated:block/swivel_bearing" },
+    "facing=up": { "model": "simulated:block/swivel_bearing" },
+    "facing=west": { "model": "simulated:block/swivel_bearing" }
+  }
+}

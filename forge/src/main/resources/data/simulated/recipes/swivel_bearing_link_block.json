@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " I ",
+    "ISI",
+    " I "
+  ],
+  "key": {
+    "I": {
+      "item": "minecraft:iron_ingot"
+    },
+    "S": {
+      "item": "simulated:swivel_bearing"
+    }
+  },
+  "result": {
+    "item": "simulated:swivel_bearing_link_block"
+  }
+}

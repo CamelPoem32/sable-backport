@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use jni::JNIEnv;
 use jni::objects::{JClass, JDoubleArray};
 use jni::sys::{jboolean, jdouble, jint, jlong, jsize};
+use log::info;
 use marten::Real;
 use rapier3d::dynamics::{GenericJointBuilder, JointAxis, RigidBodyBuilder, SpringCoefficients};
 use rapier3d::geometry::{ColliderBuilder, SharedShape};
@@ -172,6 +173,23 @@ pub extern "system" fn Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_cre
         sable_data.rope_map.counting_id += 1;
         let id = sable_data.rope_map.counting_id;
 
+        info!(
+            "SABLE_ROPE_BACKEND_CONSTRUCT_NATIVE ropeId={} pointRadius={} actualConstructorLengthArgument={} actualStoredBackendLength={} segmentCount={} anyInternalNodeCount={} firstPoint=({},{},{}) lastPoint=({},{},{}) stiffness={} damping={}",
+            id,
+            point_radius,
+            first_joint_length,
+            first_joint_length,
+            num_points - 1,
+            num_points.saturating_sub(2),
+            coordinates[0],
+            coordinates[1],
+            coordinates[2],
+            coordinates[(num_points as usize - 1) * 3],
+            coordinates[(num_points as usize - 1) * 3 + 1],
+            coordinates[(num_points as usize - 1) * 3 + 2],
+            JOINT_SPRING_FREQUENCY,
+            JOINT_SPRING_DAMPING_RATIO,
+        );
         sable_data.rope_map.ropes.insert(id, strand);
 
         id as jlong
@@ -498,6 +516,7 @@ pub extern "system" fn Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_set
         let SableSceneData {
             rope_map,
             rigid_bodies,
+            level_colliders,
             ..
         } = &mut *sable_data;
 
@@ -517,8 +536,34 @@ pub extern "system" fn Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_set
                 .unwrap()
         };
 
+        let location = DVec3::new(x, y, z);
+        let local_anchor = location
+            - if sub_level_id == -1 {
+                DVec3::ZERO
+            } else {
+                let rb_b = &level_colliders[&(sub_level_id as LevelColliderID)];
+                rb_b.center_of_mass.unwrap()
+            };
+        let sub_level_body_position = sim_data
+            .rigid_body_set
+            .get(sub_level_body)
+            .unwrap()
+            .position();
+        let rope_body_position = sim_data
+            .rigid_body_set
+            .get(*rope_body)
+            .unwrap()
+            .position();
+        let solver_attachment_world = if sub_level_id == -1 {
+            local_anchor.as_vec3()
+        } else {
+            sub_level_body_position.transform_point(local_anchor.as_vec3())
+        };
+        let rope_point_world = rope_body_position.translation;
+        let solver_error = (solver_attachment_world - rope_point_world).length();
+
         let joint = RopeJointBuilder::new(0.0)
-            .local_anchor1(Vec3::ZERO)
+            .local_anchor1(local_anchor.as_vec3())
             .local_anchor2(Vec3::ZERO)
             .softness(SpringCoefficients::new(
                 JOINT_SPRING_FREQUENCY,
@@ -552,7 +597,7 @@ pub extern "system" fn Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_set
                 Some(sub_level_id as LevelColliderID)
             },
             joint,
-            location: DVec3::new(x, y, z),
+            location,
         };
 
         if end > 0 {
@@ -560,5 +605,25 @@ pub extern "system" fn Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_set
         } else {
             strand.start_attachment = Some(attachment);
         }
+        info!(
+            "SABLE_ROPE_BACKEND_ATTACHMENT ropeId={} attachment={} subLevelId={} rawAnchor=({},{},{}) localAnchor=({},{},{}) ropePointWorld=({},{},{}) solverAttachmentWorld=({},{},{}) solverAttachmentDistance={} storedBackendFirstLength={} forceApplicationCountForPair=1",
+            rope_id,
+            if end > 0 { "END" } else { "START" },
+            sub_level_id,
+            x,
+            y,
+            z,
+            local_anchor.x,
+            local_anchor.y,
+            local_anchor.z,
+            rope_point_world.x,
+            rope_point_world.y,
+            rope_point_world.z,
+            solver_attachment_world.x,
+            solver_attachment_world.y,
+            solver_attachment_world.z,
+            solver_error,
+            strand.first_joint_length,
+        );
     })
 }

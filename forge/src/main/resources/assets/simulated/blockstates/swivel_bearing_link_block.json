@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=down": { "model": "simulated:block/swivel_bearing_link_block" },
+    "facing=east": { "model": "simulated:block/swivel_bearing_link_block" },
+    "facing=north": { "model": "simulated:block/swivel_bearing_link_block" },
+    "facing=south": { "model": "simulated:block/swivel_bearing_link_block" },
+    "facing=up": { "model": "simulated:block/swivel_bearing_link_block" },
+    "facing=west": { "model": "simulated:block/swivel_bearing_link_block" }
+  }
+}

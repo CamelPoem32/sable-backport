@@ -6,11 +6,13 @@ use jni::objects::{JClass, JDoubleArray};
 use jni::sys::{jboolean, jbyte, jdouble, jint, jlong};
 use marten::Real;
 use rapier3d::dynamics::{
-    GenericJointBuilder, JointAxesMask, JointAxis, RevoluteJointBuilder, SpringCoefficients,
+    GenericJointBuilder, ImpulseJointSet, JointAxesMask, JointAxis, RevoluteJointBuilder,
+    SpringCoefficients,
 };
 use rapier3d::glamx::{DVec3, Quat};
 use rapier3d::math::Vec3;
 use rapier3d::prelude::{FixedJointBuilder, ImpulseJointHandle};
+use log::info;
 use std::collections::HashMap;
 
 type SableJointHandle = jlong;
@@ -45,6 +47,50 @@ impl SableJointSet {
             joints: HashMap::new(),
         }
     }
+
+    pub(crate) fn diagnostic_membership(
+        &self,
+        joint_id: SableJointHandle,
+        impulse_joint_set: &ImpulseJointSet,
+    ) -> (bool, bool) {
+        let joint = self.joints.get(&joint_id);
+        (
+            joint.is_some(),
+            joint.is_some_and(|joint| impulse_joint_set.contains(joint.handle)),
+        )
+    }
+}
+
+fn normalized_rotary_axis(axis: Vec3, fallback: Vec3) -> Vec3 {
+    if axis.length_squared() > 0.0 {
+        axis.normalize()
+    } else {
+        fallback
+    }
+}
+
+/// Rapier's revolute joint frames use a directed local X axis on both bodies.
+/// Sable's public Rotary API accepts endpoint normals, which may point in
+/// opposite directions while describing the same physical hinge line.
+fn canonicalize_rotary_axes(
+    axis_a: Vec3,
+    axis_b: Vec3,
+    rotation_a: Quat,
+    rotation_b: Quat,
+) -> (Vec3, Vec3, Real, bool) {
+    let axis_a = normalized_rotary_axis(axis_a, Vec3::X);
+    let axis_b = normalized_rotary_axis(axis_b, axis_a);
+    let world_axis_a = rotation_a * axis_a;
+    let world_axis_b = rotation_b * axis_b;
+    let world_axis_dot = world_axis_a.dot(world_axis_b);
+    let flip_axis_b = world_axis_dot < 0.0;
+
+    (
+        axis_a,
+        if flip_axis_b { -axis_b } else { axis_b },
+        world_axis_dot,
+        flip_axis_b,
+    )
 }
 
 pub fn tick(scene: &PhysicsScene) {
@@ -59,10 +105,27 @@ pub fn tick(scene: &PhysicsScene) {
 
     // update every joint
     for (_handle, joint) in sable_data.joint_set.joints.iter() {
+        let rb_a = joint
+            .id_a
+            .map(|id| sable_data.rigid_bodies[&id])
+            .unwrap_or_else(|| scene.ground_handle.unwrap());
+        let rb_b = joint
+            .id_b
+            .map(|id| sable_data.rigid_bodies[&id])
+            .unwrap_or_else(|| scene.ground_handle.unwrap());
+        let body_rotation_a = *sim.rigid_body_set[rb_a].rotation();
+        let body_rotation_b = *sim.rigid_body_set[rb_b].rotation();
         let impulse_joint = sim.impulse_joint_set.get_mut(joint.handle, false).unwrap();
         impulse_joint.data.contacts_enabled = joint.contacts_enabled;
         if !joint.fixed && joint.rotation_a.is_none() {
-            impulse_joint.data.set_local_axis1(joint.normal_a.as_vec3());
+            let (axis_a, axis_b, _, _) = canonicalize_rotary_axes(
+                joint.normal_a.as_vec3(),
+                joint.normal_b.as_vec3(),
+                body_rotation_a,
+                body_rotation_b,
+            );
+            impulse_joint.data.set_local_axis1(axis_a);
+            impulse_joint.data.set_local_axis2(axis_b);
         }
 
         let center_of_mass_1 = if let Some(id_a) = joint.id_a
@@ -77,10 +140,6 @@ pub fn tick(scene: &PhysicsScene) {
         impulse_joint
             .data
             .set_local_anchor1(local_anchor_1.as_vec3());
-        if !joint.fixed && joint.rotation_b.is_none() {
-            impulse_joint.data.set_local_axis2(joint.normal_b.as_vec3());
-        }
-
         let center_of_mass_2 = if let Some(id_b) = joint.id_b
             && let Some(rb_b) = sable_data.level_colliders.get(&id_b)
         {
@@ -338,15 +397,178 @@ pub extern "system" fn Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_add
             sable_data.rigid_bodies[&(id_b as LevelColliderID)]
         };
 
-        let revolute = RevoluteJointBuilder::new(
-            Vec3::new(axis_x_a as Real, axis_y_a as Real, axis_z_a as Real).normalize(),
-        )
-        .local_anchor1(Vec3::ZERO)
-        .local_anchor2(Vec3::ZERO)
-        .softness(SpringCoefficients::new(
-            JOINT_SPRING_FREQUENCY,
-            JOINT_SPRING_DAMPING_RATIO,
-        ));
+        let center_of_mass_1 = if id_a == -1 {
+            DVec3::ZERO
+        } else {
+            sable_data
+                .level_colliders
+                .get(&(id_a as LevelColliderID))
+                .and_then(|info| info.center_of_mass)
+                .unwrap_or(DVec3::ZERO)
+        };
+        let center_of_mass_2 = if id_b == -1 {
+            DVec3::ZERO
+        } else {
+            sable_data
+                .level_colliders
+                .get(&(id_b as LevelColliderID))
+                .and_then(|info| info.center_of_mass)
+                .unwrap_or(DVec3::ZERO)
+        };
+        let public_anchor_1 = DVec3::new(local_x_a, local_y_a, local_z_a);
+        let public_anchor_2 = DVec3::new(local_x_b, local_y_b, local_z_b);
+        let local_anchor_1 = public_anchor_1 - center_of_mass_1;
+        let local_anchor_2 = public_anchor_2 - center_of_mass_2;
+        let axis_a_public = Vec3::new(axis_x_a as Real, axis_y_a as Real, axis_z_a as Real);
+        let axis_b_public = Vec3::new(axis_x_b as Real, axis_y_b as Real, axis_z_b as Real);
+        let body_a_rotation = *sim_data.rigid_body_set[rb_a].rotation();
+        let body_b_rotation = *sim_data.rigid_body_set[rb_b].rotation();
+        let (axis_a, axis_b, axis_dot, anti_parallel_axes_converted) = canonicalize_rotary_axes(
+            axis_a_public,
+            axis_b_public,
+            body_a_rotation,
+            body_b_rotation,
+        );
+        let converted_axis_b = normalized_rotary_axis(axis_b_public, axis_a);
+
+        let mut revolute = RevoluteJointBuilder::new(axis_a)
+            .local_anchor1(local_anchor_1.as_vec3())
+            .local_anchor2(local_anchor_2.as_vec3())
+            .softness(SpringCoefficients::new(
+                JOINT_SPRING_FREQUENCY,
+                JOINT_SPRING_DAMPING_RATIO,
+            ));
+        revolute.0.data.set_local_axis2(axis_b);
+        let frame_rotation_a = revolute.0.data.local_frame1.rotation;
+        let frame_rotation_b = revolute.0.data.local_frame2.rotation;
+        let frame_a_norm = (frame_rotation_a.x * frame_rotation_a.x
+            + frame_rotation_a.y * frame_rotation_a.y
+            + frame_rotation_a.z * frame_rotation_a.z
+            + frame_rotation_a.w * frame_rotation_a.w)
+            .sqrt();
+        let frame_b_norm = (frame_rotation_b.x * frame_rotation_b.x
+            + frame_rotation_b.y * frame_rotation_b.y
+            + frame_rotation_b.z * frame_rotation_b.z
+            + frame_rotation_b.w * frame_rotation_b.w)
+            .sqrt();
+
+        let body_a = &sim_data.rigid_body_set[rb_a];
+        let body_b = &sim_data.rigid_body_set[rb_b];
+        let body_a_translation = body_a.translation();
+        let body_b_translation = body_b.translation();
+        let body_a_rotation = body_a.rotation();
+        let body_b_rotation = body_b.rotation();
+        let body_a_linear_velocity = body_a.linvel();
+        let body_b_linear_velocity = body_b.linvel();
+        let body_a_angular_velocity = body_a.angvel();
+        let body_b_angular_velocity = body_b.angvel();
+        let reconstructed_a = body_a.position().transform_point(local_anchor_1.as_vec3());
+        let reconstructed_b = body_b.position().transform_point(local_anchor_2.as_vec3());
+        let reconstruction_error = (reconstructed_a - reconstructed_b).length();
+        let finite = local_anchor_1.x.is_finite()
+            && local_anchor_1.y.is_finite()
+            && local_anchor_1.z.is_finite()
+            && local_anchor_2.x.is_finite()
+            && local_anchor_2.y.is_finite()
+            && local_anchor_2.z.is_finite()
+            && axis_a.x.is_finite()
+            && axis_a.y.is_finite()
+            && axis_a.z.is_finite()
+            && axis_b.x.is_finite()
+            && axis_b.y.is_finite()
+            && axis_b.z.is_finite()
+            && frame_rotation_a.x.is_finite()
+            && frame_rotation_a.y.is_finite()
+            && frame_rotation_a.z.is_finite()
+            && frame_rotation_a.w.is_finite()
+            && frame_rotation_b.x.is_finite()
+            && frame_rotation_b.y.is_finite()
+            && frame_rotation_b.z.is_finite()
+            && frame_rotation_b.w.is_finite();
+
+        info!(
+            "SABLE_ROTARY_BACKEND_CONSTRUCT bodyAHandle={} bodyBHandle={} bodyATranslation=({},{},{}) bodyBTranslation=({},{},{}) bodyARotation=({},{},{},{}) bodyBRotation=({},{},{},{}) bodyALinearVelocity=({},{},{}) bodyBLinearVelocity=({},{},{}) bodyAAngularVelocity=({},{},{}) bodyBAngularVelocity=({},{},{}) publicRawAnchorA=({},{},{}) publicRawAnchorB=({},{},{}) convertedLocalAnchorA=({},{},{}) convertedLocalAnchorB=({},{},{}) finalRapierLocalAnchorA=({},{},{}) finalRapierLocalAnchorB=({},{},{}) publicAxisA=({},{},{}) publicAxisB=({},{},{}) convertedLocalAxisA=({},{},{}) convertedLocalAxisB=({},{},{}) finalRapierAxisA=({},{},{}) finalRapierAxisB=({},{},{}) frameRotationA=({},{},{},{}) frameRotationB=({},{},{},{}) frameQuaternionNormA={} frameQuaternionNormB={} axisNormA={} axisNormB={} worldAxisDotBefore={} antiParallelAxesValid=false antiParallelAxesConverted={} reconstructionError={} lockedAxes=LIN_X|LIN_Y|LIN_Z|ANG_Y|ANG_Z freeAxis=ANG_X limits=none motor=none friction=none contactsEnabled=true bodyAMass=java_logged bodyBMass=java_logged bodyAInertia=java_logged bodyBInertia=java_logged finite={}",
+            id_a,
+            id_b,
+            body_a_translation.x,
+            body_a_translation.y,
+            body_a_translation.z,
+            body_b_translation.x,
+            body_b_translation.y,
+            body_b_translation.z,
+            body_a_rotation.x,
+            body_a_rotation.y,
+            body_a_rotation.z,
+            body_a_rotation.w,
+            body_b_rotation.x,
+            body_b_rotation.y,
+            body_b_rotation.z,
+            body_b_rotation.w,
+            body_a_linear_velocity.x,
+            body_a_linear_velocity.y,
+            body_a_linear_velocity.z,
+            body_b_linear_velocity.x,
+            body_b_linear_velocity.y,
+            body_b_linear_velocity.z,
+            body_a_angular_velocity.x,
+            body_a_angular_velocity.y,
+            body_a_angular_velocity.z,
+            body_b_angular_velocity.x,
+            body_b_angular_velocity.y,
+            body_b_angular_velocity.z,
+            public_anchor_1.x,
+            public_anchor_1.y,
+            public_anchor_1.z,
+            public_anchor_2.x,
+            public_anchor_2.y,
+            public_anchor_2.z,
+            local_anchor_1.x,
+            local_anchor_1.y,
+            local_anchor_1.z,
+            local_anchor_2.x,
+            local_anchor_2.y,
+            local_anchor_2.z,
+            local_anchor_1.x,
+            local_anchor_1.y,
+            local_anchor_1.z,
+            local_anchor_2.x,
+            local_anchor_2.y,
+            local_anchor_2.z,
+            axis_a_public.x,
+            axis_a_public.y,
+            axis_a_public.z,
+            axis_b_public.x,
+            axis_b_public.y,
+            axis_b_public.z,
+            axis_a.x,
+            axis_a.y,
+            axis_a.z,
+            converted_axis_b.x,
+            converted_axis_b.y,
+            converted_axis_b.z,
+            axis_a.x,
+            axis_a.y,
+            axis_a.z,
+            axis_b.x,
+            axis_b.y,
+            axis_b.z,
+            frame_rotation_a.x,
+            frame_rotation_a.y,
+            frame_rotation_a.z,
+            frame_rotation_a.w,
+            frame_rotation_b.x,
+            frame_rotation_b.y,
+            frame_rotation_b.z,
+            frame_rotation_b.w,
+            frame_a_norm,
+            frame_b_norm,
+            axis_a.length(),
+            axis_b.length(),
+            axis_dot,
+            anti_parallel_axes_converted,
+            reconstruction_error,
+            finite,
+        );
 
         let handle = sim_data
             .impulse_joint_set
@@ -717,4 +939,138 @@ pub extern "system" fn Java_dev_ryanhcode_sable_physics_impl_rapier_Rapier3D_set
             _ => panic!("Invalid constraint frame side: {}", side),
         }
     })
+}
+
+#[cfg(test)]
+mod rotary_contract_tests {
+    use super::*;
+    use rapier3d::prelude::{
+        BroadPhaseBvh, CCDSolver, ColliderBuilder, ColliderSet, ImpulseJointSet,
+        IntegrationParameters, IslandManager, MultibodyJointSet, NarrowPhase, PhysicsPipeline,
+        RigidBodyBuilder, RigidBodySet,
+    };
+
+    fn assert_rotary_case(real_inertia: bool, offset_anchors: bool) {
+        let mut bodies = RigidBodySet::new();
+        let mut colliders = ColliderSet::new();
+        let mut impulse_joints = ImpulseJointSet::new();
+        let mut multibody_joints = MultibodyJointSet::new();
+        let mut pipeline = PhysicsPipeline::new();
+        let mut islands = IslandManager::new();
+        let mut broad_phase = BroadPhaseBvh::new();
+        let mut narrow_phase = NarrowPhase::new();
+        let mut ccd = CCDSolver::new();
+
+        let separation = if offset_anchors { 4.0 } else { 0.0 };
+        let body_a = bodies.insert(RigidBodyBuilder::dynamic().translation(Vec3::ZERO));
+        let body_b = bodies.insert(
+            RigidBodyBuilder::dynamic().translation(Vec3::new(separation, 0.0, 0.0)),
+        );
+        let collider_a = if real_inertia {
+            ColliderBuilder::cuboid(1.5, 0.5, 0.75).density(2.0)
+        } else {
+            ColliderBuilder::ball(0.75).density(2.0)
+        };
+        let collider_b = if real_inertia {
+            ColliderBuilder::cuboid(1.5, 0.5, 0.75).density(2.0)
+        } else {
+            ColliderBuilder::ball(0.75).density(2.0)
+        };
+        colliders.insert_with_parent(collider_a, body_a, &mut bodies);
+        colliders.insert_with_parent(collider_b, body_b, &mut bodies);
+
+        let anchor_a = if offset_anchors {
+            Vec3::new(2.0, 0.0, 0.0)
+        } else {
+            Vec3::ZERO
+        };
+        let anchor_b = if offset_anchors {
+            Vec3::new(-2.0, 0.0, 0.0)
+        } else {
+            Vec3::ZERO
+        };
+        let (axis_a, axis_b, dot_before, flipped) = canonicalize_rotary_axes(
+            Vec3::X,
+            Vec3::NEG_X,
+            Quat::IDENTITY,
+            Quat::IDENTITY,
+        );
+        assert!(dot_before < 0.0);
+        assert!(flipped);
+
+        let joint = RevoluteJointBuilder::new(axis_a)
+            .local_axis2(axis_b)
+            .local_anchor1(anchor_a)
+            .local_anchor2(anchor_b)
+            .contacts_enabled(false)
+            .build();
+        assert_eq!(joint.data.locked_axes, JointAxesMask::LOCKED_REVOLUTE_AXES);
+        assert!(joint.data.local_axis1().dot(joint.data.local_axis2()) > 0.9999);
+        impulse_joints.insert(body_a, body_b, joint, true);
+
+        let parameters = IntegrationParameters {
+            dt: 1.0 / 20.0,
+            ..Default::default()
+        };
+        for _ in 0..100 {
+            pipeline.step(
+                Vec3::ZERO,
+                &parameters,
+                &mut islands,
+                &mut broad_phase,
+                &mut narrow_phase,
+                &mut bodies,
+                &mut colliders,
+                &mut impulse_joints,
+                &mut multibody_joints,
+                &mut ccd,
+                &(),
+                &(),
+            );
+        }
+
+        let rb_a = &bodies[body_a];
+        let rb_b = &bodies[body_b];
+        assert!(rb_a.translation().is_finite() && rb_b.translation().is_finite());
+        assert!(rb_a.rotation().is_finite() && rb_b.rotation().is_finite());
+        assert!(rb_a.linvel().is_finite() && rb_b.linvel().is_finite());
+        assert!(rb_a.angvel().is_finite() && rb_b.angvel().is_finite());
+        let world_anchor_a = rb_a.position().transform_point(anchor_a);
+        let world_anchor_b = rb_b.position().transform_point(anchor_b);
+        assert!((world_anchor_a - world_anchor_b).length() < 0.01);
+    }
+
+    #[test]
+    fn rotary_target_api_handles_simple_inertia_centered_anchor() {
+        assert_rotary_case(false, false);
+    }
+
+    #[test]
+    fn rotary_target_api_handles_real_inertia_centered_anchor() {
+        assert_rotary_case(true, false);
+    }
+
+    #[test]
+    fn rotary_target_api_handles_simple_inertia_offset_anchor() {
+        assert_rotary_case(false, true);
+    }
+
+    #[test]
+    fn rotary_target_api_handles_real_inertia_offset_anchor() {
+        assert_rotary_case(true, true);
+    }
+
+    #[test]
+    fn rotary_axis_sign_is_compared_in_world_space() {
+        let body_b_rotation = Quat::from_rotation_y(std::f32::consts::PI);
+        let (_, axis_b, dot_before, flipped) = canonicalize_rotary_axes(
+            Vec3::X,
+            Vec3::NEG_X,
+            Quat::IDENTITY,
+            body_b_rotation,
+        );
+        assert!(dot_before > 0.9999);
+        assert!(!flipped);
+        assert_eq!(axis_b, Vec3::NEG_X);
+    }
 }

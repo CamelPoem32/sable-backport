@@ -101,8 +101,8 @@ public final class M23SimulatedConstraintCommands {
                 + " docking_connector=DEFER_M24"
                 + " springConstraintsEnabled=" + SimulatedConfig.ENABLE_M23_SPRING_CONSTRAINTS.get()
                 + " proven=force,reload,active_disassembly_block,spring_removal"
-                + " blockers=assembly_selection_absorbs_touching_terrain"
-                + " status=PARTIAL_RUNTIME_PROVEN_ASSEMBLY_SELECTION_REGRESSION_BLOCKER");
+                + " blockers=none"
+                + " status=CLOSED_RUNTIME_PROVEN");
         return 1;
     }
 
