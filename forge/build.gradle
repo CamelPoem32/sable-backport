@@ -1,4 +1,6 @@
 import groovy.json.JsonSlurper
+import org.apache.maven.artifact.versioning.DefaultArtifactVersion
+import org.apache.maven.artifact.versioning.VersionRange
 import org.gradle.api.attributes.LibraryElements
 
 import java.nio.charset.StandardCharsets
@@ -3977,8 +3979,9 @@ tasks.register('verifyCreateRegistrateRuntimeOwnershipBoundary') {
             String sableModsToml = readText(sableJar, 'META-INF/mods.toml')
             if (!sableModsToml.contains('modId = "sable"')
                     || !sableModsToml.contains('modId = "simulated"')
+                    || !sableModsToml.contains('modId = "aeronautics"')
                     || sableModsToml.contains('[[mods]]\nmodId = "create"')) {
-                throw new GradleException('Final Sable mods.toml no longer has the expected Sable/Simulated-only mod ownership')
+                throw new GradleException('Final artifact no longer has the expected Sable/Simulated/Aeronautics mod ownership')
             }
 
             def sableMetadata = new JsonSlurper().parseText(readText(sableJar, 'META-INF/jarjar/metadata.json'))
@@ -24384,5 +24387,381 @@ tasks.register('verifyM24ClosureStatusBoundary') {
             throw new GradleException('M24 closure documentation/status matrix is incomplete or inconsistent')
         }
         logger.lifecycle('verifyM24ClosureStatusBoundary PASS: M24 is CLOSED / RUNTIME_PROVEN and M21-M24 are frozen')
+    }
+}
+
+def m25AeronauticsSourceDir = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics')
+def m25CommandSource = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M25AeronauticsCommands.java')
+def m25ResourceDir = rootProject.file('forge/src/main/resources')
+def m25SimulatedBackportVersion = '1.3.0-m21-backport'
+def m25SimulatedVersionRange = '[1.3.0-m21-backport,2.0.0)'
+def verifyM25SimulatedDependency = { String metadata, String owner ->
+    def dependencyBlocks = metadata.split('(?=\\[\\[dependencies\\.aeronautics]])')
+            .findAll { block -> block.contains('[[dependencies.aeronautics]]') && block.contains('modId = "simulated"') }
+    if (dependencyBlocks.size() != 1) {
+        throw new GradleException("${owner} must contain exactly one Aeronautics -> Simulated dependency, found ${dependencyBlocks.size()}")
+    }
+    String block = dependencyBlocks[0]
+    def rangeMatch = block =~ /(?m)^versionRange\s*=\s*"([^"]+)"\s*$/
+    if (!block.contains('mandatory = true') || rangeMatch.count != 1) {
+        throw new GradleException("${owner} Aeronautics -> Simulated dependency is not mandatory or has an ambiguous range")
+    }
+    String rangeSpec = rangeMatch[0][1]
+    if (rangeSpec != m25SimulatedVersionRange) {
+        throw new GradleException("${owner} has unexpected Aeronautics -> Simulated range ${rangeSpec}")
+    }
+    VersionRange range = VersionRange.createFromVersionSpec(rangeSpec)
+    if (!range.containsVersion(new DefaultArtifactVersion(m25SimulatedBackportVersion))) {
+        throw new GradleException("${owner} rejects bundled Simulated ${m25SimulatedBackportVersion}")
+    }
+    if (range.containsVersion(new DefaultArtifactVersion('1.2.9'))) {
+        throw new GradleException("${owner} accepts incompatible old Simulated 1.2.9")
+    }
+    if (range.containsVersion(new DefaultArtifactVersion('2.0.0'))
+            || range.containsVersion(new DefaultArtifactVersion('3.0.0'))) {
+        throw new GradleException("${owner} lost the supported 1.x upper bound")
+    }
+}
+
+tasks.register('verifyM25AeronauticsBaselineBoundary') {
+    group = 'forge backport'
+    inputs.files(rootProject.file('M25_AERONAUTICS_BASELINE.md'),
+            rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/Aeronautics.java'))
+    doLast {
+        String baseline = rootProject.file('M25_AERONAUTICS_BASELINE.md').getText('UTF-8')
+        String source = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/Aeronautics.java').getText('UTF-8')
+        String commit = '9e60263fb5cb00033f14af655a7e72cf7aebb3e2'
+        ['Simulated-Project.git', commit, 'Aeronautics 1.3.0', 'Minecraft | `1.21.1`',
+         'NeoForge `21.1.228`', 'Sable | `2.0.0`', 'Create | `6.0.10-280`',
+         'Flywheel | `1.0.6`', 'Ponder | `1.0.81`', 'Java | 21'].each { token ->
+            if (!baseline.contains(token)) throw new GradleException("M25 baseline missing ${token}")
+        }
+        if (!source.contains(commit) || !source.contains('IMPLEMENTATION_REVISION = "M25"')) {
+            throw new GradleException('M25 source is not pinned to the frozen Aeronautics baseline/revision')
+        }
+        logger.lifecycle('verifyM25AeronauticsBaselineBoundary PASS')
+    }
+}
+
+tasks.register('verifyM25AeronauticsPortMatrixBoundary') {
+    group = 'forge backport'
+    inputs.file(rootProject.file('M25_AERONAUTICS_PORT_MATRIX.md'))
+    doLast {
+        String matrix = rootProject.file('M25_AERONAUTICS_PORT_MATRIX.md').getText('UTF-8')
+        ['| Java | 7 | 46 | 36 | 67 | 44 | 200 |',
+         '| Resources | 11 | 83 | 253 | 110 | 77 | 534 |',
+         '| Total | 18 | 129 | 289 | 177 | 121 | 734 |',
+         'ADAPT_M25', 'DEFER_M26_PROPULSION', 'DEFER_M27_AERODYNAMICS_CONTROLS',
+         'DEFER_M28_GOLDEN_AIRCRAFT', 'NOT_APPLICABLE_1_20_1'].each { token ->
+            if (!matrix.contains(token)) throw new GradleException("M25 port matrix missing ${token}")
+        }
+        if (matrix.count('Exact frozen blob') != 1) {
+            throw new GradleException('M25 port matrix does not identify exactly one frozen Levitite texture')
+        }
+        logger.lifecycle('verifyM25AeronauticsPortMatrixBoundary PASS: 200 Java and 534 resources classified')
+    }
+}
+
+tasks.register('verifyM25AeronauticsRegistryBoundary') {
+    group = 'forge backport'
+    inputs.files(fileTree(m25AeronauticsSourceDir) { include '**/*.java' },
+            rootProject.file('M25_AERONAUTICS_REGISTRY_MANIFEST.md'),
+            rootProject.file('forge/src/main/resources/META-INF/mods.toml'))
+    doLast {
+        String blocks = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/index/AeroBlocks.java').getText('UTF-8')
+        String items = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/index/AeroItems.java').getText('UTF-8')
+        String tabs = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/index/AeroCreativeTabs.java').getText('UTF-8')
+        String manifest = rootProject.file('M25_AERONAUTICS_REGISTRY_MANIFEST.md').getText('UTF-8')
+        String mods = rootProject.file('forge/src/main/resources/META-INF/mods.toml').getText('UTF-8')
+        if (blocks.count('RegistryObject<Block>') != 1 || !blocks.contains('REGISTER.register("levitite"')
+                || items.count('RegistryObject<Item>') != 1 || !items.contains('REGISTER.register("levitite"')
+                || tabs.count('RegistryObject<CreativeModeTab>') != 1 || !tabs.contains('REGISTER.register("main_tab"')
+                || !mods.contains('modId = "aeronautics"') || !mods.contains('[[dependencies.aeronautics]]')) {
+            throw new GradleException('M25 registry/mod metadata does not match the selected manifest')
+        }
+        ['| Blocks | 1 |', '| Items | 1 |', '| Block entities | 0 |', '| Entities | 0 |',
+         '| Menus | 0 |', '| Recipe types | 0 |', '| Recipe serializers | 0 |',
+         '| Creative tabs | 1 |', '| Network packets | 0 |', '| Configs | 1 |'].each { token ->
+            if (!manifest.contains(token)) throw new GradleException("M25 registry manifest missing ${token}")
+        }
+        logger.lifecycle('verifyM25AeronauticsRegistryBoundary PASS: 1 block, 1 item, 1 tab, 0 gameplay packets')
+    }
+}
+
+tasks.register('verifyM25AeronauticsJava17Boundary') {
+    group = 'forge backport'
+    inputs.files(fileTree(m25AeronauticsSourceDir) { include '**/*.java' }, m25CommandSource)
+    doLast {
+        def files = fileTree(m25AeronauticsSourceDir) { include '**/*.java' }.files + [m25CommandSource]
+        def forbidden = ['Thread.ofVirtual', 'SequencedCollection', '.reversed()', 'STR."',
+                         'getFirst()', 'getLast()', 'removeFirst()', 'removeLast()']
+        files.each { file ->
+            String source = file.getText('UTF-8')
+            forbidden.each { token ->
+                if (source.contains(token)) throw new GradleException("M25 Java 21 API ${token} in ${file.name}")
+            }
+        }
+        logger.lifecycle("verifyM25AeronauticsJava17Boundary PASS: ${files.size()} selected target sources are Java 17 compatible")
+    }
+}
+
+tasks.register('verifyM25AeronauticsForgeBoundary') {
+    group = 'forge backport'
+    inputs.files(fileTree(m25AeronauticsSourceDir) { include '**/*.java' },
+            rootProject.file('forge/src/main/resources/META-INF/mods.toml'),
+            rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForge.java'))
+    doLast {
+        String all = fileTree(m25AeronauticsSourceDir) { include '**/*.java' }
+                .files.collect { it.getText('UTF-8') }.join('\n')
+        String entry = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/forge/AeronauticsForge.java').getText('UTF-8')
+        String sable = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForge.java').getText('UTF-8')
+        if (all.contains('net.neoforged') || all.contains('net.fabricmc')
+                || !entry.contains('@Mod(Aeronautics.MOD_ID)')
+                || !entry.contains('FMLJavaModLoadingContext')
+                || !sable.contains('M25AeronauticsCommands.register(m21Builder')) {
+            throw new GradleException('M25 loader/command bootstrap is not a direct Forge 1.20.1 adaptation')
+        }
+        logger.lifecycle('verifyM25AeronauticsForgeBoundary PASS')
+    }
+}
+
+tasks.register('verifyM25AeronauticsResourceBoundary') {
+    group = 'forge backport'
+    inputs.files(rootProject.file('forge/src/main/resources/assets/aeronautics'),
+            rootProject.file('forge/src/main/resources/data/aeronautics'),
+            rootProject.file('forge/src/main/resources/data/minecraft/tags/blocks/mineable/pickaxe.json'),
+            rootProject.file('forge/src/main/resources/data/sable/tags/blocks/always_chunk_rendering.json'))
+    doLast {
+        def slurper = new JsonSlurper()
+        File blockstateFile = rootProject.file('forge/src/main/resources/assets/aeronautics/blockstates/levitite.json')
+        File blockModelFile = rootProject.file('forge/src/main/resources/assets/aeronautics/models/block/levitite.json')
+        File itemModelFile = rootProject.file('forge/src/main/resources/assets/aeronautics/models/item/levitite.json')
+        File textureFile = rootProject.file('forge/src/main/resources/assets/aeronautics/textures/block/levitite.png')
+        File itemTagFile = rootProject.file('forge/src/main/resources/data/aeronautics/tags/items/levitite.json')
+        File pickaxeTagFile = rootProject.file('forge/src/main/resources/data/minecraft/tags/blocks/mineable/pickaxe.json')
+        File renderingTagFile = rootProject.file('forge/src/main/resources/data/sable/tags/blocks/always_chunk_rendering.json')
+        [blockstateFile, blockModelFile, itemModelFile, textureFile, itemTagFile, pickaxeTagFile, renderingTagFile,
+         rootProject.file('forge/src/main/resources/assets/aeronautics/lang/en_us.json'),
+         rootProject.file('forge/src/main/resources/data/aeronautics/floating_materials/levitite.json'),
+         rootProject.file('forge/src/main/resources/data/aeronautics/physics_block_properties/levitite.json'),
+         rootProject.file('forge/src/main/resources/data/aeronautics/tags/blocks/levitite.json')].each { file ->
+            if (!file.isFile()) throw new GradleException("M25 missing required resource ${file}")
+        }
+        def blockstate = slurper.parse(blockstateFile)
+        def blockModel = slurper.parse(blockModelFile)
+        def itemModel = slurper.parse(itemModelFile)
+        def itemTag = slurper.parse(itemTagFile)
+        def pickaxeTag = slurper.parse(pickaxeTagFile)
+        def renderingTag = slurper.parse(renderingTagFile)
+        if (blockstate.variants[''].model != 'aeronautics:block/levitite'
+                || blockModel.parent != 'minecraft:block/cube_all'
+                || blockModel.textures.all != 'aeronautics:block/levitite'
+                || itemModel.parent != 'aeronautics:block/levitite'
+                || itemTag.values != ['aeronautics:levitite']
+                || pickaxeTag.values != ['aeronautics:levitite']
+                || renderingTag.values != ['aeronautics:levitite']
+                || sha256(textureFile) != '6706624545B8E53B754AC9CB2B1D7EF85DC99A78EE63EFDEC0D9C9EF726D1DC5') {
+            throw new GradleException('M25 Levitite model/texture reference graph is unresolved')
+        }
+        logger.lifecycle('verifyM25AeronauticsResourceBoundary PASS: complete Levitite model/texture/data graph')
+    }
+}
+
+tasks.register('verifyM25AeronauticsNetworkBoundary') {
+    group = 'forge backport'
+    inputs.file(rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/network/AeroNetwork.java'))
+    doLast {
+        String source = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/network/AeroNetwork.java').getText('UTF-8')
+        if (!source.contains('NetworkRegistry.newSimpleChannel') || !source.contains('Aeronautics.path("main")')
+                || !source.contains('return 0;') || source.contains('registerMessage(')) {
+            throw new GradleException('M25 network bootstrap must expose one packet-free Forge SimpleChannel')
+        }
+        logger.lifecycle('verifyM25AeronauticsNetworkBoundary PASS: SimpleChannel ready, selected packet count 0')
+    }
+}
+
+tasks.register('verifyM25AeronauticsForceProviderBoundary') {
+    group = 'forge backport'
+    inputs.files(m25CommandSource,
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/physics/floating_block/FloatingBlockController.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ServerSubLevel.java'),
+            rootProject.file('forge/src/main/resources/data/aeronautics/physics_block_properties/levitite.json'))
+    doLast {
+        String command = m25CommandSource.getText('UTF-8')
+        String controller = rootProject.file('common/src/main/java/dev/ryanhcode/sable/physics/floating_block/FloatingBlockController.java').getText('UTF-8')
+        String sublevel = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ServerSubLevel.java').getText('UTF-8')
+        String properties = rootProject.file('forge/src/main/resources/data/aeronautics/physics_block_properties/levitite.json').getText('UTF-8')
+        if (!properties.contains('"sable:floating_material": "aeronautics:levitite"')
+                || !controller.contains('this.applyLift(localGravity, linearImpulse, angularImpulse, timeStep)')
+                || !sublevel.contains('handle.applyLinearAndAngularImpulse(linearImpulse, angularImpulse, false)')
+                || !command.contains('enableIndividualQueuedForcesTracking(true)')
+                || command.contains('.setVelocity(') || command.contains('.teleport(')
+                || command.contains('.applyLinearImpulse(') || command.contains('.applyLinearAndAngularImpulse(')) {
+            throw new GradleException('M25 lift does not exclusively follow the existing production floating-force path')
+        }
+        logger.lifecycle('verifyM25AeronauticsForceProviderBoundary PASS')
+    }
+}
+
+tasks.register('verifyM25AeronauticsCoordinateFrameBoundary') {
+    group = 'forge backport'
+    inputs.files(m25CommandSource,
+            rootProject.file('M25_AERONAUTICS_FORCE_ARCHITECTURE.md'))
+    doLast {
+        String command = m25CommandSource.getText('UTF-8')
+        String architecture = rootProject.file('M25_AERONAUTICS_FORCE_ARCHITECTURE.md').getText('UTF-8')
+        if (!command.contains('new Vector3d(pointForce.point()).sub(centerOfMass)')
+                || !command.contains('logicalPose().transformPosition(new Vector3d(pointForce.point()))')
+                || !command.contains('logicalPose().orientation().transform(localLiftForce')
+                || command.contains('20000000') || command.contains('20_000_000')
+                || !architecture.contains('Raw hidden plot coordinates are never treated as visible positions')) {
+            throw new GradleException('M25 force/application-point coordinate frames are not explicit and visible-safe')
+        }
+        logger.lifecycle('verifyM25AeronauticsCoordinateFrameBoundary PASS')
+    }
+}
+
+tasks.register('verifyM25AeronauticsLiftFormulaBoundary') {
+    group = 'forge backport'
+    inputs.files(rootProject.file('forge/src/main/resources/data/aeronautics/floating_materials/levitite.json'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/physics/floating_block/FloatingBlockController.java'),
+            rootProject.file('M25_AERONAUTICS_FORCE_ARCHITECTURE.md'))
+    doLast {
+        def material = new JsonSlurper().parse(rootProject.file(
+                'forge/src/main/resources/data/aeronautics/floating_materials/levitite.json'))
+        String controller = rootProject.file('common/src/main/java/dev/ryanhcode/sable/physics/floating_block/FloatingBlockController.java').getText('UTF-8')
+        if (material.prevent_self_lift != true || material.lift_strength != 10
+                || material.transition_speed != 3 || material.slow_vertical_friction != 2
+                || material.fast_vertical_friction != 0.1 || material.slow_horizontal_friction != 1.5
+                || material.fast_horizontal_friction != 0.05 || material.scale_friction_with_gravity != true
+                || !controller.contains('double scaleFactor = -localGravity.lengthSquared() / localGravity.dot(totalAcceleration)')
+                || !controller.contains('if (scaleFactor > 1)')) {
+            throw new GradleException('M25 Levitite data/formula diverges from frozen upstream prevent-self-lift semantics')
+        }
+        logger.lifecycle('verifyM25AeronauticsLiftFormulaBoundary PASS')
+    }
+}
+
+tasks.register('verifyM25AeronauticsFixtureBoundary') {
+    group = 'forge backport'
+    inputs.file(m25CommandSource)
+    doLast {
+        String source = m25CommandSource.getText('UTF-8')
+        ['Commands.literal("lift_basic")', 'Commands.literal("lift_control")',
+         'Commands.literal("release")', 'new SimAssemblyContraption(null)',
+         'new SuperGlueEntity', 'EXPECTED_BODY_BLOCKS = 6',
+         'selectedSupportBlocks=', 'bodyMoved=false velocityChanged=false forceAppliedByCommand=false'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M25 fixture boundary missing ${token}")
+        }
+        logger.lifecycle('verifyM25AeronauticsFixtureBoundary PASS: six-block lift/control fixtures use M22 selection and glue')
+    }
+}
+
+tasks.register('verifyM25AeronauticsPersistenceBoundary') {
+    group = 'forge backport'
+    inputs.files(m25CommandSource,
+            rootProject.file('M25_AERONAUTICS_FORCE_ARCHITECTURE.md'))
+    doLast {
+        String source = m25CommandSource.getText('UTF-8')
+        String docs = rootProject.file('M25_AERONAUTICS_FORCE_ARCHITECTURE.md').getText('UTF-8')
+        if (!source.contains('findAnyLiftBody') || !source.contains('aeronautics:levitite')
+                || source.contains('CompoundTag') || source.contains('SavedData')
+                || !docs.contains('Sable rebuilds mass and floating clusters')
+                || !docs.contains('without a second Aeronautics force registry')) {
+            throw new GradleException('M25 persistence must rebuild from serialized plot blocks without duplicate force ownership')
+        }
+        logger.lifecycle('verifyM25AeronauticsPersistenceBoundary PASS')
+    }
+}
+
+tasks.register('verifyM25AeronauticsSimulatedVersionCompatibilityBoundary') {
+    group = 'forge backport'
+    description = 'Verifies final generated Forge metadata accepts the bundled qualified Simulated backport and rejects incompatible versions.'
+    dependsOn tasks.named('processResources')
+    inputs.file(tasks.named('processResources').map {
+        new File(it.destinationDir, 'META-INF/mods.toml')
+    })
+
+    doLast {
+        File generatedMetadata = new File(tasks.named('processResources').get().destinationDir, 'META-INF/mods.toml')
+        if (!generatedMetadata.isFile()) {
+            throw new GradleException("Generated Forge mods.toml is missing: ${generatedMetadata}")
+        }
+        verifyM25SimulatedDependency(generatedMetadata.getText('UTF-8'), 'Generated final META-INF/mods.toml')
+        logger.lifecycle("verifyM25AeronauticsSimulatedVersionCompatibilityBoundary PASS: "
+                + "${m25SimulatedBackportVersion} satisfies ${m25SimulatedVersionRange}; 1.2.9 and 2.0.0 do not")
+    }
+}
+
+tasks.register('verifyM25AeronauticsRegressionBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM21RegressionBoundary')
+    dependsOn tasks.named('verifyM22RegressionBoundary')
+    dependsOn tasks.named('verifyM23SpringTeardownRegression')
+    dependsOn tasks.named('verifyM24RegressionBoundary')
+    dependsOn tasks.named('verifyM24ClosureStatusBoundary')
+    doLast {
+        logger.lifecycle('verifyM25AeronauticsRegressionBoundary PASS: M21-M24 frozen foundation retained')
+    }
+}
+
+tasks.register('verifyM25AeronauticsArtifactBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('jarJar')
+    inputs.file(tasks.named('jarJar').flatMap { it.archiveFile })
+    doLast {
+        File archive = tasks.named('jarJar').get().archiveFile.get().asFile
+        JarFile jar = new JarFile(archive)
+        try {
+            ['dev/eriksonn/aeronautics/Aeronautics.class',
+             'dev/eriksonn/aeronautics/forge/AeronauticsForge.class',
+             'dev/ryanhcode/sable/command/M25AeronauticsCommands.class',
+             'assets/aeronautics/blockstates/levitite.json',
+             'assets/aeronautics/models/block/levitite.json',
+             'assets/aeronautics/models/item/levitite.json',
+             'assets/aeronautics/textures/block/levitite.png',
+             'data/aeronautics/floating_materials/levitite.json',
+             'data/aeronautics/physics_block_properties/levitite.json',
+             'data/aeronautics/tags/blocks/levitite.json',
+             'data/aeronautics/tags/items/levitite.json',
+             'data/minecraft/tags/blocks/mineable/pickaxe.json',
+             'data/sable/tags/blocks/always_chunk_rendering.json',
+             'data/aeronautics/m25_implementation_revision.txt'].each { entry ->
+                if (jar.getJarEntry(entry) == null) throw new GradleException("M25 artifact missing ${entry}")
+            }
+            String mods = jar.getInputStream(jar.getJarEntry('META-INF/mods.toml')).getText('UTF-8')
+            if (!mods.contains('modId = "aeronautics"')) {
+                throw new GradleException('M25 artifact does not declare the Aeronautics mod')
+            }
+            verifyM25SimulatedDependency(mods, "Final artifact ${archive.name} META-INF/mods.toml")
+            def entry = jar.getJarEntry('dev/eriksonn/aeronautics/Aeronautics.class')
+            byte[] bytes = jar.getInputStream(entry).readAllBytes()
+            int major = ((bytes[6] & 0xff) << 8) | (bytes[7] & 0xff)
+            if (major != 61) throw new GradleException("M25 Aeronautics class is not Java 17 major 61: ${major}")
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle("verifyM25AeronauticsArtifactBoundary PASS: ${archive.name}")
+    }
+}
+
+tasks.register('verifyM25Aeronautics') {
+    group = 'forge backport'
+    description = 'Runs focused static M25 Aeronautics bootstrap and Levitite lift boundaries.'
+    dependsOn tasks.named('verifyM25AeronauticsBaselineBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsPortMatrixBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsRegistryBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsJava17Boundary')
+    dependsOn tasks.named('verifyM25AeronauticsForgeBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsResourceBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsNetworkBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsForceProviderBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsCoordinateFrameBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsLiftFormulaBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsFixtureBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsPersistenceBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsSimulatedVersionCompatibilityBoundary')
+    doLast {
+        logger.lifecycle('verifyM25Aeronautics PASS: M25 IMPLEMENTED / RUNTIME_REQUIRED')
     }
 }

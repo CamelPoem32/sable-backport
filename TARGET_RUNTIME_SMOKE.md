@@ -3954,3 +3954,28 @@ Manual runtime acceptance is complete for the M24.12 artifact.
 Final milestone status: `M24 CLOSED / RUNTIME_PROVEN`. No additional M24
 runtime gate remains for these five families. M21-M24 are frozen as the
 completed Simulated/Sable foundation; M25 is next and is not started here.
+
+## M25 Aeronautics Lift Runtime Gate
+
+Use only a fresh artifact whose status reports `implementationRevision=M25`.
+
+1. `/sable m25 status`
+2. `/sable m25 registry_check`
+3. `/sable m25 cleanup`
+4. `/sable m25 fixture lift_basic`
+5. Assemble the single Physics Assembler.
+6. `/sable m25 inspect lift`
+7. `/sable m25 release`
+8. Wait at least 20 physics ticks, then `/sable m25 inspect lift` again.
+9. Rotate the body through an existing proven Sable manipulation path and
+   confirm lift remains world-up.
+10. Save/reload, then `/sable m25 inspect lift`; verify the same stored body,
+    one provider, finite state, and continuing lift.
+11. Cleanup/spawn `/sable m25 fixture lift_control`, assemble, release, and
+    confirm the equivalent body falls under ordinary gravity.
+
+The lift fixture must report one `aeronautics:levitite` provider, nonzero
+production lift, finite position/velocity, and qualitative motion matching
+`lift - gravity`. The command may remove its support platform but must never
+move the body or apply a force. Static status remains
+`M25 IMPLEMENTED / RUNTIME_REQUIRED`; only manual completion can close M25.

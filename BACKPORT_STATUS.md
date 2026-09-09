@@ -2367,3 +2367,21 @@ The earlier M24.x `RUNTIME_REQUIRED` entries above are chronological records of
 their then-current gates and are superseded by this closure. M21-M24 are now
 frozen as the completed Simulated/Sable foundation. M25 Aeronautics bootstrap
 and lift is the next milestone and has not started.
+
+### M25 Aeronautics Bootstrap And Lift
+
+M21-M24 remain frozen as `CLOSED / RUNTIME_PROVEN`. M25 introduces Create
+Aeronautics from the `aeronautics` module at the same frozen Simulated-Project
+commit `9e60263fb5cb00033f14af655a7e72cf7aebb3e2`.
+
+The selected first lift mechanism is exact-upstream Levitite. Its block tag,
+Sable physics-block property, and floating-material data feed the existing
+`FloatingBlockController -> RigidBodyHandle -> Rapier` production path. The
+canary never writes velocity, position, logical pose, gravity, or lift values.
+Its six-block lift fixture predicts `EXPECTED_NEAR_HOVER`; an otherwise
+equivalent no-Levitite control predicts `EXPECTED_FALL`.
+
+Static milestone status: `M25 IMPLEMENTED / RUNTIME_REQUIRED`. Propellers,
+engines, thrust, steering, aerodynamic control surfaces, full aircraft, and
+the golden aircraft remain deferred. M25 is not closed until the manual lift,
+control, orientation, and save/reload gates pass.

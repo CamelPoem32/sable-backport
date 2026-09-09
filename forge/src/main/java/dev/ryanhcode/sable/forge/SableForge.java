@@ -9,6 +9,7 @@ import dev.ryanhcode.sable.command.M21SimulatedBootstrapCommands;
 import dev.ryanhcode.sable.command.M22SimulatedAssemblyCommands;
 import dev.ryanhcode.sable.command.M23SimulatedConstraintCommands;
 import dev.ryanhcode.sable.command.M24SimulatedSystemsCommands;
+import dev.ryanhcode.sable.command.M25AeronauticsCommands;
 import dev.ryanhcode.sable.command.argument.SubLevelSelectorModifiers;
 import dev.ryanhcode.sable.index.SableAttributes;
 import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
@@ -84,6 +85,7 @@ public final class SableForge {
         M22SimulatedAssemblyCommands.register(m21Builder, event.getBuildContext());
         M23SimulatedConstraintCommands.register(m21Builder, event.getBuildContext());
         M24SimulatedSystemsCommands.register(m21Builder, event.getBuildContext());
+        M25AeronauticsCommands.register(m21Builder, event.getBuildContext());
         event.getDispatcher().register(m21Builder);
         SableForgeRuntimeSmoke.commandRegistered();
     }
