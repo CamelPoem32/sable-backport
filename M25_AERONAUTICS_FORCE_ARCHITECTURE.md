@@ -45,3 +45,11 @@ Raw hidden plot coordinates are never treated as visible positions or direct lev
 Mass, COM, inertia, pose, and velocity remain owned by `ServerSubLevel` and `RigidBodyHandle`. The M25 harness enables Sable's existing individual queued-force recording and converts the recorded substep impulse back to force for diagnostics; it does not apply that force.
 
 Persistence requires no M25 custom body state. Levitite block state is serialized inside the Sable plot. On load, Sable rebuilds mass and floating clusters from block-property data, yielding one provider per stored Levitite block without a second Aeronautics force registry that could duplicate lift.
+
+## Runtime closure
+
+Manual qualification measured mass 12, gravity near -132 Y, Levitite lift near
++110 Y, and net force near -22 Y. The lift fixture fell substantially slower
+than its zero-provider control. Reload restored the same body and exactly one
+finite provider. M25 is `CLOSED / RUNTIME_PROVEN`; this path remains the M26
+lift regression canary.

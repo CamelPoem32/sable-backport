@@ -3974,8 +3974,53 @@ Use only a fresh artifact whose status reports `implementationRevision=M25`.
 11. Cleanup/spawn `/sable m25 fixture lift_control`, assemble, release, and
     confirm the equivalent body falls under ordinary gravity.
 
-The lift fixture must report one `aeronautics:levitite` provider, nonzero
-production lift, finite position/velocity, and qualitative motion matching
-`lift - gravity`. The command may remove its support platform but must never
-move the body or apply a force. Static status remains
-`M25 IMPLEMENTED / RUNTIME_REQUIRED`; only manual completion can close M25.
+The lift fixture reported one `aeronautics:levitite` provider, mass 12,
+approximately -132 Y gravity, +110 Y lift, and -22 Y net force. It fell
+substantially slower than the equivalent zero-provider control. Save/reload
+restored the same Sable and exactly one finite provider with no duplication or
+hidden-coordinate instability. Final milestone status:
+`M25 CLOSED / RUNTIME_PROVEN`.
+
+## M26 Aeronautics Propulsion Runtime Gate
+
+Use only a fresh artifact whose status reports `implementationRevision=M26.1`.
+
+1. `/sable m26 status`
+2. `/sable m26 registry_check`
+3. `/sable m26 cleanup`
+4. `/sable m26 fixture thrust_centered`
+5. Assemble, then `/sable m26 release`.
+6. Run `/sable m26 propulsion rpm 0`, `32`, `64`, `0`, and `-32`, inspecting
+   with `/sable m26 inspect propulsion` after each settled state.
+7. Repeat with `/sable m26 fixture thrust_offset`; positive RPM must produce
+   the reported negative-Y torque without command-side rotation.
+8. Repeat with `/sable m26 fixture lift_and_thrust`; verify reduced vertical
+   fall plus horizontal thrust.
+9. At zero RPM run `/sable m26 propulsion rotate 0 90 0`, then power again;
+   propulsion must rotate with the body while Levitite remains world-up.
+10. Save/reload at zero RPM, inspect the same Sable and one propulsor, then
+    reapply RPM and disassemble normally after stopping it.
+
+Static status is `M26 IMPLEMENTED / RUNTIME_REQUIRED`. Do not close M26 until
+the real RPM, centered thrust, offset torque, orientation, persistence, and
+disassembly gates pass.
+
+### M26.1 Final Runtime Gates
+
+The centered/offset thrust formula, RPM sign, orientation transform, and
+off-center torque are runtime-proven. The remaining qualification is fixture
+session ownership and lifecycle:
+
+1. Create and assemble `thrust_centered`, release it, set RPM, and note its
+   `fixtureSessionId` and `sableId` from power/inspect output.
+2. Without relying on the old body, create and assemble `thrust_offset`, release
+   it, and run RPM/inspect. Both commands must report the new matching session,
+   Sable UUID, and motor local position.
+3. Create and assemble `lift_and_thrust`; verify combined reduced fall and
+   horizontal propulsion.
+4. Save/reload at zero RPM, inspect the same active session/body, then reapply
+   RPM.
+5. Return to zero RPM and disassemble normally with no stale provider.
+
+If an active session/body is missing, commands must fail with an
+`active_fixture_*` reason and must not select an older loaded fixture.

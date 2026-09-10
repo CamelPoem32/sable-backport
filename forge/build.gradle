@@ -24436,7 +24436,7 @@ tasks.register('verifyM25AeronauticsBaselineBoundary') {
          'Flywheel | `1.0.6`', 'Ponder | `1.0.81`', 'Java | 21'].each { token ->
             if (!baseline.contains(token)) throw new GradleException("M25 baseline missing ${token}")
         }
-        if (!source.contains(commit) || !source.contains('IMPLEMENTATION_REVISION = "M25"')) {
+        if (!source.contains(commit) || !source.contains('IMPLEMENTATION_REVISION = "M26.1"')) {
             throw new GradleException('M25 source is not pinned to the frozen Aeronautics baseline/revision')
         }
         logger.lifecycle('verifyM25AeronauticsBaselineBoundary PASS')
@@ -24762,6 +24762,464 @@ tasks.register('verifyM25Aeronautics') {
     dependsOn tasks.named('verifyM25AeronauticsPersistenceBoundary')
     dependsOn tasks.named('verifyM25AeronauticsSimulatedVersionCompatibilityBoundary')
     doLast {
-        logger.lifecycle('verifyM25Aeronautics PASS: M25 IMPLEMENTED / RUNTIME_REQUIRED')
+        logger.lifecycle('verifyM25Aeronautics PASS: M25 CLOSED / RUNTIME_PROVEN')
+    }
+}
+
+def m26CommandSource = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M26AeronauticsPropulsionCommands.java')
+def m26PropellerSource = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/content/propulsion/WoodenPropellerBlockEntity.java')
+def m26PropellerBlockSource = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/content/propulsion/WoodenPropellerBlock.java')
+def m26RegistrySource = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/index/AeroPropulsionRegistries.java')
+def m26ClientSource = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/client/AeronauticsPropulsionClient.java')
+def m26ActorSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/block/propeller/BlockEntitySubLevelPropellerActor.java')
+def m26PropellerApiSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/block/propeller/BlockEntityPropeller.java')
+
+tasks.register('verifyM25ClosureStatusBoundary') {
+    group = 'forge backport'
+    inputs.files(rootProject.file('BACKPORT_STATUS.md'), rootProject.file('TARGET_RUNTIME_SMOKE.md'),
+            rootProject.file('M25_AERONAUTICS_FORCE_ARCHITECTURE.md'),
+            rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M25AeronauticsCommands.java'))
+    doLast {
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        String architecture = rootProject.file('M25_AERONAUTICS_FORCE_ARCHITECTURE.md').getText('UTF-8')
+        String command = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M25AeronauticsCommands.java').getText('UTF-8')
+        ['M25 CLOSED / RUNTIME_PROVEN', 'mass 12', '-132 Y gravity', '+110 Y lift', '-22 Y net force',
+         'exactly one finite active provider'].each { token ->
+            if (!status.contains(token)) throw new GradleException("M25 closure status missing ${token}")
+        }
+        if (!smoke.contains('Final milestone status:') || !smoke.contains('`M25 CLOSED / RUNTIME_PROVEN`')
+                || !architecture.contains('M25 is `CLOSED / RUNTIME_PROVEN`')) {
+            throw new GradleException('M25 runtime closure is not recorded consistently')
+        }
+        if (!command.contains('status=CLOSED_RUNTIME_PROVEN')
+                || !command.contains('propulsion=M26_IMPLEMENTED_RUNTIME_REQUIRED')) {
+            throw new GradleException('M25 runtime command still reports a pre-closure state')
+        }
+        logger.lifecycle('verifyM25ClosureStatusBoundary PASS: M25 CLOSED / RUNTIME_PROVEN')
+    }
+}
+
+tasks.register('verifyM26PropulsionBaselineBoundary') {
+    group = 'forge backport'
+    inputs.file(rootProject.file('M26_PROPULSION_BASELINE.md'))
+    doLast {
+        String source = rootProject.file('M26_PROPULSION_BASELINE.md').getText('UTF-8')
+        ['9e60263fb5cb00033f14af655a7e72cf7aebb3e2', 'Aeronautics 1.3.0',
+         'Wooden Propeller', 'Propeller Bearing', 'Gyroscopic Propeller Bearing',
+         'Mounted Potato Cannon', 'Create 6.0.10', 'Sable 2.0.0'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M26 propulsion baseline missing ${token}")
+        }
+        logger.lifecycle('verifyM26PropulsionBaselineBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26PropulsionJava17Boundary') {
+    group = 'forge backport'
+    inputs.files(fileTree(rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics')) { include '**/*.java' },
+            m26CommandSource)
+    doLast {
+        def files = fileTree(rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics')) {
+            include '**/*.java'
+        }.files + [m26CommandSource]
+        ['Thread.ofVirtual', 'SequencedCollection', '.reversed()', 'STR."',
+         'getFirst()', 'getLast()', 'removeFirst()', 'removeLast()', 'HolderLookup.Provider'].each { token ->
+            files.each { file ->
+                if (file.getText('UTF-8').contains(token)) {
+                    throw new GradleException("M26 Java 21-only API ${token} in ${file.name}")
+                }
+            }
+        }
+        logger.lifecycle("verifyM26PropulsionJava17Boundary PASS: ${files.size()} selected target files")
+    }
+}
+
+tasks.register('verifyM26PropulsionPortMatrixBoundary') {
+    group = 'forge backport'
+    inputs.file(rootProject.file('M26_AERONAUTICS_PROPULSION_PORT_MATRIX.md'))
+    doLast {
+        String source = rootProject.file('M26_AERONAUTICS_PROPULSION_PORT_MATRIX.md').getText('UTF-8')
+        ['| Java | 11 | 13 | 14 | 8 | 46 |', '| Resources | 8 | 17 | 41 | 17 | 83 |',
+         '| Total | 19 | 30 | 55 | 25 | 129 |', 'ADAPT_M26', 'DEFER_M27_AERODYNAMICS',
+         'DEFER_M28_GOLDEN_AIRCRAFT', 'NOT_APPLICABLE_1_20_1'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M26 port matrix missing ${token}")
+        }
+        logger.lifecycle('verifyM26PropulsionPortMatrixBoundary PASS: all 46 Java and 83 resource paths reclassified')
+    }
+}
+
+tasks.register('verifyM26PropulsionRegistryBoundary') {
+    group = 'forge backport'
+    inputs.files(m26RegistrySource, rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/Aeronautics.java'),
+            rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/index/AeroCreativeTabs.java'),
+            rootProject.file('forge/src/main/resources/META-INF/mods.toml'))
+    doLast {
+        String registry = m26RegistrySource.getText('UTF-8')
+        String bootstrap = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/Aeronautics.java').getText('UTF-8')
+        String tab = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/index/AeroCreativeTabs.java').getText('UTF-8')
+        String mods = rootProject.file('forge/src/main/resources/META-INF/mods.toml').getText('UTF-8')
+        if (registry.count('REGISTER("wooden_propeller"') > 0
+                || registry.count('register("wooden_propeller"') != 3
+                || !registry.contains('DeferredRegister<BlockEntityType<?>>')
+                || !bootstrap.contains('AeroPropulsionRegistries.register(modBus)')
+                || !tab.contains('WOODEN_PROPELLER_ITEM.get()')
+                || !mods.contains('version = "1.3.0-m26-backport"')) {
+            throw new GradleException('M26 propulsion registration graph is incomplete')
+        }
+        logger.lifecycle('verifyM26PropulsionRegistryBoundary PASS: 1 block, 1 item, 1 block entity')
+    }
+}
+
+tasks.register('verifyM26PropulsionUpstreamFormulaBoundary') {
+    group = 'forge backport'
+    inputs.files(m26PropellerSource, m26PropellerApiSource,
+            rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/config/AeroConfig.java'))
+    doLast {
+        String propeller = m26PropellerSource.getText('UTF-8')
+        String api = m26PropellerApiSource.getText('UTF-8')
+        String config = rootProject.file('forge/src/main/java/dev/eriksonn/aeronautics/config/AeroConfig.java').getText('UTF-8')
+        ['convertToAngular(this.getSpeed())', 'Mth.lerp(0.15F', '* (10.0F / 3.0F)',
+         'getAxisDirection().getStep()', 'WoodenPropellerBlock.REVERSED', 'Math.abs(this.rotationSpeed) > 0.01F'].each { token ->
+            if (!propeller.contains(token)) throw new GradleException("M26 propeller formula missing ${token}")
+        }
+        if (!api.contains('return -this.getThrust() * this.getAirflowScaling() * this.getCurrentAirPressure()')
+                || !api.contains('Mth.clamp((airflow + velocity.dot(thrustDirection.x, thrustDirection.y, thrustDirection.z)) / airflow, 0, 1)')
+                || !config.contains('defineInRange("woodenPropellerThrust", 1.0D')
+                || !config.contains('defineInRange("woodenPropellerAirflow", 0.1D')) {
+            throw new GradleException('M26 frozen thrust/airflow scaling is not preserved')
+        }
+        logger.lifecycle('verifyM26PropulsionUpstreamFormulaBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26CreateKineticInputBoundary') {
+    group = 'forge backport'
+    inputs.files(m26PropellerSource, m26PropellerBlockSource, m26CommandSource)
+    doLast {
+        String be = m26PropellerSource.getText('UTF-8')
+        String block = m26PropellerBlockSource.getText('UTF-8')
+        String command = m26CommandSource.getText('UTF-8')
+        if (!be.contains('extends KineticBlockEntity') || !be.contains('this.getSpeed()')
+                || !block.contains('extends DirectionalKineticBlock') || !block.contains('hasShaftTowards')
+                || !command.contains('CreativeMotorBlockEntity') || !command.contains('motor.generatedSpeed.setValue(rpm)')
+                || !command.contains('commandAppliedForce=false')) {
+            throw new GradleException('M26 RPM does not flow through the real Create kinetic network')
+        }
+        logger.lifecycle('verifyM26CreateKineticInputBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26PropulsionForceOwnershipBoundary') {
+    group = 'forge backport'
+    inputs.files(m26PropellerSource, m26ActorSource, m26CommandSource,
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/force/ForceTotal.java'))
+    doLast {
+        String be = m26PropellerSource.getText('UTF-8')
+        String actor = m26ActorSource.getText('UTF-8')
+        String command = m26CommandSource.getText('UTF-8')
+        if (!be.contains('implements BlockEntitySubLevelPropellerActor, BlockEntityPropeller')
+                || !actor.contains('ForceGroups.PROPULSION.get()')
+                || !actor.contains('applyAndRecordPointForce')
+                || command.contains('.setVelocity(') || command.contains('.setDeltaMovement(')
+                || command.contains('.applyLinearImpulse(') || command.contains('.applyLinearAndAngularImpulse(')
+                || command.contains('getOrCreateQueuedForceGroup(ForceGroups.PROPULSION')) {
+            throw new GradleException('M26 command bypasses production Aeronautics/Sable force ownership')
+        }
+        logger.lifecycle('verifyM26PropulsionForceOwnershipBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26PropulsionCoordinateFrameBoundary') {
+    group = 'forge backport'
+    inputs.files(m26ActorSource, m26CommandSource, rootProject.file('M26_PROPULSION_FORCE_ARCHITECTURE.md'))
+    doLast {
+        String actor = m26ActorSource.getText('UTF-8')
+        String command = m26CommandSource.getText('UTF-8')
+        String docs = rootProject.file('M26_PROPULSION_FORCE_ARCHITECTURE.md').getText('UTF-8')
+        if (!actor.contains('JOMLConversion.atCenterOf(prop.getBlockPos())')
+                || !command.contains('new Vector3d(applicationRaw).sub(rawCom)')
+                || !command.contains('logicalPose().transformPosition(new Vector3d(applicationRaw))')
+                || !command.contains('logicalPose().orientation().transform(localForce')
+                || command.contains('20000000') || command.contains('20_000_000')
+                || !docs.contains('Hidden plot coordinates never become world lever arms')) {
+            throw new GradleException('M26 propulsion coordinate-frame boundary is not visible-safe')
+        }
+        logger.lifecycle('verifyM26PropulsionCoordinateFrameBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26PropulsionOrientationBoundary') {
+    group = 'forge backport'
+    inputs.files(m26CommandSource, rootProject.file('M26_PROPULSION_FORCE_ARCHITECTURE.md'))
+    doLast {
+        String command = m26CommandSource.getText('UTF-8')
+        String docs = rootProject.file('M26_PROPULSION_FORCE_ARCHITECTURE.md').getText('UTF-8')
+        if (!command.contains('orientation().transform(localAxis')
+                || !command.contains('orientation().transform(localForce')
+                || !command.contains('handle.teleport(body.logicalPose().position(), orientation)')
+                || !docs.contains('Levitite remains world-up')) {
+            throw new GradleException('M26 body orientation does not rotate propulsion independently of Levitite')
+        }
+        logger.lifecycle('verifyM26PropulsionOrientationBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26PropulsionReverseBoundary') {
+    group = 'forge backport'
+    inputs.files(m26PropellerSource, m26PropellerBlockSource, m26CommandSource)
+    doLast {
+        String all = [m26PropellerSource, m26PropellerBlockSource, m26CommandSource]
+                .collect { it.getText('UTF-8') }.join('\n')
+        if (!all.contains('IntegerArgumentType.integer(-256, 256)')
+                || !all.contains('state.cycle(REVERSED)')
+                || !all.contains('getAxisDirection().getStep()')
+                || !all.contains('? -1.0F : 1.0F')) {
+            throw new GradleException('M26 signed RPM/reversed-state semantics are incomplete')
+        }
+        logger.lifecycle('verifyM26PropulsionReverseBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26PropulsionTorqueBoundary') {
+    group = 'forge backport'
+    inputs.files(m26CommandSource,
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/force/ForceTotal.java'))
+    doLast {
+        String command = m26CommandSource.getText('UTF-8')
+        String total = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/physics/force/ForceTotal.java').getText('UTF-8')
+        if (!total.contains('position.sub(massTracker.getCenterOfMass(), this.temp)')
+                || !total.contains('this.localTorque.add(this.temp.cross(force))')
+                || !command.contains('origin.north(2)')
+                || !command.contains('lever.cross(propulsion.localForce, new Vector3d())')
+                || !command.contains('NEGATIVE_Y_FOR_POSITIVE_RPM')) {
+            throw new GradleException('M26 offset point-force torque path is incomplete')
+        }
+        logger.lifecycle('verifyM26PropulsionTorqueBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26PropulsionFixtureBoundary') {
+    group = 'forge backport'
+    inputs.file(m26CommandSource)
+    doLast {
+        String command = m26CommandSource.getText('UTF-8')
+        ['Commands.literal("thrust_centered")', 'Commands.literal("thrust_offset")',
+         'Commands.literal("lift_and_thrust")', 'SimulatedBlocks.PHYSICS_ASSEMBLER',
+         'AeroBlocks.LEVITITE', 'AeroPropulsionRegistries.WOODEN_PROPELLER',
+         'CREATIVE_MOTOR_ID', 'new SuperGlueEntity', 'new SimAssemblyContraption(null)',
+         'selectedSupportBlocks=', 'bodyMoved=false forceAppliedByCommand=false'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M26 fixture missing ${token}")
+        }
+        logger.lifecycle('verifyM26PropulsionFixtureBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26PropulsionPersistenceBoundary') {
+    group = 'forge backport'
+    inputs.files(m26PropellerSource, m26CommandSource, rootProject.file('M26_PROPULSION_FORCE_ARCHITECTURE.md'))
+    doLast {
+        String be = m26PropellerSource.getText('UTF-8')
+        String command = m26CommandSource.getText('UTF-8')
+        String docs = rootProject.file('M26_PROPULSION_FORCE_ARCHITECTURE.md').getText('UTF-8')
+        if (!be.contains('tag.putFloat("RotationSpeed"') || !be.contains('tag.getFloat("RotationSpeed")')
+                || !command.contains('this.bodyId = body.getUniqueId()')
+                || !command.contains('container.getSubLevel(state.bodyId)')
+                || command.contains('findAnyPropulsionBody') || command.contains('fixtureStateOrRecover')
+                || command.contains('SavedData') || !docs.contains('normal block')
+                || !docs.contains('actor registration rebuilds exactly one')
+                || !docs.contains('authoritative UUID and stored local positions')) {
+            throw new GradleException('M26 persistence/provider recovery is not production-owned')
+        }
+        logger.lifecycle('verifyM26PropulsionPersistenceBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26FixtureSessionOwnershipBoundary') {
+    group = 'forge backport'
+    inputs.file(m26CommandSource)
+    doLast {
+        String command = m26CommandSource.getText('UTF-8')
+        ['private static final Map<String, PropulsionFixtureState> ACTIVE_FIXTURES',
+         'UUID.randomUUID()', 'private final UUID fixtureSessionId;',
+         'private final FixtureKind kind;', 'private final BlockPos parentAssemblerPos;',
+         'private final BlockPos propellerOffsetFromAssembler;',
+         'private final BlockPos motorOffsetFromAssembler;',
+         'private final Map<BlockPos, ResourceLocation> fixtureBlockFingerprint;',
+         'private final Set<UUID> preExistingSableIds;',
+         'state.captureBody(match.body, match.assemblerRaw);',
+         'this.bodyId = body.getUniqueId();',
+         'ownership=AUTHORITATIVE_FIXTURE_SESSION'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M26.1 fixture session missing ${token}")
+        }
+        if (command.contains('findAnyPropulsionBody') || command.contains('fixtureStateOrRecover')) {
+            throw new GradleException('M26.1 fixture session retains global/legacy body recovery')
+        }
+        logger.lifecycle('verifyM26FixtureSessionOwnershipBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26PropulsionCommandAuthoritativeTargetBoundary') {
+    group = 'forge backport'
+    inputs.file(m26CommandSource)
+    doLast {
+        String command = m26CommandSource.getText('UTF-8')
+        ['private static int setRpm', 'private static int inspect', 'private static int release',
+         'activeFixture(source.getLevel())', 'resolveBody(source.getLevel(), state)',
+         'container.getSubLevel(state.bodyId)', 'state.owns(body)',
+         'getCenterBlock().offset(state.propellerLocalPos)',
+         'getCenterBlock().offset(state.motorLocalPos)',
+         'fixtureSessionId=', 'resolvedMotorSable=',
+         'reason=active_fixture_missing'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M26.1 authoritative command path missing ${token}")
+        }
+        if (command.contains('findAnyPropulsionBody') || command.contains('findAnyPropulsionMotor')
+                || command.contains('findAnyPropeller')) {
+            throw new GradleException('M26.1 command can still select a global propulsion component')
+        }
+        logger.lifecycle('verifyM26PropulsionCommandAuthoritativeTargetBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26CleanupInvalidatesFixtureBoundary') {
+    group = 'forge backport'
+    inputs.file(m26CommandSource)
+    doLast {
+        String command = m26CommandSource.getText('UTF-8')
+        ['ACTIVE_FIXTURES.remove(key(ctx.getSource().getLevel()))',
+         'state.invalidate();', 'sessionInvalidated=true',
+         'this.active = false;', 'this.bodyId = null;',
+         'this.propellerLocalPos = null;', 'this.motorLocalPos = null;',
+         'this.resolutionFailure = "active_fixture_missing";'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M26.1 cleanup invalidation missing ${token}")
+        }
+        logger.lifecycle('verifyM26CleanupInvalidatesFixtureBoundary PASS')
+    }
+}
+
+tasks.register('verifyM26_1FixtureOwnership') {
+    group = 'forge backport'
+    description = 'Runs focused M26.1 authoritative fixture-session boundaries.'
+    dependsOn tasks.named('verifyM26FixtureSessionOwnershipBoundary')
+    dependsOn tasks.named('verifyM26PropulsionCommandAuthoritativeTargetBoundary')
+    dependsOn tasks.named('verifyM26CleanupInvalidatesFixtureBoundary')
+    doLast {
+        logger.lifecycle('verifyM26_1FixtureOwnership PASS: M26 IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+tasks.register('verifyM26PropulsionResourceBoundary') {
+    group = 'forge backport'
+    inputs.files(rootProject.file('forge/src/main/resources/assets/aeronautics'),
+            rootProject.file('forge/src/main/resources/data/aeronautics/loot_tables/blocks/wooden_propeller.json'),
+            m26ClientSource)
+    doLast {
+        def slurper = new JsonSlurper()
+        File root = rootProject.file('forge/src/main/resources/assets/aeronautics')
+        File blockstate = new File(root, 'blockstates/wooden_propeller.json')
+        def models = ['models/block/wooden_propeller/block.json',
+                      'models/block/wooden_propeller/propeller.json',
+                      'models/block/wooden_propeller/propeller_reversed.json',
+                      'models/item/wooden_propeller.json'].collect { new File(root, it) }
+        File lootTable = rootProject.file('forge/src/main/resources/data/aeronautics/loot_tables/blocks/wooden_propeller.json')
+        def textures = ['textures/block/propeller_wood.png',
+                        'textures/block/custom_break_particles/propeller.png'].collect { new File(root, it) }
+        ([blockstate] + models + textures + [lootTable]).each { file ->
+            if (!file.isFile()) throw new GradleException("M26 propulsion resource missing ${file}")
+        }
+        def variants = slurper.parse(blockstate).variants
+        if (variants.size() != 12 || !variants.values().every { it.model == 'aeronautics:block/wooden_propeller/block' }) {
+            throw new GradleException('M26 Wooden Propeller blockstate is incomplete')
+        }
+        models.each { file ->
+            def json = slurper.parse(file)
+            if (json.textures != null) {
+                json.textures.values().findAll { it instanceof String && it.startsWith('aeronautics:block/') }
+                        .each { ref ->
+                            File texture = new File(root, 'textures/' + ref.substring('aeronautics:'.length()) + '.png')
+                            if (!texture.isFile()) throw new GradleException("M26 unresolved model texture ${ref} from ${file.name}")
+                        }
+            }
+        }
+        def loot = slurper.parse(lootTable)
+        if (loot.type != 'minecraft:block'
+                || !loot.pools*.entries.flatten().any { it.name == 'aeronautics:wooden_propeller' }) {
+            throw new GradleException('M26 Wooden Propeller loot table does not restore its registered item')
+        }
+        String client = m26ClientSource.getText('UTF-8')
+        if (!client.contains('ModelEvent.RegisterAdditional')
+                || !client.contains('WOODEN_PROPELLER_MODEL')
+                || !client.contains('registerBlockEntityRenderer')) {
+            throw new GradleException('M26 dynamic model/BER registration is incomplete')
+        }
+        logger.lifecycle('verifyM26PropulsionResourceBoundary PASS: exact Wooden Propeller model/texture graph resolves')
+    }
+}
+
+tasks.register('verifyM26M25RegressionBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM25ClosureStatusBoundary')
+    dependsOn tasks.named('verifyM25Aeronautics')
+    doLast {
+        logger.lifecycle('verifyM26M25RegressionBoundary PASS: M25 lift and control canaries remain frozen')
+    }
+}
+
+tasks.register('verifyM26RegressionBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM26M25RegressionBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsRegressionBoundary')
+    doLast {
+        logger.lifecycle('verifyM26RegressionBoundary PASS: M21-M25 frozen foundations retained')
+    }
+}
+
+tasks.register('verifyM26PropulsionArtifactBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('jarJar')
+    inputs.file(tasks.named('jarJar').flatMap { it.archiveFile })
+    doLast {
+        File archive = tasks.named('jarJar').get().archiveFile.get().asFile
+        JarFile jar = new JarFile(archive)
+        try {
+            ['dev/eriksonn/aeronautics/content/propulsion/WoodenPropellerBlock.class',
+             'dev/eriksonn/aeronautics/content/propulsion/WoodenPropellerBlockEntity.class',
+             'dev/ryanhcode/sable/command/M26AeronauticsPropulsionCommands.class',
+             'assets/aeronautics/blockstates/wooden_propeller.json',
+             'assets/aeronautics/models/block/wooden_propeller/block.json',
+             'assets/aeronautics/models/block/wooden_propeller/propeller.json',
+             'assets/aeronautics/models/block/wooden_propeller/propeller_reversed.json',
+             'assets/aeronautics/models/item/wooden_propeller.json',
+             'assets/aeronautics/textures/block/propeller_wood.png',
+             'data/aeronautics/loot_tables/blocks/wooden_propeller.json',
+             'data/aeronautics/m26_implementation_revision.txt'].each { entry ->
+                if (jar.getJarEntry(entry) == null) throw new GradleException("M26 artifact missing ${entry}")
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle("verifyM26PropulsionArtifactBoundary PASS: ${archive.name}")
+    }
+}
+
+tasks.register('verifyM26Aeronautics') {
+    group = 'forge backport'
+    description = 'Runs focused M26 Wooden Propeller production and canary boundaries.'
+    dependsOn tasks.named('verifyM26PropulsionBaselineBoundary')
+    dependsOn tasks.named('verifyM26PropulsionPortMatrixBoundary')
+    dependsOn tasks.named('verifyM26PropulsionJava17Boundary')
+    dependsOn tasks.named('verifyM26PropulsionRegistryBoundary')
+    dependsOn tasks.named('verifyM26PropulsionUpstreamFormulaBoundary')
+    dependsOn tasks.named('verifyM26CreateKineticInputBoundary')
+    dependsOn tasks.named('verifyM26PropulsionForceOwnershipBoundary')
+    dependsOn tasks.named('verifyM26PropulsionCoordinateFrameBoundary')
+    dependsOn tasks.named('verifyM26PropulsionOrientationBoundary')
+    dependsOn tasks.named('verifyM26PropulsionReverseBoundary')
+    dependsOn tasks.named('verifyM26PropulsionTorqueBoundary')
+    dependsOn tasks.named('verifyM26PropulsionFixtureBoundary')
+    dependsOn tasks.named('verifyM26PropulsionPersistenceBoundary')
+    dependsOn tasks.named('verifyM26PropulsionResourceBoundary')
+    dependsOn tasks.named('verifyM26_1FixtureOwnership')
+    doLast {
+        logger.lifecycle('verifyM26Aeronautics PASS: M26 IMPLEMENTED / RUNTIME_REQUIRED')
     }
 }

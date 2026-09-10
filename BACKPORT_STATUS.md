@@ -2381,7 +2381,28 @@ canary never writes velocity, position, logical pose, gravity, or lift values.
 Its six-block lift fixture predicts `EXPECTED_NEAR_HOVER`; an otherwise
 equivalent no-Levitite control predicts `EXPECTED_FALL`.
 
-Static milestone status: `M25 IMPLEMENTED / RUNTIME_REQUIRED`. Propellers,
-engines, thrust, steering, aerodynamic control surfaces, full aircraft, and
-the golden aircraft remain deferred. M25 is not closed until the manual lift,
-control, orientation, and save/reload gates pass.
+Manual runtime acceptance is complete. The Levitite body reported one provider,
+mass 12, approximately -132 Y gravity, +110 Y lift, and -22 Y net force; it
+fell substantially slower than the equivalent zero-provider control. Save/reload
+restored the same Sable with exactly one finite active provider, without hidden-
+coordinate instability or duplicated lift. Final status: `M25 CLOSED / RUNTIME_PROVEN`.
+
+### M26 Aeronautics Propulsion
+
+M26 selects the frozen Wooden Propeller as the smallest independent propulsion
+mechanism. It uses a real Create Creative Motor, the upstream smoothed signed-RPM
+formula, Sable's existing `PROPULSION` point-force group, and the existing Rapier
+body. Centered, offset, and combined Levitite-plus-thrust fixtures are available;
+no command writes force, velocity, or logical pose. Static status is
+`M26 IMPLEMENTED / RUNTIME_REQUIRED`. Wings, aerodynamic control surfaces,
+flight control, and full aircraft remain deferred to later milestones.
+
+M26.1 corrects only propulsion fixture ownership. Each newly placed M26 fixture
+now owns a unique active session, captures its assembled Sable UUID through an
+exact fixture fingerprint, and stores assembler-relative propeller and Creative
+Motor positions inside that body. RPM, inspect, and release use that same
+session and never fall back to the first globally loaded propeller or motor.
+Cleanup invalidates the session. The runtime disposition remains
+`M26 IMPLEMENTED / RUNTIME_REQUIRED`; centered/offset propulsion physics is
+already proven, while new-fixture command targeting, combined lift and thrust,
+save/reload, and zero-RPM disassembly remain as the final runtime gates.

@@ -17,7 +17,10 @@ public final class AeroCreativeTabs {
             () -> CreativeModeTab.builder()
                     .title(Component.translatable("itemGroup.aeronautics.main_tab"))
                     .icon(() -> new ItemStack(AeroItems.LEVITITE.get()))
-                    .displayItems((parameters, output) -> output.accept(AeroItems.LEVITITE.get()))
+                    .displayItems((parameters, output) -> {
+                        output.accept(AeroItems.LEVITITE.get());
+                        output.accept(AeroPropulsionRegistries.WOODEN_PROPELLER_ITEM.get());
+                    })
                     .build());
 
     private AeroCreativeTabs() {

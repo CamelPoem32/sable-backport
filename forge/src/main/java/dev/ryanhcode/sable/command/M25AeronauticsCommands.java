@@ -110,8 +110,8 @@ public final class M25AeronauticsCommands {
                 + " aeronauticsBaseline=" + Aeronautics.BASELINE_COMMIT
                 + " modInitialized=" + Aeronautics.isInitialized()
                 + " liftMechanism=LEVITITE_FLOATING_MATERIAL"
-                + " propulsion=DEFERRED_M26"
-                + " status=IMPLEMENTED_RUNTIME_REQUIRED");
+                + " propulsion=M26_IMPLEMENTED_RUNTIME_REQUIRED"
+                + " status=CLOSED_RUNTIME_PROVEN");
         return 1;
     }
 

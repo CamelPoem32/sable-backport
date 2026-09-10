@@ -3,6 +3,7 @@ package dev.eriksonn.aeronautics.forge;
 import dev.eriksonn.aeronautics.Aeronautics;
 import dev.eriksonn.aeronautics.config.AeroConfig;
 import dev.ryanhcode.sable.command.M25AeronauticsCommands;
+import dev.ryanhcode.sable.command.M26AeronauticsPropulsionCommands;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
@@ -24,6 +25,7 @@ public final class AeronauticsForge {
     private void levelTick(final TickEvent.LevelTickEvent event) {
         if (event.phase == TickEvent.Phase.END && event.level instanceof final ServerLevel level) {
             M25AeronauticsCommands.tick(level);
+            M26AeronauticsPropulsionCommands.tick(level);
         }
     }
 }
