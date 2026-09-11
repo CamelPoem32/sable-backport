@@ -4008,7 +4008,8 @@ disassembly gates pass.
 ### M26.1 Final Runtime Gates
 
 The centered/offset thrust formula, RPM sign, orientation transform, and
-off-center torque are runtime-proven. The remaining qualification is fixture
+off-center torque are runtime-proven: `M26 PROPULSION_CORE = RUNTIME_PROVEN`.
+The remaining qualification is fixture
 session ownership and lifecycle:
 
 1. Create and assemble `thrust_centered`, release it, set RPM, and note its
@@ -4024,3 +4025,96 @@ session ownership and lifecycle:
 
 If an active session/body is missing, commands must fail with an
 `active_fixture_*` reason and must not select an older loaded fixture.
+
+## M27.1 Aerodynamics Runtime Gate
+
+Use only a fresh artifact reporting `implementationRevision=M27.1`.
+
+1. `/sable m27 status`
+2. `/sable m27 registry_check`
+3. `/sable m27 cleanup`
+4. `/sable m27 fixture aero_surface_basic`
+5. Assemble, run `/sable m27 release`, then inspect at RPM `0`, `32`, and `64`.
+   Stop unless the static provider count is one and all available aerodynamic
+   quantities are finite.
+6. Only after the basic gate passes, run `/sable m27 fixture pitch_control`;
+   assemble while both motors remain stopped, release, set propulsion RPM 32,
+   then run `/sable m27 control elevator 0`, `1`, and `-1` with settled inspections.
+   The command must report a running Create bearing and changing actual angle;
+   the resulting aerodynamic moment must reverse without command-side torque.
+7. Then test `/sable m27 fixture aero_offset`; assemble/release and confirm the
+   off-COM aerodynamic torque agrees with physical rotation.
+8. `/sable m27 fixture aero_vehicle`; assemble/release, apply propulsion and
+   control, then verify finite propelled motion, lift/drag, and angular response.
+9. Save/reload, inspect the same Sable and provider counts, reapply input, stop
+   both motors, and disassemble normally.
+
+The exact frozen model exposes normal velocity and tangential speed rather than
+a signed AoA coefficient, so inspect reports
+`angleOfAttack=UNDEFINED_BY_FROZEN_MODEL`. Status remains
+This historical M27.1 gate is complete. Final milestone status is
+`M27 CLOSED / RUNTIME_PROVEN`.
+
+## M27.2 Control Geometry And Lifecycle Gate
+
+Use only a fresh artifact reporting `implementationRevision=M27.2`.
+
+Pitch control:
+
+1. `/sable m27 cleanup`
+2. `/sable m27 fixture pitch_control`
+3. Right-click the Physics Assembler, then run `/sable m27 inspect aero` before
+   release. Main motor, propeller, regular sail, and bearing must report
+   `STATIC_SABLE`.
+4. `/sable m27 release` and `/sable m27 propulsion rpm 64`.
+5. Run `/sable m27 control elevator 0`, `1`, and `-1`, allowing a brief settle
+   and inspecting after each. The real bearing angle and transformed control
+   normal must change in opposite directions; the control payload must contain
+   one symmetric sail and no main vehicle block.
+
+Vehicle persistence and disassembly:
+
+1. `/sable m27 cleanup`, `/sable m27 fixture aero_vehicle`, then assemble and
+   inspect before release.
+2. Release, set propulsion RPM 64, exercise elevator `1` and `-1`, and inspect.
+3. Stop propulsion, save/quit, reload, then inspect and repeat propulsion 0/64
+   and elevator `1`/`-1`. All commands must resolve the same saved Sable UUID.
+4. Run `/sable m27 prepare_disassembly`. Only when it reports
+   `READY_TO_DISASSEMBLE`, manually activate the Physics Assembler.
+5. Normal disassembly must restore all blocks with no stale provider or Create
+   contraption. A reported occupied position remains a real M22 safety block
+   and must be cleared by moving/landing naturally.
+
+Manual M27.2 qualification completed all of these gates. Static sail and moving
+control-surface providers remained finite; bearing deflection changed the sail
+normal in opposite directions; only the intended sail entered the control
+contraption; the full vehicle flew; reload retained the same Sable and static
+components; stow returned the payload; and normal Physics Assembler teardown
+completed without loss or duplication. Final status:
+`M27 CLOSED / RUNTIME_PROVEN`.
+
+## M28 Golden Aircraft Runtime Gate
+
+Use only a fresh artifact whose `/sable m28 status` reports
+`implementationRevision=M28`. Follow `M28_GOLDEN_AIRCRAFT_BUILD.md` and
+`M28_GOLDEN_AIRCRAFT_RUNTIME.md`.
+
+1. Manually build and glue the documented aircraft; configure both Creative
+   Motors and all three Steering Wheels through normal Create interactions.
+2. Confirm each Mechanical Bearing captures only its one symmetric sail, then
+   assemble through the real Physics Assembler.
+3. Board by walking onto the deck. `/sable m28 inspect` is optional and
+   read-only; it must resolve the production-tracked Sable without fixture state.
+4. Start propulsion through the normal Creative Motor value box, accelerate,
+   and use the three physical Steering Wheel channels for pitch, yaw, and roll.
+5. Take off, climb, turn, descend, and land while remaining onboard and finite.
+6. Open the chest, toggle the lever/lamp, and run the onboard Drill briefly
+   against a legitimate world block.
+7. At safe speed, exercise ordinary onboard place/break if supported; otherwise
+   record the exact production blocker for M29 without bypassing it.
+8. Stop propulsion, center all wheels, return all bearing payloads normally,
+   and activate the Physics Assembler. Verify complete clean restoration.
+
+No `/sable m25`, `m26`, or `m27` fixture/control command is part of Golden
+acceptance. M28 remains `IMPLEMENTED / RUNTIME_REQUIRED` until this continuous
+manual flight succeeds. Airborne reload and deeper structural stress are M29.

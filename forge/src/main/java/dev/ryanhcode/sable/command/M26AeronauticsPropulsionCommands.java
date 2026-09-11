@@ -115,6 +115,7 @@ public final class M26AeronauticsPropulsionCommands {
     private static int status(final CommandContext<CommandSourceStack> ctx) {
         send(ctx.getSource(), "SABLE_M26_STATUS implementationRevision=M26.1"
                 + " m25=CLOSED_RUNTIME_PROVEN"
+                + " propulsionCore=RUNTIME_PROVEN"
                 + " mechanism=WOODEN_PROPELLER"
                 + " upstreamCommit=" + Aeronautics.BASELINE_COMMIT
                 + " m27Aerodynamics=DEFERRED"

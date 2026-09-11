@@ -4,6 +4,7 @@ import dev.ryanhcode.sable.SableClient;
 import dev.ryanhcode.sable.SableClientConfig;
 import dev.ryanhcode.sable.physics.config.FloatingBlockMaterialDataHandler;
 import dev.ryanhcode.sable.sublevel.render.dispatcher.SubLevelRenderDispatcher;
+import dev.simulated_team.simulated.content.blocks.steering_wheel.SteeringWheelClient;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.common.MinecraftForge;
@@ -28,6 +29,7 @@ final class SableForgeClient {
         SableForgeClientRenderEvents.register();
         SableForgeM24PartialModels.register(modBus);
         SableForgeM24ConnectionVisuals.register(modBus);
+        SteeringWheelClient.register(modBus);
         ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, SableClientConfig.SPEC);
 
         modBus.<ModConfigEvent.Loading>addListener(event -> SableClientConfig.onUpdate(false));

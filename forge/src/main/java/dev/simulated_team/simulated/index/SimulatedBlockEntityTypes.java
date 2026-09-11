@@ -7,6 +7,7 @@ import dev.simulated_team.simulated.content.blocks.m24.M24WinchBlockEntity;
 import dev.simulated_team.simulated.content.blocks.m24.M24TorsionSpringBlockEntity;
 import dev.simulated_team.simulated.content.blocks.physics_assembler.PhysicsAssemblerBlockEntity;
 import dev.simulated_team.simulated.content.blocks.spring.SpringBlockEntity;
+import dev.simulated_team.simulated.content.blocks.steering_wheel.SteeringWheelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.registries.DeferredRegister;
@@ -78,10 +79,9 @@ public final class SimulatedBlockEntityTypes {
                     .of((pos, state) -> new M24PhysicalBlockEntity(M24Family.OPTICAL_SENSOR, pos, state),
                             SimulatedBlocks.OPTICAL_SENSOR.get())
                     .build(null));
-    public static final RegistryObject<BlockEntityType<M24PhysicalBlockEntity>> STEERING_WHEEL =
+    public static final RegistryObject<BlockEntityType<SteeringWheelBlockEntity>> STEERING_WHEEL =
             REGISTER.register("steering_wheel", () -> BlockEntityType.Builder
-                    .of((pos, state) -> new M24PhysicalBlockEntity(M24Family.STEERING_WHEEL, pos, state),
-                            SimulatedBlocks.STEERING_WHEEL.get())
+                    .of(SteeringWheelBlockEntity::new, SimulatedBlocks.STEERING_WHEEL.get())
                     .build(null));
 
     private SimulatedBlockEntityTypes() {

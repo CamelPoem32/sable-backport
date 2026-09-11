@@ -2406,3 +2406,68 @@ Cleanup invalidates the session. The runtime disposition remains
 `M26 IMPLEMENTED / RUNTIME_REQUIRED`; centered/offset propulsion physics is
 already proven, while new-fixture command targeting, combined lift and thrust,
 save/reload, and zero-RPM disassembly remain as the final runtime gates.
+The manually qualified force path is recorded as
+`M26 PROPULSION_CORE = RUNTIME_PROVEN`.
+
+## M27 Aerodynamics and control surfaces
+
+The frozen aerodynamic graph is distributed across Sable, Create, and
+Simulated. `BlockSubLevelLiftProvider` owns point velocity, pressure, lift,
+drag, and off-COM torque. A restored Sable compatibility mixin makes Create
+sails lift providers; the ported Simulated symmetric sail is the exact frozen
+drag-only surface (`lift=0`, `parallelDrag=1.75`).
+
+M27 fixtures combine those production surfaces with the runtime-proven Wooden
+Propeller. The pitch-control fixture uses a real Create Mechanical Bearing and
+Creative Motor to move a symmetric-sail control surface. Commands share one
+authoritative fixture session and never apply aerodynamic force, torque,
+velocity, or pose directly. M26 production propulsion remains unchanged and
+`M26 PROPULSION_CORE = RUNTIME_PROVEN`.
+
+`M27_AERODYNAMICS_BASELINE.md`, `M27_AERODYNAMICS_PORT_MATRIX.md`, and
+`M27_AERODYNAMIC_FORCE_ARCHITECTURE.md` record the frozen ownership and exact
+formula. Final status is superseded by the closure below:
+`M27 CLOSED / RUNTIME_PROVEN`.
+
+M27.1 repairs two test-gate failures without changing aerodynamic or propulsion
+physics. The exact frozen `SailBlockMixin` is now present in the curated Forge
+runtime mixin config, so Create sails implement `BlockSubLevelLiftProvider` and
+enter `ServerLevelPlot` provider discovery. M27 fixture ownership is captured
+at successful Physics Assembler completion from the exact returned Sable UUID
+and assembly offset; commands no longer identify bodies through post-assembly
+block fingerprints. This remains valid when a Mechanical Bearing moves its
+symmetric-sail payload into a Create contraption. Status remains
+`M27 CLOSED / RUNTIME_PROVEN` after the completed M27.2 runtime gate.
+
+M27.2 corrects only control-fixture geometry and lifecycle diagnostics. The old
+south-facing Z-axis bearing rotated around the symmetric sail's +Z normal, so
+the normal could not change. The new east-facing +X bearing carries one
++Z-normal sail across an intentional air gap. The former `aero_vehicle`
+bridging sail, which let the bearing capture eight main-body blocks, is gone.
+Main propulsion, the regular sail, and the bearing remain `STATIC_SABLE`; the
+single control sail is `CREATE_CONTRAPTION`. A test-only
+`prepare_disassembly` command stops real motors, uses Create's normal bearing
+disassembly, and reports the unchanged M22 occupied-space gate. Static Create
+sail aerodynamics are `RUNTIME_PROVEN`; the formerly pending control, reload,
+and disassembly gates are now accepted, so the final status is
+`M27 CLOSED / RUNTIME_PROVEN`.
+
+### M27 Closure And M28 Golden Aircraft
+
+Manual M27.2 runtime acceptance is complete. Ordinary Create sails provide
+finite static aerodynamics; bearing-mounted symmetric sails provide finite
+kinematic aerodynamics; the corrected hinge changes the control normal in
+opposite directions; each bearing captures only its intended sail; main
+propulsion remains `STATIC_SABLE`; the vehicle flies; reload retains the exact
+Sable and component ownership; `prepare_disassembly` reports clear restoration;
+and normal Physics Assembler disassembly restores the craft without loss or
+duplication. Final status: `M27 CLOSED / RUNTIME_PROVEN`.
+
+M28 ports the frozen Simulated Steering Wheel as the production player-control
+component. Mouse-hold input sends a serverbound exact-position target-angle
+packet. The server wheel generates bounded +/-16 RPM through normal Create
+kinetics until it reaches that target; ordinary shafts/gearboxes and isolated
+Mechanical Bearing payloads produce M27 aerodynamic control. Pitch, yaw, and
+roll are three separate physical channels, not direct Sable force or pose
+commands. `/sable m28 status` and `/sable m28 inspect` are read-only and no M28
+fixture exists. Static status: `M28 IMPLEMENTED / RUNTIME_REQUIRED`.

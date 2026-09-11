@@ -14,6 +14,7 @@
   "block.simulated.velocity_sensor": "Velocity Sensor",
   "block.simulated.optical_sensor": "Optical Sensor",
   "block.simulated.steering_wheel": "Steering Wheel",
+  "simulated.steering_wheel.angle_limit": "Steering Wheel Angle Limit",
   "block.simulated.white_symmetric_sail": "Symmetric Sail",
   "item.simulated.contraption_diagram": "Contraption Diagram",
   "item.simulated.engine_assembly": "Engine Assembly",

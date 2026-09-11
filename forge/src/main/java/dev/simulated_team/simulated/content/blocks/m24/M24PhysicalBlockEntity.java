@@ -964,7 +964,8 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
             case ALTITUDE_SENSOR -> SimulatedBlockEntityTypes.ALTITUDE_SENSOR.get();
             case VELOCITY_SENSOR -> SimulatedBlockEntityTypes.VELOCITY_SENSOR.get();
             case OPTICAL_SENSOR -> SimulatedBlockEntityTypes.OPTICAL_SENSOR.get();
-            case STEERING_WHEEL -> SimulatedBlockEntityTypes.STEERING_WHEEL.get();
+            case STEERING_WHEEL -> throw new IllegalArgumentException(
+                    "Steering Wheel uses its dedicated kinetic block entity");
         };
     }
 

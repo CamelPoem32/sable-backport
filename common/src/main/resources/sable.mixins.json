@@ -106,6 +106,7 @@
     "command.DataCommandsMixin",
     "command.ExecuteCommandMixin",
     "compatibility.computercraft.WirelessNetworkMixin",
+    "compatibility.create.sails_providing_lift.SailBlockMixin",
     "m11.create.BlockEntityConfigurationPacketAccessor",
     "m11.create.BracketedKineticBlockEntityRendererMixin",
     "m11.create.KineticBlockEntityRendererMixin",

@@ -103,6 +103,7 @@
         "command.ExecuteCommandMixin",
         "m11.create.BlockEntityConfigurationPacketAccessor",
         "m11.create.ValueSettingsPacketAccessor",
+        "compatibility.create.sails_providing_lift.SailBlockMixin",
         "compatibility.create.contraptions.AbstractContraptionEntityMixin",
         "compatibility.create.contraptions.ControlledContraptionEntityMixin",
         "compatibility.create.contraptions.GantryContraptionEntityMixin",

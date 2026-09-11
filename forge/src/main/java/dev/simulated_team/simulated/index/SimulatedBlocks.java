@@ -7,6 +7,8 @@ import dev.simulated_team.simulated.content.blocks.m24.M24TorsionSpringBlock;
 import dev.simulated_team.simulated.content.blocks.m24.M24WinchBlock;
 import dev.simulated_team.simulated.content.blocks.physics_assembler.PhysicsAssemblerBlock;
 import dev.simulated_team.simulated.content.blocks.spring.SpringBlock;
+import dev.simulated_team.simulated.content.blocks.steering_wheel.SteeringWheelBlock;
+import dev.simulated_team.simulated.content.blocks.symmetric_sail.SymmetricSailBlock;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
@@ -34,7 +36,7 @@ public final class SimulatedBlocks {
     public static final RegistryObject<Block> REDSTONE_MAGNET = REGISTER.register("redstone_magnet",
             () -> new Block(metal().strength(3.0F, 8.0F).noOcclusion()));
     public static final RegistryObject<Block> WHITE_SYMMETRIC_SAIL = REGISTER.register("white_symmetric_sail",
-            () -> new Block(wooden().strength(0.8F, 1.5F).noOcclusion()));
+            () -> new SymmetricSailBlock(wooden().strength(0.8F, 1.5F).noOcclusion()));
     public static final RegistryObject<Block> TORSION_SPRING = REGISTER.register("torsion_spring",
             () -> new M24TorsionSpringBlock(metal().strength(2.0F, 8.0F).noOcclusion()));
     public static final RegistryObject<Block> SWIVEL_BEARING = REGISTER.register("swivel_bearing",
@@ -61,8 +63,7 @@ public final class SimulatedBlocks {
             () -> new M24PhysicalComponentBlock(metal().strength(1.5F, 6.0F).noOcclusion(),
                     M24Family.OPTICAL_SENSOR));
     public static final RegistryObject<Block> STEERING_WHEEL = REGISTER.register("steering_wheel",
-            () -> new M24PhysicalComponentBlock(wooden().strength(1.5F, 4.0F).noOcclusion(),
-                    M24Family.STEERING_WHEEL));
+            () -> new SteeringWheelBlock(wooden().strength(1.5F, 4.0F).noOcclusion()));
 
     private SimulatedBlocks() {
     }

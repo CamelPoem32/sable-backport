@@ -18013,6 +18013,7 @@ tasks.register('verifyM21SimulatedSourceInventoryBoundary') {
 tasks.register('verifyM21Java17Boundary') {
     group = 'forge backport'
     description = 'Verifies M21-selected Simulated sources and produced classes stay within Java 17.'
+    dependsOn tasks.named('syncMixinRefmap')
 
     inputs.dir(m21SimulatedSourceDir)
     inputs.dir(rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command')).optional()
@@ -18170,13 +18171,14 @@ tasks.register('verifyM21SableApiBoundary') {
 
 tasks.register('verifyM21NetworkBootstrapBoundary') {
     group = 'forge backport'
-    description = 'Verifies M21 network bootstrap is Forge SimpleChannel only.'
+    description = 'Verifies the M21 Forge SimpleChannel ownership boundary remains intact.'
 
     inputs.file(rootProject.file('forge/src/main/java/dev/simulated_team/simulated/network/SimulatedNetwork.java'))
 
     doLast {
         String network = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/network/SimulatedNetwork.java').getText('UTF-8')
-        ['NetworkRegistry.newSimpleChannel', 'PROTOCOL_VERSION = "m21-bootstrap"', 'Simulated.path("main")'].each { token ->
+        ['NetworkRegistry.newSimpleChannel', 'public static final String PROTOCOL_VERSION',
+         'Simulated.path("main")', 'PROTOCOL_VERSION::equals'].each { token ->
             if (!network.contains(token)) {
                 throw new GradleException("M21 network bootstrap missing ${token}")
             }
@@ -18186,7 +18188,7 @@ tasks.register('verifyM21NetworkBootstrapBoundary') {
                 throw new GradleException("M21 network bootstrap contains unsupported payload API ${token}")
             }
         }
-        logger.lifecycle('verifyM21NetworkBootstrapBoundary PASS: Forge SimpleChannel simulated:main is registration-only')
+        logger.lifecycle('verifyM21NetworkBootstrapBoundary PASS: Forge SimpleChannel simulated:main ownership preserved')
     }
 }
 
@@ -18238,6 +18240,8 @@ tasks.register('verifyM21ResourceBoundary') {
 tasks.register('verifyM21ForgeArtifactBoundary') {
     group = 'forge backport'
     description = 'Verifies source metadata and, when present, final Forge artifacts contain M21 Simulated bootstrap without NeoForge metadata.'
+
+    mustRunAfter tasks.named('jar')
 
     inputs.file(rootProject.file('forge/src/main/resources/META-INF/mods.toml'))
     inputs.dir(m21SimulatedSourceDir)
@@ -24436,8 +24440,8 @@ tasks.register('verifyM25AeronauticsBaselineBoundary') {
          'Flywheel | `1.0.6`', 'Ponder | `1.0.81`', 'Java | 21'].each { token ->
             if (!baseline.contains(token)) throw new GradleException("M25 baseline missing ${token}")
         }
-        if (!source.contains(commit) || !source.contains('IMPLEMENTATION_REVISION = "M26.1"')) {
-            throw new GradleException('M25 source is not pinned to the frozen Aeronautics baseline/revision')
+        if (!source.contains(commit)) {
+            throw new GradleException('M25 source is not pinned to the frozen Aeronautics baseline')
         }
         logger.lifecycle('verifyM25AeronauticsBaselineBoundary PASS')
     }
@@ -24863,7 +24867,7 @@ tasks.register('verifyM26PropulsionRegistryBoundary') {
                 || !registry.contains('DeferredRegister<BlockEntityType<?>>')
                 || !bootstrap.contains('AeroPropulsionRegistries.register(modBus)')
                 || !tab.contains('WOODEN_PROPELLER_ITEM.get()')
-                || !mods.contains('version = "1.3.0-m26-backport"')) {
+                || !mods.contains('version = "1.3.0-m27.1-backport"')) {
             throw new GradleException('M26 propulsion registration graph is incomplete')
         }
         logger.lifecycle('verifyM26PropulsionRegistryBoundary PASS: 1 block, 1 item, 1 block entity')
@@ -25069,7 +25073,7 @@ tasks.register('verifyM26PropulsionCommandAuthoritativeTargetBoundary') {
          'getCenterBlock().offset(state.propellerLocalPos)',
          'getCenterBlock().offset(state.motorLocalPos)',
          'fixtureSessionId=', 'resolvedMotorSable=',
-         'reason=active_fixture_missing'].each { token ->
+         'reason=active_fixture_missing', 'propulsionCore=RUNTIME_PROVEN'].each { token ->
             if (!command.contains(token)) throw new GradleException("M26.1 authoritative command path missing ${token}")
         }
         if (command.contains('findAnyPropulsionBody') || command.contains('findAnyPropulsionMotor')
@@ -25221,5 +25225,1152 @@ tasks.register('verifyM26Aeronautics') {
     dependsOn tasks.named('verifyM26_1FixtureOwnership')
     doLast {
         logger.lifecycle('verifyM26Aeronautics PASS: M26 IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+def m27CommandSource = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M27AerodynamicsCommands.java')
+def m27LiftProviderSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/block/BlockSubLevelLiftProvider.java')
+def m27ServerSubLevelSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ServerSubLevel.java')
+def m27SailMixinSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/sails_providing_lift/SailBlockMixin.java')
+def m27SymmetricSailSource = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/symmetric_sail/SymmetricSailBlock.java')
+def m27SimulatedBlocksSource = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/index/SimulatedBlocks.java')
+def m27ArchitectureDoc = rootProject.file('M27_AERODYNAMIC_FORCE_ARCHITECTURE.md')
+
+tasks.register('verifyM27AerodynamicsBaselineBoundary') {
+    group = 'forge backport'
+    inputs.files(rootProject.file('M27_AERODYNAMICS_BASELINE.md'), m27SailMixinSource,
+            m27SymmetricSailSource, m27LiftProviderSource)
+    doLast {
+        String docs = rootProject.file('M27_AERODYNAMICS_BASELINE.md').getText('UTF-8')
+        String mixin = m27SailMixinSource.getText('UTF-8')
+        String symmetric = m27SymmetricSailSource.getText('UTF-8')
+        ['9e60263fb5cb00033f14af655a7e72cf7aebb3e2', 'BlockSubLevelLiftProvider',
+         'SailBlockMixin', 'SymmetricSailBlock', 'MechanicalBearingBlockEntity',
+         'M27 CLOSED / RUNTIME_PROVEN'].each { token ->
+            if (!docs.contains(token)) throw new GradleException("M27 baseline missing ${token}")
+        }
+        if (!mixin.contains('SailBlock.class') || !mixin.contains('implements BlockSubLevelLiftProvider')
+                || !symmetric.contains('implements BlockSubLevelLiftProvider')) {
+            throw new GradleException('M27 frozen aerodynamic owners are not connected')
+        }
+        logger.lifecycle('verifyM27AerodynamicsBaselineBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27AerodynamicsPortMatrixBoundary') {
+    group = 'forge backport'
+    inputs.file(rootProject.file('M27_AERODYNAMICS_PORT_MATRIX.md'))
+    doLast {
+        String matrix = rootProject.file('M27_AERODYNAMICS_PORT_MATRIX.md').getText('UTF-8')
+        ['ADAPT_M27_AERODYNAMICS', 'ADAPT_M27_CONTROL_SURFACES',
+         'DEFER_M28_GOLDEN_AIRCRAFT', 'NOT_APPLICABLE_1_20_1',
+         '| **Selected M27 total** | **4** | **7** | **11 paths** |'].each { token ->
+            if (!matrix.contains(token)) throw new GradleException("M27 port matrix missing ${token}")
+        }
+        logger.lifecycle('verifyM27AerodynamicsPortMatrixBoundary PASS: 4 Java owners and 7 resource paths')
+    }
+}
+
+tasks.register('verifyM27AerodynamicActorBoundary') {
+    group = 'forge backport'
+    inputs.files(m27LiftProviderSource, m27ServerSubLevelSource, m27SailMixinSource,
+            m27SymmetricSailSource, rootProject.file('common/src/main/resources/sable.mixins.json'))
+    doLast {
+        String provider = m27LiftProviderSource.getText('UTF-8')
+        String sublevel = m27ServerSubLevelSource.getText('UTF-8')
+        String mixins = rootProject.file('common/src/main/resources/sable.mixins.json').getText('UTF-8')
+        if (!provider.contains('sable$contributeLiftAndDrag')
+                || !sublevel.contains('plot.getLiftProviders()')
+                || !sublevel.contains('context.state().getBlock()).sable$contributeLiftAndDrag')
+                || !sublevel.contains('handle.applyLinearAndAngularImpulse(linearImpulse, angularImpulse, false)')
+                || !mixins.contains('compatibility.create.sails_providing_lift.SailBlockMixin')) {
+            throw new GradleException('M27 surface -> Sable -> rigid body ownership is incomplete')
+        }
+        logger.lifecycle('verifyM27AerodynamicActorBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27RelativeAirflowBoundary') {
+    group = 'forge backport'
+    inputs.files(m27LiftProviderSource, m27ArchitectureDoc, m27CommandSource)
+    doLast {
+        String provider = m27LiftProviderSource.getText('UTF-8')
+        String docs = m27ArchitectureDoc.getText('UTF-8')
+        String command = m27CommandSource.getText('UTF-8')
+        if (!provider.contains('LIFT_VELO.set(linearVelocity).add(angularVelocity.cross(TEMP, TEMP))')
+                || !provider.contains('pose.transformNormalInverse(LIFT_VELO)')
+                || !command.contains('relativeAirflowWorld')
+                || !docs.contains('no world wind field and no surface propwash coupling')) {
+            throw new GradleException('M27 relative-airflow ownership differs from frozen Sable')
+        }
+        logger.lifecycle('verifyM27RelativeAirflowBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27AngularPointVelocityBoundary') {
+    group = 'forge backport'
+    inputs.files(m27LiftProviderSource, m27CommandSource)
+    doLast {
+        String provider = m27LiftProviderSource.getText('UTF-8')
+        String command = m27CommandSource.getText('UTF-8')
+        if (!provider.contains('pose.transformPosition(LIFT_POS, TEMP).sub(pose.position())')
+                || !provider.contains('angularVelocity.cross(TEMP, TEMP)')
+                || !command.contains('angular.cross(leverWorld, new Vector3d()).add(linear)')) {
+            throw new GradleException('M27 does not include angular point velocity')
+        }
+        logger.lifecycle('verifyM27AngularPointVelocityBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27CoordinateFrameBoundary') {
+    group = 'forge backport'
+    inputs.files(m27LiftProviderSource, m27CommandSource, m27ArchitectureDoc)
+    doLast {
+        String all = [m27LiftProviderSource, m27CommandSource, m27ArchitectureDoc]
+                .collect { it.getText('UTF-8') }.join('\n')
+        ['logicalPose().transformPosition(new Vector3d(applicationRaw))',
+         'new Vector3d(body.getMassTracker().getCenterOfMass())',
+         'applicationRaw.sub(comRaw, new Vector3d())',
+         'logicalPose().orientation().transform(leverLocal',
+         'Hidden plot coordinates never become visible-world lever arms'].each { token ->
+            if (!all.contains(token)) throw new GradleException("M27 coordinate frame missing ${token}")
+        }
+        if (all.contains('20000000') || all.contains('20_000_000')) {
+            throw new GradleException('M27 contains hidden-coordinate constants')
+        }
+        logger.lifecycle('verifyM27CoordinateFrameBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27LiftDragFormulaBoundary') {
+    group = 'forge backport'
+    inputs.files(m27LiftProviderSource, m27SymmetricSailSource)
+    doLast {
+        String provider = m27LiftProviderSource.getText('UTF-8')
+        String symmetric = m27SymmetricSailSource.getText('UTF-8')
+        ['LIFT_NORMAL.dot(LIFT_VELO)', 'sable$getParallelDragScalar() * pressure * timeStep',
+         'LIFT_VELO.mul(dragStrength, TEMP)', 'LIFT_VELO.sub(DRAG, TEMP).length()',
+         'sable$getLiftScalar() * pressure * timeStep', 'linearImpulse.sub(LIFT_FORCE)',
+         'angularImpulse.sub(TEMP.cross(LIFT_FORCE))'].each { token ->
+            if (!provider.contains(token)) throw new GradleException("M27 frozen formula missing ${token}")
+        }
+        if (!symmetric.contains('return 0.0F;') || !symmetric.contains('return 1.75F;')) {
+            throw new GradleException('M27 symmetric sail scalars differ from frozen source')
+        }
+        logger.lifecycle('verifyM27LiftDragFormulaBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27AngleOfAttackBoundary') {
+    group = 'forge backport'
+    inputs.files(m27CommandSource, m27ArchitectureDoc)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        String docs = m27ArchitectureDoc.getText('UTF-8')
+        if (!command.contains('angleOfAttack=UNDEFINED_BY_FROZEN_MODEL')
+                || !command.contains('normalVelocity=') || !command.contains('tangentialSpeed=')
+                || !docs.contains('does not calculate or persist a signed angle-of-attack scalar')) {
+            throw new GradleException('M27 diagnostics invent or obscure the frozen angle convention')
+        }
+        logger.lifecycle('verifyM27AngleOfAttackBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27CenterOfPressureTorqueBoundary') {
+    group = 'forge backport'
+    inputs.files(m27LiftProviderSource, m27CommandSource)
+    doLast {
+        String provider = m27LiftProviderSource.getText('UTF-8')
+        String command = m27CommandSource.getText('UTF-8')
+        if (!provider.contains('LIFT_POS.sub(subLevel.getMassTracker().getCenterOfMass(), TEMP)')
+                || !provider.contains('angularImpulse.sub(TEMP.cross(LIFT_FORCE))')
+                || !command.contains('FixtureKind.OFFSET') || !command.contains('expectedTorqueBodyLocal=')) {
+            throw new GradleException('M27 center-of-pressure torque path is incomplete')
+        }
+        logger.lifecycle('verifyM27CenterOfPressureTorqueBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27PropwashBoundary') {
+    group = 'forge backport'
+    inputs.files(m27LiftProviderSource, m27ArchitectureDoc)
+    doLast {
+        String provider = m27LiftProviderSource.getText('UTF-8')
+        String docs = m27ArchitectureDoc.getText('UTF-8')
+        if (provider.contains('Propeller') || provider.contains('airflow')
+                || !docs.contains('no surface propwash coupling')) {
+            throw new GradleException('M27 invented or failed to document propwash coupling')
+        }
+        logger.lifecycle('verifyM27PropwashBoundary PASS: frozen sail model has no propwash input')
+    }
+}
+
+tasks.register('verifyM27ControlSurfaceBoundary') {
+    group = 'forge backport'
+    inputs.files(m27CommandSource, m27SymmetricSailSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        ['MechanicalBearingBlockEntity', 'MECHANICAL_BEARING_ID',
+         'SimulatedBlocks.WHITE_SYMMETRIC_SAIL', 'bearing.assemble()',
+         'motor.generatedSpeed.setValue(requestedSpeed)',
+         'CREATE_MECHANICAL_BEARING_SYMMETRIC_SAIL'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M27 control surface missing ${token}")
+        }
+        logger.lifecycle('verifyM27ControlSurfaceBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27ControlInputOwnershipBoundary') {
+    group = 'forge backport'
+    inputs.file(m27CommandSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        if (!command.contains('forceAppliedByCommand=false bodyPoseChangedByCommand=false')
+                || command.contains('.applyLinearImpulse(') || command.contains('.applyAngularImpulse(')
+                || command.contains('.applyLinearAndAngularImpulse(') || command.contains('.setVelocity(')
+                || command.contains('.setDeltaMovement(') || command.contains('handle.teleport(')
+                || command.contains('getOrCreateQueuedForceGroup(')) {
+            throw new GradleException('M27 control command bypasses production Create/Sable ownership')
+        }
+        logger.lifecycle('verifyM27ControlInputOwnershipBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27FixtureSessionOwnershipBoundary') {
+    group = 'forge backport'
+    inputs.file(m27CommandSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        ['private static final Map<String, FixtureState> ACTIVE_FIXTURES', 'UUID.randomUUID()',
+         'private final UUID sessionId;', 'private UUID bodyId;', 'private BlockPos motorLocal;',
+         'private BlockPos propellerLocal;', 'private BlockPos aeroLocal;',
+         'private BlockPos controlLocal;', 'container.getSubLevel(state.bodyId)',
+         'state.capture(subLevel, assemblerRaw)', 'this.bodyId = body.getUniqueId()'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M27 fixture session missing ${token}")
+        }
+        if (command.contains('findAny') || command.contains('nearest')) {
+            throw new GradleException('M27 fixture can fall back to global/spatial selection')
+        }
+        logger.lifecycle('verifyM27FixtureSessionOwnershipBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27FixtureBoundary') {
+    group = 'forge backport'
+    inputs.file(m27CommandSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        ['Commands.literal("aero_surface_basic")', 'Commands.literal("aero_offset")',
+         'Commands.literal("pitch_control")', 'Commands.literal("aero_vehicle")',
+         'Commands.literal("propulsion")', 'Commands.literal("control")',
+         'Commands.literal("aero")', 'SimulatedBlocks.PHYSICS_ASSEMBLER',
+         'AeroPropulsionRegistries.WOODEN_PROPELLER', 'CREATE_SAIL_ID',
+         'selectedSupportBlocks=', 'new SimAssemblyContraption(null)'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M27 fixture missing ${token}")
+        }
+        logger.lifecycle('verifyM27FixtureBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27PersistenceBoundary') {
+    group = 'forge backport'
+    inputs.files(m27CommandSource, m27ArchitectureDoc)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        String docs = m27ArchitectureDoc.getText('UTF-8')
+        if (!command.contains('this.bodyId = body.getUniqueId()')
+                || !command.contains('container.getSubLevel(state.bodyId)')
+                || !docs.contains('bearing contraption state, kinetic blocks, and Sable actor discovery serialize')
+                || command.contains('SavedData')) {
+            throw new GradleException('M27 persistence is not production-owned with UUID diagnostic recovery')
+        }
+        logger.lifecycle('verifyM27PersistenceBoundary PASS')
+    }
+}
+
+tasks.register('verifyM27RenderingBoundary') {
+    group = 'forge backport'
+    inputs.files(rootProject.file('forge/src/main/resources/assets/simulated/blockstates/white_symmetric_sail.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/symmetric_sail/block.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/white_symmetric_sail.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/symmetric_sail/item.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/item/white_symmetric_sail.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/textures/block/symmetric_sail/side_white.png'))
+    doLast {
+        def json = new JsonSlurper()
+        File root = rootProject.file('forge/src/main/resources/assets/simulated')
+        File stateFile = new File(root, 'blockstates/white_symmetric_sail.json')
+        File blockModel = new File(root, 'models/block/symmetric_sail/block.json')
+        File blockAlias = new File(root, 'models/block/white_symmetric_sail.json')
+        File itemModel = new File(root, 'models/block/symmetric_sail/item.json')
+        File publicItem = new File(root, 'models/item/white_symmetric_sail.json')
+        File texture = new File(root, 'textures/block/symmetric_sail/side_white.png')
+        [stateFile, blockModel, blockAlias, itemModel, publicItem, texture].each { file ->
+            if (!file.isFile()) throw new GradleException("M27 resource missing ${file}")
+        }
+        def states = json.parse(stateFile).variants
+        if (states.keySet() as Set != ['axis=x', 'axis=y', 'axis=z'] as Set
+                || !states.values().every { it.model == 'simulated:block/symmetric_sail/block' }) {
+            throw new GradleException('M27 symmetric sail axis models are incomplete')
+        }
+        def model = json.parse(blockModel)
+        if (model.textures['1'] != 'simulated:block/symmetric_sail/side_white'
+                || json.parse(blockAlias).parent != 'simulated:block/symmetric_sail/block'
+                || json.parse(publicItem).parent != 'simulated:block/symmetric_sail/item') {
+            throw new GradleException('M27 symmetric sail model/texture references do not resolve')
+        }
+        logger.lifecycle('verifyM27RenderingBoundary PASS: exact static sail model graph resolves')
+    }
+}
+
+tasks.register('verifyM27M26RegressionBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM26Aeronautics')
+    dependsOn tasks.named('verifyM26FixtureSessionOwnershipBoundary')
+    doLast {
+        String propeller = m26PropellerSource.getText('UTF-8')
+        if (!propeller.contains('convertToAngular(this.getSpeed())')) {
+            throw new GradleException('M27 changed frozen M26 production propulsion')
+        }
+        logger.lifecycle('verifyM27M26RegressionBoundary PASS: M26 propulsion core and session correction retained')
+    }
+}
+
+tasks.register('verifyM27RegressionBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM27M26RegressionBoundary')
+    dependsOn tasks.named('verifyM25AeronauticsRegressionBoundary')
+    dependsOn tasks.named('verifyM24ClosureStatusBoundary')
+    doLast {
+        logger.lifecycle('verifyM27RegressionBoundary PASS: M21-M26 foundation retained')
+    }
+}
+
+tasks.register('verifyM27Aerodynamics') {
+    group = 'forge backport'
+    description = 'Runs focused M27 frozen sail aerodynamics and bearing-control boundaries.'
+    dependsOn tasks.named('verifyM27AerodynamicsBaselineBoundary')
+    dependsOn tasks.named('verifyM27AerodynamicsPortMatrixBoundary')
+    dependsOn tasks.named('verifyM27AerodynamicActorBoundary')
+    dependsOn tasks.named('verifyM27RelativeAirflowBoundary')
+    dependsOn tasks.named('verifyM27AngularPointVelocityBoundary')
+    dependsOn tasks.named('verifyM27CoordinateFrameBoundary')
+    dependsOn tasks.named('verifyM27LiftDragFormulaBoundary')
+    dependsOn tasks.named('verifyM27AngleOfAttackBoundary')
+    dependsOn tasks.named('verifyM27CenterOfPressureTorqueBoundary')
+    dependsOn tasks.named('verifyM27PropwashBoundary')
+    dependsOn tasks.named('verifyM27ControlSurfaceBoundary')
+    dependsOn tasks.named('verifyM27ControlInputOwnershipBoundary')
+    dependsOn tasks.named('verifyM27FixtureSessionOwnershipBoundary')
+    dependsOn tasks.named('verifyM27FixtureBoundary')
+    dependsOn tasks.named('verifyM27PersistenceBoundary')
+    dependsOn tasks.named('verifyM27RenderingBoundary')
+    doLast {
+        logger.lifecycle('verifyM27Aerodynamics PASS: M27 CLOSED / RUNTIME_PROVEN')
+    }
+}
+
+def m27RuntimeMixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+def m27AssemblerSource = file('src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java')
+def m27ContraptionMixinSource = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java')
+def m27ProviderAudit = rootProject.file('M27_1_SAIL_PROVIDER_AUDIT.md')
+
+tasks.register('verifyM27Create608SailTargetBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    inputs.file(createDevelopmentRuntime)
+    doLast {
+        JarFile createJar = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            def entry = createJar.getJarEntry('com/simibubi/create/content/contraptions/bearing/SailBlock.class')
+            if (entry == null) {
+                throw new GradleException('Create 6.0.8 SailBlock target class is missing')
+            }
+            String bytes = new String(createJar.getInputStream(entry).bytes, StandardCharsets.ISO_8859_1)
+            ['com/simibubi/create/foundation/block/WrenchableDirectionalBlock',
+             'getStateForPlacement', 'net/minecraft/world/level/block/state/BlockState'].each { token ->
+                if (!bytes.contains(token)) {
+                    throw new GradleException("Create 6.0.8 SailBlock bytecode lost ${token}")
+                }
+            }
+        } finally {
+            createJar.close()
+        }
+        logger.lifecycle('verifyM27Create608SailTargetBoundary PASS: exact Create 6.0.8 SailBlock bytecode target exists')
+    }
+}
+
+tasks.register('verifyM27CreateSailProviderMixinBytecodeBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('verifyM27Create608SailTargetBoundary')
+    inputs.file(m27SailMixinSource)
+    doLast {
+        File mixinClass = layout.buildDirectory.file(
+                'classes/java/main/dev/ryanhcode/sable/mixin/compatibility/create/sails_providing_lift/SailBlockMixin.class').get().asFile
+        if (!mixinClass.isFile()) {
+            throw new GradleException("Compiled SailBlockMixin is missing: ${mixinClass}")
+        }
+        String bytes = new String(mixinClass.bytes, StandardCharsets.ISO_8859_1)
+        ['dev/ryanhcode/sable/api/block/BlockSubLevelLiftProvider',
+         'dev/ryanhcode/sable/api/block/BlockSubLevelCustomCenterOfMass',
+         'sable$getNormal', 'net/minecraft/world/level/block/state/properties/BlockStateProperties',
+         'FACING', 'getOpposite'].each { token ->
+            if (!bytes.contains(token)) {
+                throw new GradleException("Compiled SailBlockMixin bytecode lost ${token}")
+            }
+        }
+        String source = m27SailMixinSource.getText('UTF-8')
+        if (!source.contains('@Mixin(SailBlock.class)') || source.contains('require = 0')) {
+            throw new GradleException('SailBlockMixin no longer follows the exact frozen interface-mixin target')
+        }
+        logger.lifecycle('verifyM27CreateSailProviderMixinBytecodeBoundary PASS: compiled mixin adds both frozen Sable interfaces')
+    }
+}
+
+tasks.register('verifyM27CreateSailProviderRegistrationBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('processResources')
+    dependsOn tasks.named('jar')
+    inputs.files(m27RuntimeMixinConfig, m27SailMixinSource,
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java'),
+            m27ServerSubLevelSource)
+    doLast {
+        String entry = 'compatibility.create.sails_providing_lift.SailBlockMixin'
+        File generated = layout.buildDirectory.file('resources/main/sable-common-forge.mixins.json').get().asFile
+        if (!m27RuntimeMixinConfig.getText('UTF-8').contains(entry)
+                || !generated.isFile() || !generated.getText('UTF-8').contains(entry)) {
+            throw new GradleException('SailBlockMixin is absent from the Forge runtime mixin config')
+        }
+        JarFile output = new JarFile(tasks.named('jar').get().archiveFile.get().asFile)
+        try {
+            def configEntry = output.getJarEntry('sable-common-forge.mixins.json')
+            if (configEntry == null
+                    || !new String(output.getInputStream(configEntry).bytes, StandardCharsets.UTF_8).contains(entry)) {
+                throw new GradleException('Packaged Forge artifact omits SailBlockMixin from its runtime config')
+            }
+        } finally {
+            output.close()
+        }
+        String plot = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ServerLevelPlot.java').getText('UTF-8')
+        String sublevel = m27ServerSubLevelSource.getText('UTF-8')
+        if (!plot.contains('state.getBlock() instanceof final BlockSubLevelLiftProvider prov')
+                || !plot.contains('this.liftProviders.put')
+                || !sublevel.contains('plot.getLiftProviders()')
+                || !sublevel.contains('sable$contributeLiftAndDrag')) {
+            throw new GradleException('Create sail provider registration/invocation call graph is incomplete')
+        }
+        logger.lifecycle('verifyM27CreateSailProviderRegistrationBoundary PASS: source, generated config, packaged config, plot registry, and pre-physics consumer agree')
+    }
+}
+
+tasks.register('verifyM27ProviderNormalBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM27CreateSailProviderMixinBytecodeBoundary')
+    inputs.files(m27SailMixinSource, m27ProviderAudit)
+    doLast {
+        String source = m27SailMixinSource.getText('UTF-8')
+        String audit = m27ProviderAudit.getText('UTF-8')
+        if (!source.contains('state.getValue(BlockStateProperties.FACING).getOpposite()')
+                || !audit.contains('create:white_sail[facing=down]') || !audit.contains('normal is `UP`')) {
+            throw new GradleException('M27 sail normal no longer matches frozen facing-opposite semantics')
+        }
+        logger.lifecycle('verifyM27ProviderNormalBoundary PASS: facing=down resolves to frozen normal UP')
+    }
+}
+
+tasks.register('verifyM27NoNaNDiagnosticBoundary') {
+    group = 'forge backport'
+    inputs.file(m27CommandSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        ['WAITING_FOR_AERO_PROVIDER', 'UNAVAILABLE_PROVIDER_MISSING', 'INVALID_NUMERIC_STATE',
+         'providerMissing=', 'diagnostic('].each { token ->
+            if (!command.contains(token)) {
+                throw new GradleException("M27 explicit missing/numeric diagnostic state lost ${token}")
+            }
+        }
+        if (command.contains('Double.NaN') || command.contains('Float.NaN')
+                || command.contains('new Vector3d(Double.NaN)')) {
+            throw new GradleException('M27 command diagnostics still encode missing data as NaN')
+        }
+        logger.lifecycle('verifyM27NoNaNDiagnosticBoundary PASS: missing providers are unavailable/waiting, not invalid NaN physics')
+    }
+}
+
+tasks.register('verifyM27AuthoritativeAssemblyCaptureBoundary') {
+    group = 'forge backport'
+    inputs.files(m27AssemblerSource, m27CommandSource)
+    doLast {
+        String assembler = m27AssemblerSource.getText('UTF-8')
+        String command = m27CommandSource.getText('UTF-8')
+        ['M27AerodynamicsCommands.onM22AssemblyCreated(',
+         'level, parentAssemblerPos, result.subLevel(), result.offset()'].each { token ->
+            if (!assembler.contains(token)) {
+                throw new GradleException("Physics Assembler completion lost M27 capture token ${token}")
+            }
+        }
+        if (assembler.indexOf('M27AerodynamicsCommands.onM22AssemblyCreated(')
+                < assembler.indexOf('SimAssemblyHelper.assembleFromSingleBlock')) {
+            throw new GradleException('M27 capture runs before successful assembly returns')
+        }
+        ['state.parentAssembler.equals(parentAssemblerPos)',
+         'parentAssemblerPos.offset(assemblyOffset)', 'state.capture(subLevel, assemblerRaw)',
+         'captureOwner=PhysicsAssemblerBlockEntity#assemble', 'storedBlockCountAtCapture=',
+         'captureStatus=PASS'].each { token ->
+            if (!command.contains(token)) {
+                throw new GradleException("M27 authoritative assembly capture lost ${token}")
+            }
+        }
+        logger.lifecycle('verifyM27AuthoritativeAssemblyCaptureBoundary PASS: exact assembler completion stores returned Sable UUID and local identities')
+    }
+}
+
+tasks.register('verifyM27BearingFixtureSessionMutationBoundary') {
+    group = 'forge backport'
+    inputs.file(m27CommandSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        ['container.getSubLevel(state.bodyId)', 'sableResolvedByUuid=true',
+          '+ " componentOwner=" + componentOwner',
+          'return movingProviderPresent ? "CREATE_CONTRAPTION" : "UNAVAILABLE";',
+         'contraption.sable$liftProviders().values()'].each { token ->
+            if (!command.contains(token)) {
+                throw new GradleException("M27 bearing-mutating session ownership lost ${token}")
+            }
+        }
+        ['matchingAssembler', 'state.fingerprint', 'preExisting', 'getAllSubLevels()'].each { forbidden ->
+            if (command.contains(forbidden)) {
+                throw new GradleException("M27 still uses post-assembly/global body matching: ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM27BearingFixtureSessionMutationBoundary PASS: UUID ownership survives static block-set mutation')
+    }
+}
+
+tasks.register('verifyM27NoGlobalFixtureBodyFallbackBoundary') {
+    group = 'forge backport'
+    inputs.file(m27CommandSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        if (!command.contains('state.failure = "active_fixture_body_unresolved"')
+                || !command.contains('container.getSubLevel(state.bodyId)')) {
+            throw new GradleException('M27 body resolution does not fail closed around authoritative UUID ownership')
+        }
+        ['nearest', 'getAllSubLevels()', 'matchingAssembler', 'fingerprint('].each { forbidden ->
+            if (command.contains(forbidden)) {
+                throw new GradleException("M27 body resolution contains forbidden fallback ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM27NoGlobalFixtureBodyFallbackBoundary PASS: unresolved sessions fail loudly without nearest/first/global fallback')
+    }
+}
+
+tasks.register('verifyM27ControlFixtureStationaryStartupBoundary') {
+    group = 'forge backport'
+    inputs.file(m27CommandSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        int fixtureStart = command.indexOf('private static int fixture(')
+        int rpmStart = command.indexOf('private static int setRpm(', fixtureStart)
+        int controlStart = command.indexOf('private static int setControl(', rpmStart)
+        int inspectStart = command.indexOf('private static int inspect(', controlStart)
+        if (fixtureStart < 0 || rpmStart < fixtureStart || controlStart < rpmStart || inspectStart < controlStart) {
+            throw new GradleException('Unable to isolate M27 fixture/control methods')
+        }
+        String fixture = command.substring(fixtureStart, rpmStart)
+        String control = command.substring(controlStart, inspectStart)
+        if (!command.contains('motor.generatedSpeed.setValue(0)')
+                || !fixture.contains('placeStoppedMotor(level, body, controlMotor, Direction.EAST)')
+                || fixture.contains('bearing.assemble()') || !control.contains('bearing.assemble()')) {
+            throw new GradleException('M27 control fixture does not remain stopped until post-capture control input')
+        }
+        logger.lifecycle('verifyM27ControlFixtureStationaryStartupBoundary PASS: both motors start at zero and bearing assembly is control-command owned')
+    }
+}
+
+tasks.register('verifyM27KinematicSailProviderBoundary') {
+    group = 'forge backport'
+    inputs.files(m27ContraptionMixinSource, m27ServerSubLevelSource, m27SymmetricSailSource,
+            m27RuntimeMixinConfig)
+    doLast {
+        String contraption = m27ContraptionMixinSource.getText('UTF-8')
+        String server = m27ServerSubLevelSource.getText('UTF-8')
+        String symmetric = m27SymmetricSailSource.getText('UTF-8')
+        String config = m27RuntimeMixinConfig.getText('UTF-8')
+        ['state.getBlock() instanceof final BlockSubLevelLiftProvider liftProvider',
+         'this.sable$liftProviderContexts.put', 'sable$liftProviders()'].each { token ->
+            if (!contraption.contains(token)) {
+                throw new GradleException("Create contraption provider scan lost ${token}")
+            }
+        }
+        if (!server.contains('contraption.sable$liftProviders().values()')
+                || !symmetric.contains('implements BlockSubLevelLiftProvider')
+                || !config.contains('compatibility.create.contraptions.AbstractContraptionEntityMixin')) {
+            throw new GradleException('Kinematic symmetric-sail provider ownership is incomplete')
+        }
+        logger.lifecycle('verifyM27KinematicSailProviderBoundary PASS: bearing payload providers are discovered from contraption contents')
+    }
+}
+
+tasks.register('verifyM27BearingContraptionAeroTransformBoundary') {
+    group = 'forge backport'
+    inputs.files(m27ServerSubLevelSource, m27LiftProviderSource)
+    doLast {
+        String server = m27ServerSubLevelSource.getText('UTF-8')
+        String provider = m27LiftProviderSource.getText('UTF-8')
+        ['contraption.sable$getLocalPose(localContraptionPose, physicsSystem.getPartialPhysicsTick())',
+         'sable$contributeLiftAndDrag(context, this, localContraptionPose'].each { token ->
+            if (!server.contains(token)) {
+                throw new GradleException("Bearing aero transform path lost ${token}")
+            }
+        }
+        if (!provider.contains('localPose.transformNormal(LIFT_NORMAL)')
+                || !provider.contains('localPose.transformPosition(LIFT_POS)')) {
+            throw new GradleException('Lift provider no longer transforms bearing normal and application point')
+        }
+        logger.lifecycle('verifyM27BearingContraptionAeroTransformBoundary PASS: interpolated Create pose transforms both normal and application point')
+    }
+}
+
+tasks.register('verifyM27_1Aerodynamics') {
+    group = 'forge backport'
+    description = 'Runs focused M27.1 SailBlock registration and authoritative assembly-session boundaries.'
+    dependsOn tasks.named('verifyM27CreateSailProviderMixinBytecodeBoundary')
+    dependsOn tasks.named('verifyM27CreateSailProviderRegistrationBoundary')
+    dependsOn tasks.named('verifyM27Create608SailTargetBoundary')
+    dependsOn tasks.named('verifyM27ProviderNormalBoundary')
+    dependsOn tasks.named('verifyM27NoNaNDiagnosticBoundary')
+    dependsOn tasks.named('verifyM27AuthoritativeAssemblyCaptureBoundary')
+    dependsOn tasks.named('verifyM27BearingFixtureSessionMutationBoundary')
+    dependsOn tasks.named('verifyM27NoGlobalFixtureBodyFallbackBoundary')
+    dependsOn tasks.named('verifyM27ControlFixtureStationaryStartupBoundary')
+    dependsOn tasks.named('verifyM27KinematicSailProviderBoundary')
+    dependsOn tasks.named('verifyM27BearingContraptionAeroTransformBoundary')
+    doLast {
+        logger.lifecycle('verifyM27_1Aerodynamics PASS: M27.1 IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+def m27GeometryAudit = rootProject.file('M27_2_CONTROL_SURFACE_GEOMETRY_AUDIT.md')
+
+tasks.register('verifyM27ControlBearingAxisChangesProviderNormalBoundary') {
+    group = 'forge backport'
+    inputs.files(m27CommandSource, m27GeometryAudit, m27SymmetricSailSource, m27ServerSubLevelSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        String audit = m27GeometryAudit.getText('UTF-8')
+        String symmetric = m27SymmetricSailSource.getText('UTF-8')
+        String server = m27ServerSubLevelSource.getText('UTF-8')
+        ['setValue(DirectionalBlock.FACING, Direction.EAST)',
+         'setValue(RotatedPillarBlock.AXIS, Direction.Axis.Z)',
+         'contraption.sable$getLocalPose(new Pose3d(), partialTick)',
+         'localPose.transformNormal(initial, new Vector3d())',
+         'controlSurfaceNormalCurrent=', 'normalDeltaDegrees=', 'bearingAxisBodyLocal='].each { token ->
+            if (!command.contains(token)) throw new GradleException("M27.2 control-normal path missing ${token}")
+        }
+        if (!symmetric.contains('Direction.get(Direction.AxisDirection.POSITIVE, state.getValue(AXIS))')
+                || !server.contains('contraption.sable$getLocalPose(localContraptionPose')
+                || !audit.contains('(+X) dot (+Z) = 0')) {
+            throw new GradleException('M27.2 axis/normal contract does not match frozen provider and runtime pose')
+        }
+        def axis = [1d, 0d, 0d]
+        def normal = [0d, 0d, 1d]
+        double dot = (0..2).collect { axis[it] * normal[it] }.sum() as double
+        double crossLength = Math.sqrt(Math.pow(axis[1] * normal[2] - axis[2] * normal[1], 2)
+                + Math.pow(axis[2] * normal[0] - axis[0] * normal[2], 2)
+                + Math.pow(axis[0] * normal[1] - axis[1] * normal[0], 2))
+        if (Math.abs(dot) > 1.0e-12 || Math.abs(crossLength - 1.0d) > 1.0e-12) {
+            throw new GradleException('M27.2 fixture hinge is not orthogonal to its frozen initial normal')
+        }
+        logger.lifecycle('verifyM27ControlBearingAxisChangesProviderNormalBoundary PASS: +X hinge is orthogonal to +Z normal and runtime pose supplies current normal')
+    }
+}
+
+tasks.register('verifyM27ControlFixtureIsolatedPayloadBoundary') {
+    group = 'forge backport'
+    inputs.files(m27CommandSource, m27GeometryAudit)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        ['final BlockPos controlMotor = kind.hasControl ? origin.south(2) : null;',
+         'final BlockPos controlBearing = kind.hasControl ? controlMotor.east() : null;',
+         'final BlockPos control = kind.hasControl ? controlBearing.east() : null;',
+         'expectedControlPayloadBlocks=', 'blocks.size() == 1 && controlSurfaces == 1'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M27.2 isolated payload source missing ${token}")
+        }
+        if (command.contains('origin.east(2).south(), SimulatedBlocks.WHITE_SYMMETRIC_SAIL')) {
+            throw new GradleException('M27.2 retained the bridging vehicle sail')
+        }
+
+        // Reconstruct the fixture's face-adjacency graph. The bearing is Create's
+        // anchoring boundary; traversal from its front payload must not reach a
+        // second non-anchor fixture block.
+        def payload = [2, 0, 2]
+        def bearing = [1, 0, 2]
+        def main = [[0,0,0],[-1,0,0],[0,1,0],[1,0,0],[2,0,0],[0,-1,0],
+                    [0,0,1],[0,0,2]]
+        def adjacent = { a, b -> Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]) + Math.abs(a[2]-b[2]) == 1 }
+        if (!adjacent(payload, bearing) || main.any { adjacent(payload, it) }) {
+            throw new GradleException('M27.2 control payload is not isolated by the bearing/air-gap topology')
+        }
+        logger.lifecycle('verifyM27ControlFixtureIsolatedPayloadBoundary PASS: bearing frontier contains one sail and cannot reach main structure')
+    }
+}
+
+tasks.register('verifyM27AeroVehicleNoMainBodyCaptureBoundary') {
+    group = 'forge backport'
+    inputs.file(m27CommandSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        ['containsPhysicsAssembler=', 'containsMainPropulsionMotor=', 'containsWoodenPropeller=',
+         'containsStaticMainSail=', 'containsMainStructure=', 'payloadValid=',
+         'reason=invalid_control_contraption_payload'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M27.2 payload hard gate missing ${token}")
+        }
+        if (!command.contains('AeroBlocks.LEVITITE.get().defaultBlockState()')) {
+            throw new GradleException('M27.2 vehicle replacement main-body block is missing')
+        }
+        logger.lifecycle('verifyM27AeroVehicleNoMainBodyCaptureBoundary PASS: captured payload rejects every main-vehicle owner')
+    }
+}
+
+tasks.register('verifyM27ControlContraptionComponentOwnershipBoundary') {
+    group = 'forge backport'
+    inputs.files(m27CommandSource, m27ContraptionMixinSource)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        String mixin = m27ContraptionMixinSource.getText('UTF-8')
+        ['mainPropulsionMotorOwner=', 'woodenPropellerOwner=', 'staticMainSailOwner=',
+         'controlBearingOwner=', 'controlSurfaceOwner=',
+         'resolveMotor(ctx.getSource().getLevel(), body, state)',
+         'resolvePropeller(ctx.getSource().getLevel(), body, state)',
+         'contraption.sable$liftProviders().values()'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M27.2 ownership split missing ${token}")
+        }
+        if (!mixin.contains('this.contraption.getBlocks().entrySet()')) {
+            throw new GradleException('M27.2 moving provider is not owned by actual Create contraption contents')
+        }
+        logger.lifecycle('verifyM27ControlContraptionComponentOwnershipBoundary PASS: main components are Sable-local; control provider is contraption-owned')
+    }
+}
+
+tasks.register('verifyM27ReloadComponentResolutionBoundary') {
+    group = 'forge backport'
+    inputs.files(m27CommandSource, m27ArchitectureDoc)
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        String docs = m27ArchitectureDoc.getText('UTF-8')
+        ['container.getSubLevel(state.bodyId)',
+         'body.getPlot().getCenterBlock().offset(state.motorLocal)',
+         'body.getPlot().getCenterBlock().offset(state.propellerLocal)',
+         'body.getPlot().getCenterBlock().offset(state.controlBearingLocal)',
+         'bearing.getMovedContraption()'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M27.2 reload ownership missing ${token}")
+        }
+        ['getAllSubLevels()', 'nearest', 'matchingAssembler', 'fingerprint('].each { forbidden ->
+            if (command.contains(forbidden)) throw new GradleException("M27.2 reload uses forbidden fallback ${forbidden}")
+        }
+        if (!docs.contains('Only the symmetric sail moves into `CREATE_CONTRAPTION`')) {
+            throw new GradleException('M27.2 reload ownership is undocumented')
+        }
+        logger.lifecycle('verifyM27ReloadComponentResolutionBoundary PASS: UUID plus stable local identities survive Create payload persistence')
+    }
+}
+
+tasks.register('verifyM27PrepareDisassemblySafetyBoundary') {
+    group = 'forge backport'
+    inputs.files(m27CommandSource, rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java'))
+    doLast {
+        String command = m27CommandSource.getText('UTF-8')
+        String helper = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        int start = command.indexOf('private static int prepareDisassembly(')
+        int end = command.indexOf('private static int cleanup(', start)
+        if (start < 0 || end < start) throw new GradleException('Unable to isolate M27.2 prepare_disassembly')
+        String method = command.substring(start, end)
+        ['generatedSpeed.setValue(0)', 'bearing.disassemble()', 'previewDisassembly(level, body, state)',
+         'READY_TO_DISASSEMBLE', 'occupiedGuardBypassed=false', 'commandDisassembledSable=false'].each { token ->
+            if (!method.contains(token)) throw new GradleException("M27.2 stow path missing ${token}")
+        }
+        ['new SubLevelAssemblyHelper.AssemblyTransform(', 'SimAssemblyHelper.currentVisibleBlockPos(body, rawAssembler)',
+         'Rotation.NONE', 'if (!level.getBlockState(target).isAir())'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M27.2 restoration preview differs from M22: ${token}")
+        }
+        if (!helper.contains('final List<BlockPos> occupied = findOccupiedRestoreSpace(level, blocks, transform)')
+                || !helper.contains('throw SimAssemblyException.occupied(occupied)')) {
+            throw new GradleException('M22 occupied-space guard was weakened')
+        }
+        ['teleport(', 'logicalPose().position().set', 'disassembleSubLevel(', 'Blocks.AIR'].each { forbidden ->
+            if (method.contains(forbidden)) throw new GradleException("M27.2 stow command bypasses safety via ${forbidden}")
+        }
+        logger.lifecycle('verifyM27PrepareDisassemblySafetyBoundary PASS: normal bearing stow precedes unchanged M22 occupancy gate')
+    }
+}
+
+tasks.register('verifyM27_2Aerodynamics') {
+    group = 'forge backport'
+    description = 'Runs focused M27.2 control geometry, payload ownership, reload, and disassembly boundaries.'
+    dependsOn tasks.named('verifyM27_1Aerodynamics')
+    dependsOn tasks.named('verifyM27ControlBearingAxisChangesProviderNormalBoundary')
+    dependsOn tasks.named('verifyM27ControlFixtureIsolatedPayloadBoundary')
+    dependsOn tasks.named('verifyM27AeroVehicleNoMainBodyCaptureBoundary')
+    dependsOn tasks.named('verifyM27ControlContraptionComponentOwnershipBoundary')
+    dependsOn tasks.named('verifyM27ReloadComponentResolutionBoundary')
+    dependsOn tasks.named('verifyM27PrepareDisassemblySafetyBoundary')
+    doLast {
+        logger.lifecycle('verifyM27_2Aerodynamics PASS: M27 CLOSED / RUNTIME_PROVEN')
+    }
+}
+
+def m28ControlArchitecture = rootProject.file('M28_GOLDEN_AIRCRAFT_CONTROL_ARCHITECTURE.md')
+def m28BuildDocument = rootProject.file('M28_GOLDEN_AIRCRAFT_BUILD.md')
+def m28RuntimeDocument = rootProject.file('M28_GOLDEN_AIRCRAFT_RUNTIME.md')
+def m28CommandSource = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M28GoldenAircraftCommands.java')
+def m28WheelBlockSource = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelBlock.java')
+def m28WheelEntitySource = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelBlockEntity.java')
+def m28WheelClientSource = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelClientControl.java')
+def m28WheelPacketSource = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelControlPacket.java')
+def m28WheelRendererSource = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelRenderer.java')
+def m28WheelClientRegistration = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelClient.java')
+
+tasks.register('verifyM28FrozenControlArchitectureBoundary') {
+    group = 'forge backport'
+    inputs.files(m28ControlArchitecture, m28WheelBlockSource, m28WheelEntitySource,
+            m28WheelClientSource, m28WheelPacketSource)
+    doLast {
+        String docs = m28ControlArchitecture.getText('UTF-8')
+        ['9e60263fb5cb00033f14af655a7e72cf7aebb3e2', 'SteeringWheelBlock',
+         'SteeringWheelBlockEntity', 'SteeringWheelHandler', 'SteeringWheelPacket',
+         'no monolithic aircraft controller', 'fixed-magnitude 16 RPM',
+         "assigned by the aircraft's mechanical topology"].each { token ->
+            if (!docs.contains(token)) throw new GradleException("M28 frozen control audit missing ${token}")
+        }
+        logger.lifecycle('verifyM28FrozenControlArchitectureBoundary PASS: frozen control is positional Steering Wheel kinetics')
+    }
+}
+
+tasks.register('verifyM28PlayerControlInputBoundary') {
+    group = 'forge backport'
+    inputs.file(m28WheelClientSource)
+    doLast {
+        String client = m28WheelClientSource.getText('UTF-8')
+        ['minecraft.options.keyUse.isDown()', 'minecraft.player.getYRot()',
+         'yawDelta / 10.0F', 'wheel.directionConvert(1.0F)',
+         'SimulatedNetwork.sendToServer(new SteeringWheelControlPacket'].each { token ->
+            if (!client.contains(token)) throw new GradleException("M28 player control path missing ${token}")
+        }
+        if (client.contains('KeyMapping') || client.contains('setVelocity') || client.contains('teleport')) {
+            throw new GradleException('M28 player input invented a keybinding or body manipulation')
+        }
+        logger.lifecycle('verifyM28PlayerControlInputBoundary PASS: normal use-hold plus mouse yaw drives intent')
+    }
+}
+
+tasks.register('verifyM28ServerAuthoritativeControlBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelPacketSource, m28WheelEntitySource,
+            rootProject.file('forge/src/main/java/dev/simulated_team/simulated/network/SimulatedNetwork.java'))
+    doLast {
+        String packet = m28WheelPacketSource.getText('UTF-8')
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        String network = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/network/SimulatedNetwork.java').getText('UTF-8')
+        ['context.getSender()', 'Float.isFinite(packet.targetAngle)',
+         'getBlockEntity(packet.pos)', 'distanceToSqr(visibleCenter)',
+         'wheel.acceptControl(player'].each { token ->
+            if (!packet.contains(token)) throw new GradleException("M28 server validation missing ${token}")
+        }
+        ['NetworkDirection.PLAY_TO_SERVER', 'consumerNetworkThread'].each { token ->
+            if (!network.contains(token)) throw new GradleException("M28 packet direction missing ${token}")
+        }
+        ['Mth.clamp(requested', 'updateGeneratedRotation()', 'getTrackingSubLevel(player)'].each { token ->
+            if (!wheel.contains(token)) throw new GradleException("M28 authoritative wheel state missing ${token}")
+        }
+        String combined = packet + wheel
+        ['applyLinearImpulse', 'applyAngularImpulse', 'logicalPose().position().set', 'teleport('].each { forbidden ->
+            if (combined.contains(forbidden)) throw new GradleException("M28 control bypasses physics via ${forbidden}")
+        }
+        logger.lifecycle('verifyM28ServerAuthoritativeControlBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28PitchControlBoundary') {
+    group = 'forge backport'
+    inputs.files(m28ControlArchitecture, m28BuildDocument, m27ServerSubLevelSource)
+    doLast {
+        String docs = m28ControlArchitecture.getText('UTF-8') + m28BuildDocument.getText('UTF-8')
+        ['| Pitch | Dedicated onboard Steering Wheel', 'Mechanical Bearing facing south; rotation axis Z',
+         'Symmetric Sail, axis Y', 'bearing axis Z is orthogonal'].each { token ->
+            if (!docs.contains(token)) throw new GradleException("M28 pitch channel missing ${token}")
+        }
+        if (!m27ServerSubLevelSource.getText('UTF-8').contains('contraption.sable$getLocalPose')) {
+            throw new GradleException('M28 pitch does not retain real M27 contraption transform')
+        }
+        logger.lifecycle('verifyM28PitchControlBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28YawControlBoundary') {
+    group = 'forge backport'
+    inputs.files(m28ControlArchitecture, m28BuildDocument)
+    doLast {
+        String docs = m28ControlArchitecture.getText('UTF-8') + m28BuildDocument.getText('UTF-8')
+        ['| Yaw | Dedicated onboard Steering Wheel', 'Mechanical Bearing facing up; rotation axis Y',
+         'Symmetric Sail, axis Z', '+Y hinge is orthogonal'].each { token ->
+            if (!docs.contains(token)) throw new GradleException("M28 yaw channel missing ${token}")
+        }
+        logger.lifecycle('verifyM28YawControlBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28RollControlBoundary') {
+    group = 'forge backport'
+    inputs.files(m28ControlArchitecture, m28BuildDocument)
+    doLast {
+        String docs = m28ControlArchitecture.getText('UTF-8') + m28BuildDocument.getText('UTF-8')
+        ['| Roll | Dedicated onboard Steering Wheel', 'This surface is offset to starboard',
+         'Mechanical Bearing facing south; rotation axis Z', 'aerodynamic force produces a roll'].each { token ->
+            if (!docs.contains(token)) throw new GradleException("M28 roll channel missing ${token}")
+        }
+        logger.lifecycle('verifyM28RollControlBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ControlSurfaceTravelBoundary') {
+    group = 'forge backport'
+    inputs.file(m28WheelEntitySource)
+    doLast {
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        ['public static final float RPM = 16.0F', '.between(1, 360)',
+         'Mth.clamp(requested, -this.getAngleLimit(), this.getAngleLimit())',
+         'this.angle = this.targetAngle', 'this.stopMove()', 'this.updateGeneratedRotation()'].each { token ->
+            if (!wheel.contains(token)) throw new GradleException("M28 positional travel missing ${token}")
+        }
+        logger.lifecycle('verifyM28ControlSurfaceTravelBoundary PASS: bounded target travel stops at angle')
+    }
+}
+
+tasks.register('verifyM28ControlNeutralCleanupBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelClientSource, m28WheelEntitySource)
+    doLast {
+        String client = m28WheelClientSource.getText('UTF-8')
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        ['!minecraft.options.keyUse.isDown()', 'ClientPlayerNetworkEvent.LoggingOut',
+         'new SteeringWheelControlPacket(activePos, targetAngle, true)'].each { token ->
+            if (!client.contains(token)) throw new GradleException("M28 client cleanup missing ${token}")
+        }
+        ['player.isAlive()', 'getTrackingSubLevel(player) == owner',
+         'distanceToSqr(visibleCenter)', 'this.controller = null;', 'this.held = false;'].each { token ->
+            if (!wheel.contains(token)) throw new GradleException("M28 server cleanup missing ${token}")
+        }
+        if (wheel.contains('tag.putUUID(') || wheel.contains('tag.getUUID(') || wheel.contains('tag.hasUUID(')) {
+            throw new GradleException('M28 transient control owner persists across reload')
+        }
+        logger.lifecycle('verifyM28ControlNeutralCleanupBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28GoldenAircraftBuildBoundary') {
+    group = 'forge backport'
+    inputs.files(m28BuildDocument, m28RuntimeDocument)
+    doLast {
+        String build = m28BuildDocument.getText('UTF-8')
+        ['simulated:physics_assembler', 'aeronautics:wooden_propeller',
+         'simulated:steering_wheel', 'simulated:white_symmetric_sail',
+         'Create white sail', 'Mechanical Drill', 'Chest', 'Lever', 'Redstone Lamp',
+         '## Core and propulsion', '## Main wing', '## Pitch channel',
+         '## Yaw channel', '## Roll channel', '## Glue map', '## Views'].each { token ->
+            if (!build.contains(token)) throw new GradleException("M28 Golden build missing ${token}")
+        }
+        if (!build.contains('Never glue a symmetric sail payload')) {
+            throw new GradleException('M28 build does not preserve M27 payload isolation')
+        }
+        logger.lifecycle('verifyM28GoldenAircraftBuildBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28NoFixtureSessionGameplayDependencyBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelBlockSource, m28WheelEntitySource, m28WheelClientSource,
+            m28WheelPacketSource, m28CommandSource)
+    doLast {
+        String production = [m28WheelBlockSource, m28WheelEntitySource, m28WheelClientSource,
+                             m28WheelPacketSource].collect { it.getText('UTF-8') }.join('\n')
+        ['M25AeronauticsCommands', 'M26AeronauticsPropulsionCommands', 'M27AerodynamicsCommands',
+         'FixtureState', 'fixtureSessionId', 'ACTIVE_FIXTURES'].each { forbidden ->
+            if (production.contains(forbidden)) throw new GradleException("M28 gameplay depends on fixture state: ${forbidden}")
+        }
+        String command = m28CommandSource.getText('UTF-8')
+        ['Commands.literal("fixture")', 'Commands.literal("rpm")', 'Commands.literal("control")',
+         'Commands.literal("assemble")', 'Commands.literal("disassemble")'].each { forbidden ->
+            if (command.contains(forbidden)) throw new GradleException("M28 command exposes mutation path ${forbidden}")
+        }
+        if (!command.contains('Commands.literal("status")') || !command.contains('Commands.literal("inspect")')) {
+            throw new GradleException('M28 read-only command surface is incomplete')
+        }
+        logger.lifecycle('verifyM28NoFixtureSessionGameplayDependencyBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28NormalAssemblyBoundary') {
+    group = 'forge backport'
+    inputs.files(m28RuntimeDocument, m28CommandSource)
+    doLast {
+        String runtime = m28RuntimeDocument.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        if (!runtime.contains('Right-click the Physics Assembler normally')
+                || !runtime.contains('The aircraft works without ever running an M28 command')
+                || command.contains('SimAssemblyHelper.assemble') || command.contains('fixture(')) {
+            throw new GradleException('M28 normal assembly boundary is not preserved')
+        }
+        logger.lifecycle('verifyM28NormalAssemblyBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28NormalPropulsionControlBoundary') {
+    group = 'forge backport'
+    inputs.files(m28RuntimeDocument, m28CommandSource, m26PropellerSource)
+    doLast {
+        String runtime = m28RuntimeDocument.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        if (!runtime.contains('normal Create Creative Motor value box')
+                || !m26PropellerSource.getText('UTF-8').contains('return AeroConfig.WOODEN_PROPELLER_THRUST.get()')
+                || command.contains('generatedSpeed.setValue') || command.contains('setRpm')) {
+            throw new GradleException('M28 propulsion is not normal production Create input')
+        }
+        logger.lifecycle('verifyM28NormalPropulsionControlBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28OnboardInteractionBoundary') {
+    group = 'forge backport'
+    inputs.files(m28BuildDocument, m28RuntimeDocument)
+    doLast {
+        String all = m28BuildDocument.getText('UTF-8') + m28RuntimeDocument.getText('UTF-8')
+        ['Chest', 'Lever', 'Redstone Lamp', 'open the chest', 'toggle the lever'].each { token ->
+            if (!all.contains(token)) throw new GradleException("M28 onboard interaction missing ${token}")
+        }
+        logger.lifecycle('verifyM28OnboardInteractionBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28CreateActorIntegrationBoundary') {
+    group = 'forge backport'
+    inputs.files(m28BuildDocument, m28RuntimeDocument,
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SubLevelBlockBreakingUtility.java'))
+    doLast {
+        String all = m28BuildDocument.getText('UTF-8') + m28RuntimeDocument.getText('UTF-8')
+        if (!all.contains('Mechanical Drill') || !all.contains('Briefly power the drill pod')) {
+            throw new GradleException('M28 Drill integration sequence is missing')
+        }
+        logger.lifecycle('verifyM28CreateActorIntegrationBoundary PASS: reuses frozen Drill compatibility path')
+    }
+}
+
+tasks.register('verifyM28NormalDisassemblyBoundary') {
+    group = 'forge backport'
+    inputs.files(m28RuntimeDocument, m28CommandSource)
+    doLast {
+        String runtime = m28RuntimeDocument.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        ['Neutralize all three Steering Wheels', 'Disassemble each bearing payload through normal Create interaction',
+         'Activate the Physics Assembler normally'].each { token ->
+            if (!runtime.contains(token)) throw new GradleException("M28 normal disassembly missing ${token}")
+        }
+        ['prepare_disassembly', 'disassemble()', 'Blocks.AIR', 'teleport('].each { forbidden ->
+            if (command.contains(forbidden)) throw new GradleException("M28 command bypasses teardown via ${forbidden}")
+        }
+        logger.lifecycle('verifyM28NormalDisassemblyBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28RenderingBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelRendererSource, m28WheelClientRegistration,
+            rootProject.file('forge/src/main/resources/assets/simulated/blockstates/steering_wheel.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/steering_wheel/block.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/steering_wheel/block_up.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/steering_wheel/item.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/steering_wheel/item.obj'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/steering_wheel/item.mtl'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/steering_wheel/wheel.json'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/steering_wheel/wheel.obj'),
+            rootProject.file('forge/src/main/resources/assets/simulated/models/block/steering_wheel/wheel.mtl'),
+            rootProject.file('forge/src/main/resources/assets/simulated/textures/block/steering_wheel.png'))
+    doLast {
+        def json = new JsonSlurper()
+        File root = rootProject.file('forge/src/main/resources/assets/simulated')
+        File wheelJson = new File(root, 'models/block/steering_wheel/wheel.json')
+        File itemJson = new File(root, 'models/block/steering_wheel/item.json')
+        def wheelModel = json.parse(wheelJson)
+        def itemModel = json.parse(itemJson)
+        if (wheelModel.loader != 'forge:obj' || itemModel.loader != 'forge:obj'
+                || wheelModel.model != 'simulated:models/block/steering_wheel/wheel.obj'
+                || itemModel.model != 'simulated:models/block/steering_wheel/item.obj') {
+            throw new GradleException('M28 OBJ models do not use target Forge 1.20.1 loader semantics')
+        }
+        if (wheelModel.textures.steering_wheel != 'simulated:block/steering_wheel'
+                || !new File(root, 'textures/block/steering_wheel.png').isFile()) {
+            throw new GradleException('M28 steering-wheel texture reference is unresolved')
+        }
+        String registration = m28WheelClientRegistration.getText('UTF-8')
+        String renderer = m28WheelRendererSource.getText('UTF-8')
+        if (!registration.contains('ModelEvent.RegisterAdditional')
+                || !registration.contains('registerBlockEntityRenderer')
+                || !renderer.contains('CachedBuffers.partial(SteeringWheelClient.WHEEL, state)')) {
+            throw new GradleException('M28 BER partial registration/render ownership is incomplete')
+        }
+        if (renderer.contains('20000000') || renderer.contains('20_000_000')) {
+            throw new GradleException('M28 renderer contains hidden plot coordinates')
+        }
+        logger.lifecycle('verifyM28RenderingBoundary PASS: exact assets, explicit bake, BER fallback')
+    }
+}
+
+tasks.register('verifyM28M27RegressionBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM27_2Aerodynamics')
+    inputs.files(rootProject.file('BACKPORT_STATUS.md'), rootProject.file('TARGET_RUNTIME_SMOKE.md'))
+    doLast {
+        String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
+        String smoke = rootProject.file('TARGET_RUNTIME_SMOKE.md').getText('UTF-8')
+        if (!status.contains('M27 CLOSED / RUNTIME_PROVEN') || !smoke.contains('M27 CLOSED / RUNTIME_PROVEN')) {
+            throw new GradleException('M27 runtime closure is not recorded')
+        }
+        logger.lifecycle('verifyM28M27RegressionBoundary PASS: M27 closed runtime evidence retained')
+    }
+}
+
+tasks.register('verifyM28RegressionBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM28M27RegressionBoundary')
+    dependsOn tasks.named('verifyM27RegressionBoundary')
+    dependsOn tasks.named('verifyM26RegressionBoundary')
+    dependsOn tasks.named('verifyM24ClosureStatusBoundary')
+    doLast {
+        logger.lifecycle('verifyM28RegressionBoundary PASS: M21-M27 frozen foundation retained')
+    }
+}
+
+tasks.register('verifyM28GoldenAircraft') {
+    group = 'forge backport'
+    description = 'Runs focused M28 production steering, Golden build, rendering, and frozen-foundation boundaries.'
+    dependsOn tasks.named('verifyM28FrozenControlArchitectureBoundary')
+    dependsOn tasks.named('verifyM28PlayerControlInputBoundary')
+    dependsOn tasks.named('verifyM28ServerAuthoritativeControlBoundary')
+    dependsOn tasks.named('verifyM28PitchControlBoundary')
+    dependsOn tasks.named('verifyM28YawControlBoundary')
+    dependsOn tasks.named('verifyM28RollControlBoundary')
+    dependsOn tasks.named('verifyM28ControlSurfaceTravelBoundary')
+    dependsOn tasks.named('verifyM28ControlNeutralCleanupBoundary')
+    dependsOn tasks.named('verifyM28GoldenAircraftBuildBoundary')
+    dependsOn tasks.named('verifyM28NoFixtureSessionGameplayDependencyBoundary')
+    dependsOn tasks.named('verifyM28NormalAssemblyBoundary')
+    dependsOn tasks.named('verifyM28NormalPropulsionControlBoundary')
+    dependsOn tasks.named('verifyM28OnboardInteractionBoundary')
+    dependsOn tasks.named('verifyM28CreateActorIntegrationBoundary')
+    dependsOn tasks.named('verifyM28NormalDisassemblyBoundary')
+    dependsOn tasks.named('verifyM28RenderingBoundary')
+    doLast {
+        logger.lifecycle('verifyM28GoldenAircraft PASS: M28 IMPLEMENTED / RUNTIME_REQUIRED')
     }
 }

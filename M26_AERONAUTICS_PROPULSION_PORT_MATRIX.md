@@ -36,8 +36,9 @@ broken partial recipe.
 
 ## Deferred boundaries
 
-`DEFER_M27_AERODYNAMICS` owns Smart/Gyroscopic control behavior and broader
-airflow/aerodynamic control integration. `DEFER_M28_GOLDEN_AIRCRAFT` owns the
+`DEFER_M27_AERODYNAMICS` owns the frozen Sable/Create sail lift provider,
+Simulated symmetric-sail drag, and bearing-mounted control-surface composition;
+see `M27_AERODYNAMICS_BASELINE.md`. `DEFER_M28_GOLDEN_AIRCRAFT` owns the
 large bearing contraption graph, remaining propeller variants, recipes, sound,
 Ponder and full-vehicle content. NeoForge datagen, duplicate generated output,
 optional visuals, and mixins outside the selected mechanism are

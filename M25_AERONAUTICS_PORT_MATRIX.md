@@ -41,7 +41,7 @@ The inventory is taken from `git ls-tree -r` at commit `9e60263fb5cb00033f14af65
 | Classification | Complete ownership rule |
 | --- | --- |
 | `DEFER_M26_PROPULSION` | All propeller, propeller-bearing, mounted potato cannon, thrust, airflow, and direct models/textures/recipes. |
-| `DEFER_M27_AERODYNAMICS_CONTROLS` | Hot-air balloons, envelopes, burners, steam vents, lifting-gas graph, broader aerodynamic/control source, and direct assets/data. |
+| `DEFER_M27_AERODYNAMICS_CONTROLS` | Regular Create-sail lift, Simulated symmetric-sail drag, and bearing-mounted control-surface composition. These exact frozen owners are selected by M27. |
 | `DEFER_M28_GOLDEN_AIRCRAFT` | Remaining full-content registrations, items, components, fluids, integrations, and assets needed for a coherent full aircraft/content pass. |
 | `NOT_APPLICABLE_1_20_1` | NeoForge-only service glue, upstream datagen implementation, Ponder scenes, optional shader integrations, deferred mixins, and generated non-selected gameplay data. |
 

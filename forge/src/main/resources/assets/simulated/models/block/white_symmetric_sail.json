@@ -1,6 +1,3 @@
 {
-  "parent": "minecraft:block/cube_all",
-  "textures": {
-    "all": "minecraft:block/white_wool"
-  }
+  "parent": "simulated:block/symmetric_sail/block"
 }
