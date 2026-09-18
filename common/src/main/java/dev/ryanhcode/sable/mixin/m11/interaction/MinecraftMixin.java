@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.mixin.m11.interaction;
 
 import dev.ryanhcode.sable.network.client.ClientSubLevelInteractionHelper;
+import dev.ryanhcode.sable.network.client.ClientSubLevelHoldUseGuard;
 import dev.ryanhcode.sable.network.client.ClientSubLevelTargetHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -15,6 +16,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.At.Shift;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /** Catches Sable block right-clicks before vanilla can drop them or serialize hidden plot coordinates. */
 @Mixin(Minecraft.class)
@@ -36,6 +38,11 @@ public abstract class MinecraftMixin {
 
     @Inject(method = "startUseItem", at = @At("HEAD"), cancellable = true)
     private void sable$startUseItemOnSubLevel(final CallbackInfo ci) {
+        if (ClientSubLevelHoldUseGuard.isActive()) {
+            this.rightClickDelay = 4;
+            ci.cancel();
+            return;
+        }
         if (this.player == null || this.level == null) {
             return;
         }
@@ -53,6 +60,13 @@ public abstract class MinecraftMixin {
                 Minecraft.getInstance().gameRenderer.itemInHandRenderer.itemUsed(hand);
             }
             ci.cancel();
+        }
+    }
+
+    @Inject(method = "startAttack", at = @At("HEAD"), cancellable = true)
+    private void sable$blockAttackDuringHeldSubLevelUse(final CallbackInfoReturnable<Boolean> cir) {
+        if (ClientSubLevelHoldUseGuard.isActive()) {
+            cir.setReturnValue(false);
         }
     }
 

@@ -4096,7 +4096,7 @@ completed without loss or duplication. Final status:
 ## M28 Golden Aircraft Runtime Gate
 
 Use only a fresh artifact whose `/sable m28 status` reports
-`implementationRevision=M28`. Follow `M28_GOLDEN_AIRCRAFT_BUILD.md` and
+`implementationRevision=M28.5c`. Follow `M28_GOLDEN_AIRCRAFT_BUILD.md` and
 `M28_GOLDEN_AIRCRAFT_RUNTIME.md`.
 
 1. Manually build and glue the documented aircraft; configure both Creative
@@ -4118,3 +4118,118 @@ Use only a fresh artifact whose `/sable m28 status` reports
 No `/sable m25`, `m26`, or `m27` fixture/control command is part of Golden
 acceptance. M28 remains `IMPLEMENTED / RUNTIME_REQUIRED` until this continuous
 manual flight succeeds. Airborne reload and deeper structural stress are M29.
+
+### M28 captured-model A/B and vertex probe
+
+Before changing the final render path, use a nearly stationary Sable bearing
+with one `simulated:white_symmetric_sail` and one offset asymmetric ordinary
+model block. Sweep the bearing through at least 90 degrees and record which
+block visibly moves. Repeat the symmetric sail on an ordinary-world Create
+Mechanical Bearing. For the Sable sample, retain two
+`SABLE_M28_BUFFER_TRANSFORM` and `SABLE_M28_VERTEX_PROBE` groups separated by at
+least 30 degrees. The probe must report finite actual submitted vertices,
+near-zero expected-versus-actual error, and no hidden plot coordinate. These
+tests classify the remaining issue; they do not by themselves close M28.
+
+### M28.1 manual Sable retest
+
+Stand on the assembled aircraft and look at an onboard block, then run
+`/sable m28 inspect` twice with at least one tick between calls. The resolution
+line must identify either current support ownership or the targeted Sable block
+without fixture state. At zero RPM expect one propeller actor and
+`READY_ZERO_RPM`. Set the real Creative Motor to at least 64 RPM and inspect
+again: expect `bodyDynamic=true`, `propulsionProviderCount=1`, nonzero
+production thrust, and a recorded propulsion force after tracking has begun.
+The same output reports unexpected terrain blocks if the assembler absorbed its
+runway or support.
+
+### M28.3 steering controls
+
+Use the corrected build coordinates: yaw is at `z=-4`, roll is at `x=1`, and
+`(-5,1,-3)` remains air between pitch and yaw gearboxes. After assembly,
+`/sable m28 inspect` must report three wheel blocks and three block entities.
+Operate pitch, yaw, and roll separately. For the active channel, generated RPM,
+gearbox speed, shaft RPM, and bearing RPM become nonzero, then stop at target;
+the other channels remain at zero and no block is removed.
+
+### M28.4 Steering Wheel stress capacity
+
+Run `/sable m28 inspect` while each wheel is moving. The active channel must
+report base `stressCapacity=16.0`, positive live network capacity, stress no
+greater than capacity, `networkOverstressed=false`, and nonzero gearbox, shaft,
+and bearing RPM. Its `networkMembers` list must contain only that isolated
+control channel. No Creative Motor is part of the test.
+
+### M28.5 Steering Wheel held-use and bearing hold
+
+Set every control Mechanical Bearing to Create's `Only Place when Anchor
+Destroyed` (`ROTATE_NEVER_PLACE`) movement mode. Value 0 is `Always Place when
+Stopped`, not the holding mode.
+Hold RMB on one wheel, move the crosshair over neighboring blocks and the
+Physics Assembler while continuing to steer, then release. The captured wheel
+must remain the sole interaction owner until release; the aircraft must not
+disassemble. The bearing payload must remain present at the nonzero target with
+zero generated RPM, `HOLDING_TARGET`, and unchanged contraption create/remove
+counts. After release, an intentional Physics Assembler click must remain
+available. Repeat independently for all three channels.
+
+### M28.5b preflight before steering
+
+On the assembled Golden Aircraft, run `/sable m28 validate_controls` first.
+If `overallStatus=FAIL`, correct only the reported positions, bearing mode, or
+payload. A successful preflight must report one isolated wheel generator and
+one bearing per channel, no Creative Motor, effective
+`ROTATE_NEVER_PLACE`, and a captured `simulated:white_symmetric_sail`.
+Then hold RMB and operate one wheel. If a block is removed, inspect
+`SABLE_M28_KINETIC_CONFLICT` for the initiating Create method and network
+members. For comparison, operate the same tiny pitch channel once in an
+ordinary world and once on a manually assembled Sable.
+
+### M28.5c scoped assembled-contraption rendering
+
+With Oculus 1.8.0 and the user's shader configuration active, test one
+`white_symmetric_sail[axis=y]` and one `[axis=z]`. Before bearing assembly the
+ordinary static Sable path must remain correct. After assembly, steer through
+at least 90 degrees, hold a nonzero angle, reverse, and disassemble normally.
+The assembled sail must visibly follow the Create bearing while the outer body
+continues following the Sable pose.
+
+Sampled logs must show `SABLE_M28_ENTITY_BATCH` with one
+`BEGIN_SCOPED_BATCH`, all relevant `WRITE` ranges, one `END_SCOPED_BATCH`, and
+same-frame `FLUSH_COMPLETE flushed=true unflushedRanges=0`. The source class
+must be vanilla `MultiBufferSource$BufferSource`, not Oculus
+`FullyBufferedMultiBufferSource`. Any `UNFLUSHED_RANGE`, missing material, or
+shader regression keeps M28 visual status open.
+
+### M28.5d Sodium storage and entity-phase A/B
+
+Use the final jar from this revision with ImmediatelyFast absent. First run the
+existing default scoped mode and retain the bounded
+`SABLE_M28_SODIUM_VERTEX_WRITE`, `SABLE_M28_SODIUM_VERTEX_COMPARE`,
+`SABLE_M28_SODIUM_BUFFER_LIFECYCLE`, `SABLE_M28_PRE_DRAW_VERTEX`, and
+`SABLE_M28_DRAW_PROVENANCE` lines. They must show the same backing builder,
+changing stored positions over at least 30 degrees, same-frame finalization,
+and an actual draw.
+
+Then launch a fresh client with `-Dsable.m28.entityPhaseAB=true`. This disables
+the Forge-stage dispatch and renders the same contained contraptions once from
+the real `LevelRenderer.renderEntity` phase using that phase's source. Compare
+`SABLE_M28_ENTITY_PHASE_AB` and player-visible motion against the default. Add
+`-Dsable.m28.normalCreateAB=true` only when collecting the ordinary-world
+Create control. M28 visual remains open unless the assembled axis-Y and axis-Z
+sails visibly rotate, hold, reverse, and restore after disassembly.
+
+### M28.6 framebuffer visual-owner isolation
+
+Do not rerun steering qualification. Assemble one existing control sail and
+move it through at least 90 degrees. First enable
+`-Dsable.m28.visualOwnershipTrace=true -Dsable.m28.framebufferProbe=true` and
+retain the `SCREEN_BOUNDS`, two-phase `FRAMEBUFFER_PROBE`, `STATIC_DRAW_CONTENT`,
+and `VISIBLE_OWNER` markers. Then perform separate launches with
+`sable.m28.suppressDynamicContraption`, `sable.m28.forceCapturedStaticInvalidate`,
+and `sable.m28.entityPhaseAB` enabled one at a time. The decisive observation is
+whether the stationary image remains when the dynamic owner is suppressed.
+
+Minecraft is not launched by the build process. M28 mechanics remain PASS;
+assembled-sail rendering remains FAIL/PARTIAL until this A/B identifies and
+corrects the visible framebuffer owner.

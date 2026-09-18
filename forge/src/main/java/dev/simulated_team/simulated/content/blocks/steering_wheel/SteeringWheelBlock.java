@@ -66,9 +66,20 @@ public final class SteeringWheelBlock extends HorizontalDirectionalBlock
         }
         if (level.isClientSide) {
             DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
-                    () -> () -> SteeringWheelClientControl.begin(pos));
+                    () -> () -> SteeringWheelClientControl.begin(pos, hand));
         }
         return InteractionResult.sidedSuccess(level.isClientSide);
+    }
+
+    @Override
+    public void onRemove(final BlockState state, final Level level, final BlockPos pos,
+                         final BlockState newState, final boolean movedByPiston) {
+        if (!state.is(newState.getBlock())) {
+            final SteeringWheelBlockEntity wheel = level.getBlockEntity(pos) instanceof final SteeringWheelBlockEntity found
+                    ? found : null;
+            SteeringWheelDiagnostics.recordRemoval(level, pos, state, newState, movedByPiston, wheel);
+        }
+        super.onRemove(state, level, pos, newState, movedByPiston);
     }
 
     @Override

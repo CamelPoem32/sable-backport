@@ -72,6 +72,9 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
                         + this.lastLifecycleState), true);
             }
         } catch (final AssemblyException exception) {
+            if (!(Sable.HELPER.getContaining(this) instanceof ServerSubLevel)) {
+                this.primaryAssembler = false;
+            }
             this.lastFailure = describeAssemblyException(exception);
             this.lastAssemblyFailureStage = extractFailureStage(this.lastFailure);
             this.lastLifecycleState = "FAILED";

@@ -21,8 +21,8 @@ assembler.
 | 3 | Create Mechanical Bearing | Control-surface actuators |
 | 3 | `simulated:white_symmetric_sail` | Isolated moving control payloads |
 | 12 | Create white sail | Main aerodynamic lifting surfaces |
-| 6 | Create gearbox | Vertical wheel output and shaft routing |
-| 10 | Create shaft | Control transmission |
+| 4 | Create gearbox | Vertical wheel output and shaft routing |
+| 3 | Create shaft | Control transmission |
 | 1 | Mechanical Drill | In-flight Create actor regression |
 | 1 | Chest | Onboard inventory regression |
 | 1 | Lever | Onboard redstone interaction |
@@ -35,7 +35,7 @@ assembler.
 | Position | Block and facing |
 | --- | --- |
 | `(0,1,0)` | Physics Assembler |
-| `(-1,1,0)` through `(3,1,0)` | Copper fuselage blocks |
+| `(-1,1,0)` and `(1,1,0)` through `(3,1,0)` | Copper fuselage blocks; leave `(0,1,0)` for the assembler |
 | `(3,2,0)` | Creative Motor facing east, set to 0 before assembly |
 | `(4,2,0)` | Wooden Propeller facing east |
 | `(-1,2,0)` | Chest |
@@ -70,12 +70,12 @@ and do not glue it. The bearing axis Z is orthogonal to its initial +Y normal.
 
 | Position | Block and facing |
 | --- | --- |
-| `(-3,2,-3)` | Steering Wheel on floor, facing east |
-| `(-3,1,-3)` | Gearbox |
-| `(-4,1,-3)` | Horizontal shaft |
-| `(-5,1,-3)` | Gearbox below bearing |
-| `(-5,2,-3)` | Mechanical Bearing facing up; rotation axis Y |
-| `(-5,3,-3)` | Symmetric Sail, axis Z; this is the only payload |
+| `(-3,2,-4)` | Steering Wheel on floor, facing east |
+| `(-3,1,-4)` | Gearbox |
+| `(-4,1,-4)` | Horizontal shaft |
+| `(-5,1,-4)` | Gearbox below bearing |
+| `(-5,2,-4)` | Mechanical Bearing facing up; rotation axis Y |
+| `(-5,3,-4)` | Symmetric Sail, axis Z; this is the only payload |
 
 The +Y hinge is orthogonal to the sail's +Z normal. Keep the payload unglued
 and separated from the tail structure by air.
@@ -84,15 +84,44 @@ and separated from the tail structure by air.
 
 | Position | Block and facing |
 | --- | --- |
-| `(0,2,3)` | Steering Wheel on floor, facing west |
-| `(0,1,3)` | Gearbox |
-| `(0,1,4)` | Horizontal shaft |
-| `(0,1,5)` | Mechanical Bearing facing south; rotation axis Z |
-| `(0,1,6)` | Symmetric Sail, axis Y; this is the only payload |
+| `(1,2,3)` | Steering Wheel on floor, facing west |
+| `(1,1,3)` | Gearbox |
+| `(1,1,4)` | Horizontal shaft |
+| `(1,1,5)` | Mechanical Bearing facing south; rotation axis Z |
+| `(1,1,6)` | Symmetric Sail, axis Y; this is the only payload |
 
 This surface is offset to starboard so its aerodynamic force produces a roll
-moment. The payload is one unglued sail and must not touch the main wing sail at
-`(0,2,6)`; the one-block Y separation is intentional.
+moment. The one-block east offset keeps the Steering Wheel out of the main-wing
+sail row. The payload is one unglued sail and must not touch the main wing.
+
+## Canonical control topology
+
+All positions are relative to the Physics Assembler at `(0,1,0)`. Each listed
+channel is a separate Create kinetic network. A control payload is exactly one
+`simulated:white_symmetric_sail`, never `create:white_sail`.
+
+| Channel | Wheel local position / facing | Gearbox local position(s) | Shaft local position | Bearing local position / facing | Sail local position / axis |
+| --- | --- | --- | --- | --- | --- |
+| Pitch | `(-5,2,-2)` / north | `(-5,1,-2)` | `(-5,1,-1)` | `(-5,1,0)` / south | `(-5,1,1)` / Y |
+| Yaw | `(-3,2,-4)` / east | `(-3,1,-4)`, `(-5,1,-4)` | `(-4,1,-4)` | `(-5,2,-4)` / up | `(-5,3,-4)` / Z |
+| Roll | `(1,2,3)` / west | `(1,1,3)` | `(1,1,4)` | `(1,1,5)` / south | `(1,1,6)` / Y |
+
+Before moving a control wheel, run `/sable m28 validate_controls` while on or
+targeting the assembled aircraft. It inventories the actual wheels first and
+then compares their exact positions, the Create connectivity graph, the
+assembled bearing movement mode, and the captured payload. `overallStatus=FAIL`
+means repair only the reported blocks or settings before flight-control testing.
+Power reaching a bearing does not prove the payload or movement mode is correct.
+
+For an isolated comparison, build the pitch route from the table in an ordinary
+static world: wheel, gearbox, shaft, Mechanical Bearing in `Only Place when
+Anchor Destroyed` mode, and one unglued `simulated:white_symmetric_sail` on its
+front. Operate the wheel and note wheel/shaft/bearing speeds, captured payload,
+and contraption create/remove counts. Then build exactly that route on a tiny
+manually assembled Sable with a Physics Assembler and static support, and repeat.
+If the ordinary-world rig passes but the identical Sable rig fails, investigate
+Sable/Create network reconstruction; if both fail, investigate the isolated
+Steering Wheel/Create adaptation. Neither rig needs an M28 fixture command.
 
 ## Drill pod and skids
 
@@ -108,8 +137,18 @@ controllers, drill pod, and skids into one connected assembly. Glue each wheel,
 shaft, gearbox, and bearing casing to the static structure.
 
 Never glue a symmetric sail payload to the aircraft. Never bridge around the
-bearing with another touching block. Before assembly, activate each bearing and
-confirm it captures exactly its one intended symmetric sail.
+bearing with another touching block. Configure every control Mechanical Bearing
+to Create's `ROTATE_NEVER_PLACE` (`Only Place when Anchor Destroyed`) movement
+mode with its normal
+wrench/scroll-value interaction. This is the real Create mode that keeps a
+stopped contraption assembled at its commanded angle. Before Sable assembly,
+activate each bearing and confirm it captures exactly its one intended symmetric
+sail and remains present when its shaft stops.
+
+Keep the three control drivetrains kinetically isolated. In particular, leave
+`(-5,1,-3)` empty between the pitch gearbox at `(-5,1,-2)` and yaw gearbox at
+`(-5,1,-4)`. Adjacent gearboxes join networks and turn independent Steering
+Wheels into competing Create generators.
 
 ## Views
 
@@ -144,4 +183,3 @@ Front view looking toward the nose:
      =============+=============
           skid         skid
 ```
-

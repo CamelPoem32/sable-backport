@@ -2471,3 +2471,237 @@ Mechanical Bearing payloads produce M27 aerodynamic control. Pitch, yaw, and
 roll are three separate physical channels, not direct Sable force or pose
 commands. `/sable m28 status` and `/sable m28 inspect` are read-only and no M28
 fixture exists. Static status: `M28 IMPLEMENTED / RUNTIME_REQUIRED`.
+
+### M28.1 Manual Aircraft Resolution And Propulsion Diagnostics
+
+M28.1 removes the inspect command's assumption that server-side player tracking
+must already be populated. A real manually assembled Sable is resolved from
+production ownership in strict order: current tracking/vehicle/collision/feet
+support first, then the Sable block under the player's ray target. There is no
+fixture session, nearest-body scan, first-body selection, or hidden-plot
+proximity fallback.
+
+The Wooden Propeller implementation and M25-M27 force formulas are unchanged.
+Inspection now proves whether the real propeller block entity is registered in
+the Sable `BlockEntitySubLevelActor` index, reports exact production thrust and
+the recorded `ForceGroups.PROPULSION` sample separately, and exposes dynamic
+body type, backend membership, mass/COM, velocities, selected bounds, and
+suspicious terrain captured by assembly. Static status remains
+`M28.1 IMPLEMENTED / RUNTIME_REQUIRED`.
+
+### M28.3 Steering Wheel Kinetic Output And Hold Safety
+
+M28.3 restores the frozen Steering Wheel's Create `TURN_ANGLE` sequence-aware
+16 RPM lifecycle and prevents repeat-use or attack from escaping to adjacent
+blocks while steering is held. Ordinary Create propagation and its opposing
+source protection remain unchanged.
+
+The Golden Aircraft blueprint now has three disjoint control networks. The yaw
+channel moved one block north to separate its gearbox from pitch, and the roll
+channel moved one block east so its wheel no longer overlaps a main-wing sail.
+Read-only M28 inspection reports all three expected wheel positions and the
+real wheel/gearbox/shaft/bearing network state. Status remains
+`M28.3 IMPLEMENTED / RUNTIME_REQUIRED`.
+
+### M28.4 Steering Wheel Stress Capacity
+
+M28.4 restores the frozen Steering Wheel generator registration omitted by the
+Forge DeferredRegister port. `simulated:steering_wheel` supplies configurable
+`16 SU/RPM` capacity and retains signed 16 RPM generator metadata through
+Create 6.0.8's block-keyed stress registries. At 16 RPM the source contributes
+256 SU before the isolated channel's normal bearing load is evaluated.
+
+No Creative Motor was added, no Golden Aircraft coordinates changed, and no
+generic Create kinetic code was modified. Read-only M28 diagnostics now expose
+the registered capacity/impact, live network stress/capacity, overstress state,
+and exact member list for pitch, yaw, and roll. Status remains
+`M28.4 IMPLEMENTED / RUNTIME_REQUIRED`.
+
+### M28.5 Steering Wheel Held Use And Bearing Hold
+
+M28.5 closes the interaction-retarget boundary without changing Create
+kinetics. A client control session now captures the exact Sable UUID, wheel-local
+position, hand, and token at the initial click. Every update and the single stop
+packet resolve that identity; neither the moving crosshair nor a raw hidden-plot
+position can retarget the session. Repeat use and attack remain consumed until
+RMB is physically released, including after an invalidation event.
+
+The frozen Steering Wheel already emits Create `TURN_ANGLE`; that context limits
+the move but does not choose whether a stopped Mechanical Bearing places its
+payload. Target Create 6.0.8, like the frozen 6.0.10 line, retains a stopped
+surface only in `ROTATE_NEVER_PLACE`. The Golden Aircraft instructions now make
+this required normal Create bearing configuration explicit. Read-only lifecycle
+diagnostics expose movement mode, entity identity, payload presence, and bounded
+create/remove counts. Piston-move removal during M22 transfer is classified as
+`BLOCK_TRANSFER`, not destructive loss. Status remains
+`M28.5a IMPLEMENTED / RUNTIME_REQUIRED`. The corrective pass registers the
+existing Mechanical Bearing accessor in the packaged Forge common mixin config;
+it does not change Steering Wheel or Create bearing behavior.
+
+### M28.5b Control Preflight And Conflict Attribution
+
+`M28.5b IMPLEMENTED / RUNTIME_REQUIRED`. The read-only
+`/sable m28 validate_controls` command inventories actual assembled wheel
+positions before comparing the canonical pitch/yaw/roll routes. It checks
+Create connectivity, assembled bearing `ROTATE_NEVER_PLACE`, and a one-block
+`simulated:white_symmetric_sail` payload. Bounded diagnostics identify
+Create's initiating kinetic-destruction method without altering destruction or
+generator behavior. The latest runtime shows wrong bearing mode, wrong payload,
+and one real unexpected wheel removal; the complete control path still needs a
+manual test.
+
+### M28 Steering Source Flap Follow-Up
+
+`M28 IMPLEMENTED / RUNTIME_REQUIRED`, not closed. The wheel previously stopped
+an old `TURN_ANGLE` countdown before consuming the latest steering request,
+detaching its Create generator for one tick while the printed requested angle
+still differed from the current angle. The wheel now decides from one current
+target/angle snapshot, and a same-speed retarget extends only its downstream
+Mechanical Bearing's sequenced travel without rebuilding the kinetic graph.
+The exact Create 6.0.8 accessor field, production decision regression, Forge
+compile, and final package pass. Continuous sail motion, stable active network
+membership, and unchanged contraption create/remove counts still require a
+fresh manual runtime test. See `M28_STEERING_SOURCE_FLAP_AUDIT.md`.
+
+### M28 Contraption Buffer Submission Follow-Up
+
+The latest runtime clears the stale-static-copy hypothesis: the captured source
+is air, the stored snapshot no longer contains the sail, and ownership is
+`CONTRAPTION_ONLY`. Client angle, Create's prepared inner model matrix, culling,
+and dispatch all advance. The remaining boundary is between that prepared
+matrix and the vertices actually submitted for the captured model.
+
+The symmetric sail is plain baked `MODEL` geometry with no BER or Flywheel
+visual. Bounded `SABLE_M28_BUFFER_TRANSFORM` and `SABLE_M28_VERTEX_PROBE`
+diagnostics now sample Create 6.0.8's real CPU `SuperByteBuffer` transform and
+the actual final coordinates passed to `VertexConsumer`. No render transform or
+gameplay behavior changed. M28 remains `IMPLEMENTED / RUNTIME_REQUIRED` until
+the ordinary-block/symmetric-sail A/B and player-visible rotation test identify
+and clear the final downstream boundary. See
+`M28_CONTRAPTION_BUFFER_SUBMISSION_AUDIT.md`.
+
+### M28.5c Oculus Entity-Batch Ownership
+
+Runtime proved that the transformed sail vertices reached Oculus 1.8.0's
+`FullyBufferedMultiBufferSource` during Forge `AFTER_ENTITIES` but remained
+unflushed across later frames. Oculus owns 32 segmented entity builders,
+deliberately ignores `endBatch(RenderType)`, and collects/draws segments only
+at its own LevelRenderer transparency boundaries. Sable was borrowing that
+foreign source after its matching lifecycle had closed.
+
+The manual Sable contraption pass now owns one vanilla `BufferSource` for the
+whole stage and ends it once after every contained contraption is dispatched.
+It never flushes Oculus's global source and never flushes per entity. Bounded
+`SABLE_M28_ENTITY_BATCH` output proves same-frame scoped ownership. Static
+status is `M28.5c IMPLEMENTED / VISUAL_RUNTIME_REQUIRED`; M28 mechanics remain
+PASS and no transform, culling, kinetic, or physics behavior changed. See
+`M28_BATCH_DRAW_PIPELINE_AUDIT.md`.
+
+### M28.5d Embeddium Destination and Entity-Phase A/B
+
+The M28.5c scoped-buffer architecture did not make the assembled sail visibly
+rotate, and removing ImmediatelyFast did not change the failure. Exact
+Embeddium 0.3.31 bytecode proves Catnip's per-vertex call writes through
+`SodiumBufferBuilder` into the same vanilla backing `BufferBuilder` that owns
+the final byte storage. The bounded probe now reads those actual bytes after
+the Sodium call and follows matching vertex signatures through Oculus segment
+finalization and `BufferUploader` draw.
+
+A property-gated `ENTITY_PHASE_BRIDGE` comparison dispatches contained Create
+entities with the real `LevelRenderer.renderEntity` pose stack and buffer source;
+the scoped `AFTER_ENTITIES` route remains the default until runtime selects a
+winner. Static status is `M28.5d IMPLEMENTED / VISUAL_RUNTIME_REQUIRED`.
+Mechanics remain PASS; no physics, kinetic, angle, pivot, culling, or ownership
+logic changed. See `M28_EMBEDDIUM_VERTEX_PIPELINE_AUDIT.md`.
+
+### M28.6 Framebuffer Visual Ownership
+
+Runtime now proves that moving finalized contraption vertices reach a
+same-frame GPU draw. M28.6 leaves that closed path unchanged and adds bounded
+draw-owner A/B diagnostics. The active Forge static renderer is immediate-mode:
+client block changes replace its bounded block-state snapshot and every layer
+is tessellated into a fresh buffer, with no retained uploaded static mesh.
+
+Diagnostic properties are `sable.m28.suppressDynamicContraption`,
+`sable.m28.forceCapturedStaticInvalidate`, `sable.m28.framebufferProbe`, and the
+retained `sable.m28.entityPhaseAB`. Full dynamic vertex screen bounds and
+after-draw/end-world framebuffer samples identify whether the stationary image
+comes from another draw, a later overwrite, or the Forge-stage context. Static
+status is `M28.6 IMPLEMENTED / VISUAL_RUNTIME_REQUIRED`; M28 mechanics remain
+PASS and the assembled visual remains FAIL/PARTIAL pending the manual A/B.
+
+### M28.7 Visual Render Owner Audit
+
+The M28.6 dynamic-suppression runtime proved that the stationary assembled sail
+is not Sable's known rotating Create draw. Static source state, static snapshot,
+and immediate static geometry were also absent. M28.7 instruments the global
+Minecraft entity dispatcher, exact Create contraption renderer, parent/inclusive
+entity collection views, transformed inclusive queries, and exact symmetric-sail
+baked-model entry points. The requested vanilla-pass suppression is diagnostic
+and does not change production rendering or simulation. Status is `M28.7
+IMPLEMENTED / VISUAL_RUNTIME_REQUIRED`; M28 mechanics remain PASS.
+
+### M28.8 Flywheel Contraption Visual Ownership Audit
+
+Runtime M28.7 exposed Create 6.0.8 constructing an independent Flywheel 1.0.5
+`ContraptionVisual` for each affected Sable-contained controlled contraption. M28.8
+instruments that visual's exact model construction, lifecycle, and per-frame embedding
+matrix, and adds a diagnostic-only admission veto scoped to Sable-contained
+`ControlledContraptionEntity` instances. Worker-thread diagnostics no longer query
+RenderSystem/OpenGL state. No production renderer, Create mechanic, Sable transform, or
+physics behavior changed. Status is `M28.8 IMPLEMENTED / VISUAL_RUNTIME_REQUIRED`; M28
+mechanics remain PASS.
+M28.9 visual identity/final-presentation diagnostics are implemented. Exact CPU target ranges can be
+tinted and verified pre-draw, projected into a labeled screen box, isolated from unrelated static
+symmetric sails, and followed through `RenderTarget` presentation. M28 mechanics remain PASS; visual
+status remains runtime-required.
+
+### M28.10 Normal-World Controlled Sail Flywheel Gate
+
+The supplied M28.9 runtime showed that the actual airplane sail is a normal-world
+Mechanical Bearing contraption, not the older Sable CPU targets. M28.10 selects
+normal-world captured symmetric sails by controller identity and observed motion,
+traces actual Flywheel embedding storage and composed CPU-arena bytes, compares
+against exact Create 6.0.8 transforms, and optionally overlays/suppresses only those
+diagnostic targets. CPU fallback is not assumed from visual admission rejection.
+No production mechanics, transforms, static rendering, culling or visualizer policy
+changed. M28 remains mechanics PASS / visual runtime required.
+
+### M28.11 Inner Mechanical Bearing Assembly Lifecycle
+
+The assembled-airplane runtime moved the unresolved boundary ahead of rendering:
+the Sable-contained Mechanical Bearing receives `-16 RPM`, but reports no moved
+`ControlledContraptionEntity` and its sail blocks remain static. M28.11 adds
+property-gated, read-only tracing at Create 6.0.8's exact speed scheduling,
+server tick gate, `BearingContraption` traversal/capture, entity construction,
+controller assignment, ignored `Level.addFreshEntity` result, registration,
+next-tick survival, removal, and disassembly boundaries. It records both raw plot
+and Sable-local coordinates for a paired normal-world/Sable-contained comparison.
+No production behavior or render path changed. Status remains `M28 mechanics
+partially proven / assembled-airplane inner-bearing lifecycle unresolved` pending
+the manual lifecycle run described in `M28_11_BEARING_ASSEMBLY_LIFECYCLE_AUDIT.md`.
+## M28.13 nested bearing payload preservation audit
+
+M28.13 adds diagnostic-only ownership tracing for the inner Mechanical Bearing payload across M22 outer
+assembly. Exact source audit shows that an assembled Create payload is air in the source level and owned by
+its `ControlledContraptionEntity`, while both upstream and target `SubLevelAssemblyHelper.moveOtherStuff()`
+only relocate hanging entities and do not migrate nested Create contraptions. Historical M13 created its
+bearing after the Sable sublevel already existed, so it did not cover this preservation boundary.
+
+`-Dsable.m28.traceNestedBearingPayload=true` emits `SABLE_M33_NESTED_PAYLOAD` and
+`SABLE_M33_OUTER_TRANSFER`. `-Dsable.m28.traceBearingHeadRender=true` independently traces whether Create's
+`BEARING_TOP` is owned by `BearingRenderer` or `BearingVisual`. No production topology, mechanics, glue, or
+render behavior changes in this pass. `implementationRevision=M28.13`; runtime A-G classification remains
+required.
+
+## M28.14 nested bearing ownership preservation
+
+M28.14 identifies the raw payload rejection as the outer traversal attachment gate: the unglued bearing-facing
+neighbor has no glue, no attachment-toward-face relation, and no mutual block stickiness, so it never enters the
+outer frontier. The production fix snapshots the exact nested `BearingContraption` before M22 transfer and
+reconstructs that exact block set at the remapped Mechanical Bearing in both assembly directions. Destination
+traversal is not rerun, payload/hull overlap aborts the transfer, every payload block must have exactly one nested
+owner, and registration is checked again on the next server tick. The Sable-contained Mechanical Bearing top uses
+Create's CPU `BEARING_TOP` renderer because Flywheel's position-only-at-construction instance remains in hidden plot
+space. Normal-world Flywheel behavior is unchanged. `implementationRevision=M28.14`; assembled-aircraft runtime is
+pending and M28 overall remains open.

@@ -56,7 +56,7 @@ public final class ClientSubLevelInteractionHelper {
                                             final Level level,
                                             @Nullable final HitResult currentHit) {
         final Minecraft minecraft = Minecraft.getInstance();
-        if (!minecraft.options.keyUse.isDown()) {
+        if (!minecraft.options.keyUse.isDown() || ClientSubLevelHoldUseGuard.isActive()) {
             return;
         }
         if (ClientSubLevelTargetHelper.resolveFromHit(level, currentHit) != null) {

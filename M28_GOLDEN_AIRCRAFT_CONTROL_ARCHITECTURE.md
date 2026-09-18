@@ -66,6 +66,17 @@ level departure, leaving the wheel at its last physical target with zero output
 once that target is reached. Held ownership is deliberately not restored from
 NBT after reload.
 
+The target hold guard matches frozen `QuietUse`/`BlockHoldInteraction`
+ownership: after the initial wheel click, repeated use and attack are consumed
+until release. The server wheel uses Create's real `TURN_ANGLE` sequence context
+and only advances its physical angle while its kinetic network reports nonzero
+speed.
+
+All three blueprint channels are disjoint. The pitch and yaw gearboxes have an
+air block between them, and the roll wheel is east of the main-wing sail row.
+This prevents Create's normal opposing-generator conflict path from destroying
+a wheel while preserving ordinary gearbox and shaft behavior.
+
 The controller association is derived from the wheel block inside a Sable and
 `Sable.HELPER.getTrackingSubLevel(player)`. No M25, M26, or M27 fixture session
 is imported by the production path.
@@ -85,4 +96,3 @@ There are no aircraft keybindings in the frozen control graph. There is no
 direct Sable torque, orientation, velocity, or force packet. No autopilot,
 stabilizer, cockpit HUD, fixture-spawn command, command throttle, or command
 surface control is added.
-

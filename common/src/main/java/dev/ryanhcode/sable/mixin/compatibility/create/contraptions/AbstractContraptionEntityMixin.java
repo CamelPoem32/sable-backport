@@ -5,6 +5,8 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.contraptions.Contraption;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28BearingAssemblyTrace;
+import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NormalWorldCceSync;
 import dev.ryanhcode.sable.api.block.BlockSubLevelLiftProvider;
 import dev.ryanhcode.sable.api.physics.mass.MassTracker;
 import dev.ryanhcode.sable.api.sublevel.KinematicContraption;
@@ -20,6 +22,8 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import net.createmod.catnip.math.VecHelper;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -75,6 +79,25 @@ public abstract class AbstractContraptionEntityMixin extends Entity implements K
     @Shadow
     public abstract Vec3 getAnchorVec();
 
+    @Inject(method = "writeSpawnData", at = @At("HEAD"))
+    private void sable$traceRestoredSpawnPacket(final FriendlyByteBuf buffer, final CallbackInfo ci) {
+        SableM28NormalWorldCceSync.beforeWriteSpawnData((AbstractContraptionEntity) (Object) this);
+    }
+
+    @Inject(method = "writeAdditional", at = @At("RETURN"))
+    private void sable$writeRestoredSpawnMarker(final CompoundTag tag, final boolean spawnPacket,
+                                                 final CallbackInfo ci) {
+        SableM28NormalWorldCceSync.writeMarker(
+                (AbstractContraptionEntity) (Object) this, tag, spawnPacket);
+    }
+
+    @Inject(method = "readAdditional", at = @At("RETURN"))
+    private void sable$readRestoredSpawnMarker(final CompoundTag tag, final boolean spawnPacket,
+                                                final CallbackInfo ci) {
+        SableM28NormalWorldCceSync.readMarker(
+                (AbstractContraptionEntity) (Object) this, tag, spawnPacket);
+    }
+
     @Redirect(method = "moveCollidedEntitiesOnDisassembly",
             at = @At(value = "INVOKE",
                     target = "Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;toLocalVector(Lnet/minecraft/world/phys/Vec3;F)Lnet/minecraft/world/phys/Vec3;"))
@@ -102,6 +125,7 @@ public abstract class AbstractContraptionEntityMixin extends Entity implements K
 
     @Inject(method = "contraptionInitialize", at = @At("HEAD"))
     private void sable$initializeKinematicContraption(final CallbackInfo ci) {
+        SableM28NormalWorldCceSync.firstTick((AbstractContraptionEntity) (Object) this);
         if (this.sable$initialized || !(this.level() instanceof final ServerLevel serverLevel)) {
             return;
         }
@@ -123,6 +147,7 @@ public abstract class AbstractContraptionEntityMixin extends Entity implements K
     @Inject(method = {"remove", "m_142687_"}, at = @At("HEAD"), remap = false)
     private void sable$removeKinematicContraption(final Entity.RemovalReason removalReason,
                                                   final CallbackInfo ci) {
+        SableM28BearingAssemblyTrace.entityRemoved((AbstractContraptionEntity) (Object) this, removalReason);
         if (this.sable$removedFromRuntime || !(this.level() instanceof final ServerLevel serverLevel)) {
             return;
         }

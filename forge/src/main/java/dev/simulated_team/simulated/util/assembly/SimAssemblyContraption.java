@@ -6,6 +6,7 @@ import com.simibubi.create.content.contraptions.AssemblyException;
 import com.simibubi.create.content.contraptions.chassis.AbstractChassisBlock;
 import com.simibubi.create.content.contraptions.chassis.ChassisBlockEntity;
 import com.simibubi.create.content.contraptions.gantry.GantryCarriageBlock;
+import com.simibubi.create.content.contraptions.bearing.BearingBlock;
 import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import com.simibubi.create.content.contraptions.piston.MechanicalPistonBlock;
 import com.simibubi.create.content.contraptions.piston.MechanicalPistonBlock.PistonState;
@@ -195,6 +196,8 @@ public class SimAssemblyContraption {
                     && SimAssemblyService.canStickTo(state, blockState)
                     && SimAssemblyService.canStickTo(blockState, state);
 
+            final boolean mutualStickinessBeforeRules = canStick;
+
             if (canStick) {
                 if (state.getPistonPushReaction() == PushReaction.PUSH_ONLY
                         || blockState.getPistonPushReaction() == PushReaction.PUSH_ONLY) {
@@ -213,6 +216,22 @@ public class SimAssemblyContraption {
                 this.recordFrontierAddition(offsetPos, blockState, pos, state,
                         faceHasGlue ? "GLUE" : blockAttachedTowardsFace ? "ATTACHED_TOWARDS_FACE" : "BLOCK_STICKINESS");
                 frontier.add(offsetPos);
+            }
+
+            if (state.getBlock() instanceof BearingBlock
+                    && offsetDirectionNullable == state.getValue(BearingBlock.FACING)) {
+                final boolean admitted = !wasVisited && (canStick || blockAttachedTowardsFace || faceHasGlue);
+                dev.simulated_team.simulated.Simulated.LOGGER.info(
+                        "SABLE_M34_OUTER_SELECTION_DECISION method=SimAssemblyContraption.moveBlock "
+                                + "bearingPos={} bearingFacing={} payloadPos={} payloadState={} "
+                                + "enteredNeighborEvaluation=true enteredTraversalCandidateSet={} "
+                                + "enteredFrontier={} wasVisited={} brittle={} "
+                                + "faceHasGlue={} attachedTowardsFace={} mutualStickinessBeforeRules={} "
+                                + "canStickAfterRules={} movementAllowed={} anchoring={} decision={}",
+                        pos, offsetDirectionNullable, offsetPos, blockState, admitted, admitted, wasVisited, brittle,
+                        faceHasGlue, blockAttachedTowardsFace, mutualStickinessBeforeRules, canStick,
+                        this.movementAllowed(blockState, world, offsetPos), this.isAnchoringBlockAt(offsetPos),
+                        admitted ? "ADMITTED_TO_FRONTIER" : "REJECTED_NO_ATTACHMENT_PATH");
             }
         }
 

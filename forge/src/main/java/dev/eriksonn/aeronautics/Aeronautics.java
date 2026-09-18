@@ -15,7 +15,7 @@ public final class Aeronautics {
     public static final String MOD_NAME = "Create Aeronautics";
     public static final String BASELINE_COMMIT = "9e60263fb5cb00033f14af655a7e72cf7aebb3e2";
     public static final String BASELINE_LABEL = "Aeronautics 1.3.0 / mc1.21.1-neoforge / Sable 2.0.0";
-    public static final String IMPLEMENTATION_REVISION = "M28";
+    public static final String IMPLEMENTATION_REVISION = "M28.11";
     public static final Logger LOGGER = LogUtils.getLogger();
 
     private static boolean initialized;

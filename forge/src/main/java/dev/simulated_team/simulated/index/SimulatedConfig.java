@@ -13,6 +13,7 @@ public final class SimulatedConfig {
     public static final ForgeConfigSpec.BooleanValue ENABLE_M23_SPRING_CONSTRAINTS;
     public static final ForgeConfigSpec.BooleanValue ENABLE_M24_SIMULATED_SYSTEMS;
     public static final ForgeConfigSpec.DoubleValue M24_PAIRING_RANGE;
+    public static final ForgeConfigSpec.DoubleValue STEERING_WHEEL_STRESS_CAPACITY;
     public static final ForgeConfigSpec CLIENT_SPEC;
     public static final ForgeConfigSpec.BooleanValue EXPECT_STATIC_CLIENT_BOOTSTRAP;
 
@@ -43,6 +44,14 @@ public final class SimulatedConfig {
                 .define("enableRemainingPhysicalSystems", true);
         M24_PAIRING_RANGE = common.comment("Maximum visible range for automatic M24 test-fixture endpoint pairing.")
                 .defineInRange("pairingRange", 12.0D, 1.0D, 64.0D);
+        common.pop();
+        common.push("kinetics");
+        common.push("stressValues");
+        common.push("capacity");
+        STEERING_WHEEL_STRESS_CAPACITY = common.comment("Stress capacity supplied per RPM by a Steering Wheel.")
+                .defineInRange("steering_wheel", 16.0D, 0.0D, Double.MAX_VALUE);
+        common.pop();
+        common.pop();
         common.pop();
         COMMON_SPEC = common.build();
 

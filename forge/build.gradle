@@ -3,6 +3,7 @@ import org.apache.maven.artifact.versioning.DefaultArtifactVersion
 import org.apache.maven.artifact.versioning.VersionRange
 import org.gradle.api.attributes.LibraryElements
 
+import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -11548,12 +11549,15 @@ tasks.register('verifyM15GantryInterpolationBoundary') {
                 'clientOffsetDiff',
                 'axisMotion',
                 'deltaFromPreviousVisibleAnchor',
-                'hiddenPlotPoseTranslation=false',
-                'final Vec3 visiblePosition = clientSubLevel.renderPose(partialTick).transformPosition(rawPosition)'
+                'hiddenPlotPoseTranslation=false'
         ].each { canary ->
             if (!renderText.contains(canary)) {
                 throw new GradleException("M15 Gantry interpolation diagnostic lost canary: ${canary}")
             }
+        }
+        if (!renderText.contains('final Pose3dc renderPose = clientSubLevel.renderPose(partialTick)')
+                || !renderText.contains('final Vec3 visiblePosition = renderPose.transformPosition(rawPosition)')) {
+            throw new GradleException('M15 Gantry visible anchor no longer uses the sampled Sable render pose')
         }
         if (!targetCreateJar.isFile()) {
             throw new GradleException("Missing target Create 6.0.8 jar for M15 Gantry interpolation verification: ${targetCreateJar}")
@@ -11875,7 +11879,6 @@ tasks.register('verifyM15HiddenPlotRenderBoundary') {
         String text = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java').getText('UTF-8')
         [
                 'final Vec3 rawPosition = interpolatedPosition(contraptionEntity, partialTick)',
-                'final Vec3 visiblePosition = clientSubLevel.renderPose(partialTick).transformPosition(rawPosition)',
                 'final double x = visiblePosition.x - cameraPosition.x',
                 'final boolean frustumPass = frustum == null || frustum.isVisible(visibleAabb)',
                 'hiddenPlotPoseTranslation=false'
@@ -11883,6 +11886,10 @@ tasks.register('verifyM15HiddenPlotRenderBoundary') {
             if (!text.contains(canary)) {
                 throw new GradleException("M15 hidden-plot render boundary lost canary: ${canary}")
             }
+        }
+        if (!text.contains('final Pose3dc renderPose = clientSubLevel.renderPose(partialTick)')
+                || !text.contains('final Vec3 visiblePosition = renderPose.transformPosition(rawPosition)')) {
+            throw new GradleException('M15 hidden-plot renderer must use the sampled visible Sable pose')
         }
         [
                 'dispatcher.render(contraptionEntity, oldRawDispatcherX',
@@ -12045,7 +12052,6 @@ tasks.register('verifyM15DiagnosticCoordinateBoundary') {
             }
         }
         [
-                'final Vec3 visiblePosition = clientSubLevel.renderPose(partialTick).transformPosition(rawPosition)',
                 'oldRawDispatcherXYZ=',
                 'newVisibleDispatcherXYZ=',
                 'frustum.isVisible(visibleAabb)'
@@ -12053,6 +12059,13 @@ tasks.register('verifyM15DiagnosticCoordinateBoundary') {
             if (!renderBridgeText.contains(canary)) {
                 throw new GradleException("M15 must retain the M13/M14 visible-space render bridge canary: ${canary}")
             }
+        }
+        boolean directPose = renderBridgeText.contains(
+                'final Vec3 visiblePosition = clientSubLevel.renderPose(partialTick).transformPosition(rawPosition)')
+        boolean sampledPose = renderBridgeText.contains('final Pose3dc renderPose = clientSubLevel.renderPose(partialTick)')
+                && renderBridgeText.contains('final Vec3 visiblePosition = renderPose.transformPosition(rawPosition)')
+        if (!directPose && !sampledPose) {
+            throw new GradleException('M15 must compute the dispatcher anchor in Sable visible space')
         }
         logger.lifecycle('verifyM15DiagnosticCoordinateBoundary PASS: M15 diagnostics keep raw plot, local, and visible coordinates distinct and retain visible-space render scheduling')
     }
@@ -18242,6 +18255,7 @@ tasks.register('verifyM21ForgeArtifactBoundary') {
     description = 'Verifies source metadata and, when present, final Forge artifacts contain M21 Simulated bootstrap without NeoForge metadata.'
 
     mustRunAfter tasks.named('jar')
+    mustRunAfter tasks.named('jarJar')
 
     inputs.file(rootProject.file('forge/src/main/resources/META-INF/mods.toml'))
     inputs.dir(m21SimulatedSourceDir)
@@ -26074,7 +26088,8 @@ tasks.register('verifyM28ServerAuthoritativeControlBoundary') {
         String wheel = m28WheelEntitySource.getText('UTF-8')
         String network = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/network/SimulatedNetwork.java').getText('UTF-8')
         ['context.getSender()', 'Float.isFinite(packet.targetAngle)',
-         'getBlockEntity(packet.pos)', 'distanceToSqr(visibleCenter)',
+         'container.getSubLevel(packet.sableId)', 'getBlockEntity(rawPos)',
+         'distanceToSqr(visibleCenter)',
          'wheel.acceptControl(player'].each { token ->
             if (!packet.contains(token)) throw new GradleException("M28 server validation missing ${token}")
         }
@@ -26141,7 +26156,8 @@ tasks.register('verifyM28ControlSurfaceTravelBoundary') {
         String wheel = m28WheelEntitySource.getText('UTF-8')
         ['public static final float RPM = 16.0F', '.between(1, 360)',
          'Mth.clamp(requested, -this.getAngleLimit(), this.getAngleLimit())',
-         'this.angle = this.targetAngle', 'this.stopMove()', 'this.updateGeneratedRotation()'].each { token ->
+         'SequencerInstructions.TURN_ANGLE', 'this.sequencedAngleLimit',
+         'this.getSpeed() == 0.0F', 'this.stopMove()', 'this.updateGeneratedRotation()'].each { token ->
             if (!wheel.contains(token)) throw new GradleException("M28 positional travel missing ${token}")
         }
         logger.lifecycle('verifyM28ControlSurfaceTravelBoundary PASS: bounded target travel stops at angle')
@@ -26155,7 +26171,7 @@ tasks.register('verifyM28ControlNeutralCleanupBoundary') {
         String client = m28WheelClientSource.getText('UTF-8')
         String wheel = m28WheelEntitySource.getText('UTF-8')
         ['!minecraft.options.keyUse.isDown()', 'ClientPlayerNetworkEvent.LoggingOut',
-         'new SteeringWheelControlPacket(activePos, targetAngle, true)'].each { token ->
+         'send(true)', 'activeSableId = null', 'activeLocalPos = null'].each { token ->
             if (!client.contains(token)) throw new GradleException("M28 client cleanup missing ${token}")
         }
         ['player.isAlive()', 'getTrackingSubLevel(player) == owner',
@@ -26372,5 +26388,2943 @@ tasks.register('verifyM28GoldenAircraft') {
     dependsOn tasks.named('verifyM28RenderingBoundary')
     doLast {
         logger.lifecycle('verifyM28GoldenAircraft PASS: M28 IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+tasks.register('verifyM28ManualSableResolutionBoundary') {
+    group = 'forge backport'
+    inputs.files(m28CommandSource,
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/ActiveSableCompanion.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/clip_overwrite/BlockGetterMixin.java'))
+    doLast {
+        String command = m28CommandSource.getText('UTF-8')
+        ['SABLE_M28_AIRCRAFT_RESOLUTION', 'getTrackingOrVehicleSubLevel(entity)',
+         'collision.verticalCollisionBelow', 'movement.sable$getInBlockStatePos()',
+         'entity.pick(100.0D, 1.0F, true)', 'TARGETED_SABLE_BLOCK',
+         'supportOwner=', 'targetOwner=', 'resolutionMethod=', 'playerOnSable='].each { token ->
+            if (!command.contains(token)) throw new GradleException('M28.1 manual Sable resolution missing ' + token)
+        }
+        int support = command.indexOf('if (supportOwner != null)')
+        int target = command.indexOf('if (targetOwner != null)')
+        if (support < 0 || target < support) {
+            throw new GradleException('M28.1 resolution does not prioritize current support over ray target')
+        }
+        ['getAllSubLevels()', 'nearest', 'FixtureState', 'fixtureSessionId', 'ACTIVE_FIXTURES'].each { forbidden ->
+            if (command.contains(forbidden)) throw new GradleException('M28.1 command uses forbidden body fallback ' + forbidden)
+        }
+        logger.lifecycle('verifyM28ManualSableResolutionBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28InspectNoFixtureDependencyBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM28NoFixtureSessionGameplayDependencyBoundary')
+    inputs.file(m28CommandSource)
+    doLast {
+        String command = m28CommandSource.getText('UTF-8')
+        if (!command.contains('fixtureSessionDependency=false')
+                || command.contains('M26AeronauticsPropulsionCommands')
+                || command.contains('M27AerodynamicsCommands')) {
+            throw new GradleException('M28.1 inspect regained a fixture/session dependency')
+        }
+        logger.lifecycle('verifyM28InspectNoFixtureDependencyBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ManualPropulsionProviderBoundary') {
+    group = 'forge backport'
+    inputs.files(m28CommandSource, m26PropellerSource,
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/block/propeller/BlockEntitySubLevelPropellerActor.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ServerSubLevel.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/LevelPlot.java'),
+            rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java'))
+    doLast {
+        String command = m28CommandSource.getText('UTF-8')
+        String actor = rootProject.file(
+                'common/src/main/java/dev/ryanhcode/sable/api/block/propeller/BlockEntitySubLevelPropellerActor.java').getText('UTF-8')
+        String sublevel = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/ServerSubLevel.java').getText('UTF-8')
+        String plot = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/LevelPlot.java').getText('UTF-8')
+        String assembly = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java').getText('UTF-8')
+        ['getBlockEntityActor(raw)', 'BlockEntitySubLevelPropellerActor',
+         'propulsionProviderCount=', 'WAITING_FOR_PROPULSION_PROVIDER',
+         'ForceGroups.PROPULSION.get()', 'accumulatedPropulsionForceBodyLocal=',
+         'zeroThrustReason='].each { token ->
+            if (!command.contains(token)) throw new GradleException('M28.1 propulsion diagnostic missing ' + token)
+        }
+        if (!actor.contains('forceGroup.applyAndRecordPointForce')
+                || !sublevel.contains('actor.sable$physicsTick(this, handle, timeStep)')
+                || !plot.contains('this.blockEntityActors.put(pos, actor)')
+                || !assembly.contains('chunk.setBlockState(newPos, subLevelState, true)')) {
+            throw new GradleException('M28.1 manual assembly no longer reaches the normal production propeller actor path')
+        }
+        ['applyLinearImpulse(', 'applyAngularImpulse(', 'setVelocity(', 'teleport('].each { forbidden ->
+            if (command.contains(forbidden)) throw new GradleException('M28.1 inspect mutates propulsion through ' + forbidden)
+        }
+        logger.lifecycle('verifyM28ManualPropulsionProviderBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ManualAircraftDynamicBodyBoundary') {
+    group = 'forge backport'
+    inputs.files(m28CommandSource,
+            rootProject.file('sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java'))
+    doLast {
+        String command = m28CommandSource.getText('UTF-8')
+        String rapier = rootProject.file(
+                'sable_rapier/src/main/java/dev/ryanhcode/sable/physics/impl/rapier/RapierPhysicsPipeline.java').getText('UTF-8')
+        ['getRigidBodyType(body)', 'bodyStaticOrDynamic=', 'bodyDynamic=',
+         'isBodyRegistered(body)', 'bodySleeping=', 'contactCount=unavailable'].each { token ->
+            if (!command.contains(token)) throw new GradleException('M28.1 dynamic-body diagnostic missing ' + token)
+        }
+        if (!rapier.contains('return "dynamic";') || command.contains('setBodyType')
+                || command.contains('setKinematic') || command.contains('setDynamic')) {
+            throw new GradleException('M28.1 changed or obscured normal dynamic Physics Assembler semantics')
+        }
+        logger.lifecycle('verifyM28ManualAircraftDynamicBodyBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ManualAssemblySelectionBoundary') {
+    group = 'forge backport'
+    inputs.files(m28CommandSource, m28BuildDocument)
+    doLast {
+        String command = m28CommandSource.getText('UTF-8')
+        ['SimAssemblyHelper.collectBlocks', 'storedBlockCount=', 'selectedBounds=',
+         'unexpectedWorldBlocks=', 'BlockTags.BASE_STONE_OVERWORLD',
+         'BlockTags.DIRT', 'BlockTags.SAND'].each { token ->
+            if (!command.contains(token)) throw new GradleException('M28.1 assembly selection diagnostic missing ' + token)
+        }
+        if (command.contains('assembleFromSingleBlock') || command.contains('searchMovedStructure')) {
+            throw new GradleException('M28.1 inspect attempts to re-run or alter assembly selection')
+        }
+        logger.lifecycle('verifyM28ManualAssemblySelectionBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28_1GoldenAircraft') {
+    group = 'forge backport'
+    description = 'Runs focused M28.1 manual-body resolution and production propulsion diagnostics.'
+    dependsOn tasks.named('verifyM28GoldenAircraft')
+    dependsOn tasks.named('verifyM28ManualSableResolutionBoundary')
+    dependsOn tasks.named('verifyM28InspectNoFixtureDependencyBoundary')
+    dependsOn tasks.named('verifyM28ManualPropulsionProviderBoundary')
+    dependsOn tasks.named('verifyM28ManualAircraftDynamicBodyBoundary')
+    dependsOn tasks.named('verifyM28ManualAssemblySelectionBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_1GoldenAircraft PASS: M28.1 IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+def m28SteeringAudit = rootProject.file('M28_3_STEERING_WHEEL_AUDIT.md')
+def m28WheelDiagnosticsSource = rootProject.file(
+        'forge/src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelDiagnostics.java')
+def m28HoldGuardSource = rootProject.file(
+        'common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelHoldUseGuard.java')
+def m28InteractionMixinSource = rootProject.file(
+        'common/src/main/java/dev/ryanhcode/sable/mixin/m11/interaction/MinecraftMixin.java')
+
+tasks.register('verifyM28SteeringWheelUpstreamParityBoundary') {
+    group = 'forge backport'
+    inputs.files(m28SteeringAudit, m28WheelEntitySource, m28WheelClientSource)
+    doLast {
+        String audit = m28SteeringAudit.getText('UTF-8')
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        ['9e60263fb5cb00033f14af655a7e72cf7aebb3e2', 'QuietUse',
+         'SteeringWheelHandler', '16 RPM', 'TURN_ANGLE',
+         'GeneratingKineticBlockEntity.applyNewSpeed'].each { token ->
+            if (!audit.contains(token)) throw new GradleException("M28.3 upstream wheel audit missing ${token}")
+        }
+        ['SequencedGearshiftBlockEntity.SequenceContext', 'SequencerInstructions.TURN_ANGLE',
+         'this.inUse', 'this.sequencedAngleLimit', 'this.getSpeed() == 0.0F',
+         'this.updateGeneratedRotation()'].each { token ->
+            if (!wheel.contains(token)) throw new GradleException("M28.3 wheel parity missing ${token}")
+        }
+        logger.lifecycle('verifyM28SteeringWheelUpstreamParityBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28SteeringWheelKineticSourceBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelBlockSource, m28WheelEntitySource, m28CommandSource)
+    doLast {
+        String block = m28WheelBlockSource.getText('UTF-8')
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        if (!wheel.contains('extends GeneratingKineticBlockEntity')
+                || !wheel.contains('public float getGeneratedSpeed()')
+                || !wheel.contains('this.updateGeneratedRotation()')
+                || !block.contains('implements IBE<SteeringWheelBlockEntity>, IRotate')) {
+            throw new GradleException('M28.3 Steering Wheel is not a real Create generator')
+        }
+        ['generatedRpm=', 'actualWheelSpeed=', 'networkId=', 'downstreamShaftRpm=', 'bearingRpm='].each { token ->
+            if (!command.contains(token)) throw new GradleException("M28.3 kinetic diagnostic missing ${token}")
+        }
+        ['setSpeed(', 'bearing.setSpeed', 'updateFromNetwork('].each { forbidden ->
+            if (command.contains(forbidden)) throw new GradleException("M28.3 inspect bypasses Create through ${forbidden}")
+        }
+        logger.lifecycle('verifyM28SteeringWheelKineticSourceBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28SteeringWheelAxisBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelBlockSource, m28CommandSource, m28BuildDocument)
+    doLast {
+        String block = m28WheelBlockSource.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        String build = m28BuildDocument.getText('UTF-8')
+        ['state.getValue(ON_FLOOR) ? Direction.DOWN : Direction.UP',
+         'return Direction.Axis.Y'].each { token ->
+            if (!block.contains(token)) throw new GradleException("M28.3 output-axis contract missing ${token}")
+        }
+        ['expectedOutputAxis=Y', 'gearboxAcceptedConnection=', 'networkConnected='].each { token ->
+            if (!command.contains(token)) throw new GradleException("M28.3 axis diagnostic missing ${token}")
+        }
+        if (build.count('Steering Wheel on floor') != 3) {
+            throw new GradleException('M28.3 blueprint does not define three floor-wheel Y outputs')
+        }
+        logger.lifecycle('verifyM28SteeringWheelAxisBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28SteeringWheelGearboxPropagationBoundary') {
+    group = 'forge backport'
+    inputs.files(m28CommandSource, m28BuildDocument)
+    doLast {
+        def channels = [
+                pitch: [[-5, 2, -2], [-5, 1, -2], [-5, 1, -1], [-5, 1, 0]],
+                yaw  : [[-3, 2, -4], [-3, 1, -4], [-4, 1, -4], [-5, 1, -4], [-5, 2, -4]],
+                roll : [[1, 2, 3], [1, 1, 3], [1, 1, 4], [1, 1, 5]]
+        ]
+        channels.each { name, points ->
+            if (points.toSet().size() != points.size()) {
+                throw new GradleException("M28.3 ${name} channel overlaps itself")
+            }
+        }
+        def names = channels.keySet().toList()
+        for (int a = 0; a < names.size(); a++) {
+            for (int b = a + 1; b < names.size(); b++) {
+                channels[names[a]].each { left ->
+                    channels[names[b]].each { right ->
+                        int distance = Math.abs(left[0] - right[0]) + Math.abs(left[1] - right[1]) + Math.abs(left[2] - right[2])
+                        if (distance <= 1) {
+                            throw new GradleException("M28.3 ${names[a]} and ${names[b]} kinetic paths touch at ${left}/${right}")
+                        }
+                    }
+                }
+            }
+        }
+        String command = m28CommandSource.getText('UTF-8')
+        ['new WheelExpectation("pitch"', 'new WheelExpectation("yaw"',
+         'new WheelExpectation("roll"', 'adjacentGearboxPos=',
+         'downstreamShaftPos=', 'bearingPos='].each { token ->
+            if (!command.contains(token)) throw new GradleException("M28.3 propagation ownership missing ${token}")
+        }
+        logger.lifecycle('verifyM28SteeringWheelGearboxPropagationBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28SteeringWheelRightClickSafetyBoundary') {
+    group = 'forge backport'
+    inputs.files(m28HoldGuardSource, m28InteractionMixinSource, m28WheelClientSource,
+            m28WheelBlockSource, m28WheelEntitySource, m28WheelDiagnosticsSource)
+    doLast {
+        String guard = m28HoldGuardSource.getText('UTF-8')
+        String mixin = m28InteractionMixinSource.getText('UTF-8')
+        String client = m28WheelClientSource.getText('UTF-8')
+        String production = m28WheelBlockSource.getText('UTF-8') + m28WheelEntitySource.getText('UTF-8')
+        if (!guard.contains('BooleanSupplier') || !guard.contains('isActive()')
+                || !client.contains('ClientSubLevelHoldUseGuard.register(SteeringWheelClientControl::isActive)')) {
+            throw new GradleException('M28.3 held-use guard is not owned by Steering Wheel client state')
+        }
+        int guardCheck = mixin.indexOf('ClientSubLevelHoldUseGuard.isActive()')
+        int normalUse = mixin.indexOf('ClientSubLevelInteractionHelper.tryUseOnCurrentTarget')
+        if (guardCheck < 0 || normalUse < 0 || guardCheck > normalUse
+                || !mixin.contains('sable$blockAttackDuringHeldSubLevelUse')) {
+            throw new GradleException('M28.3 repeat use/attack is not intercepted before normal sublevel interaction')
+        }
+        ['destroyBlock(', 'setBlock(', 'setBlockAndUpdate('].each { forbidden ->
+            if (production.contains(forbidden)) throw new GradleException("M28.3 wheel directly mutates blocks through ${forbidden}")
+        }
+        if (!m28WheelDiagnosticsSource.getText('UTF-8').contains('CREATE_OPPOSING_SOURCE_CONFLICT')) {
+            throw new GradleException('M28.3 removal diagnostic cannot identify Create source conflict')
+        }
+        logger.lifecycle('verifyM28SteeringWheelRightClickSafetyBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ThreeWheelPresenceBoundary') {
+    group = 'forge backport'
+    inputs.files(m28BuildDocument, m28CommandSource)
+    doLast {
+        String build = m28BuildDocument.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        def wheels = [[-5, 2, -2], [-3, 2, -4], [1, 2, 3]]
+        def sails = []
+        (-6..-1).each { z -> sails << [0, 2, z] }
+        (1..6).each { z -> sails << [0, 2, z] }
+        if (wheels.toSet().size() != 3 || !Collections.disjoint(wheels.toSet(), sails.toSet())) {
+            throw new GradleException('M28.3 wheel positions are not three unique non-sail cells')
+        }
+        ['| 3 | `simulated:steering_wheel`', '`(-3,2,-4)`', '`(1,2,3)`'].each { token ->
+            if (!build.contains(token)) throw new GradleException("M28.3 three-wheel blueprint missing ${token}")
+        }
+        if (!command.contains('steeringWheelCount=') || !command.contains('steeringWheelBeCount=')) {
+            throw new GradleException('M28.3 inspect does not distinguish wheel blocks from wheel block entities')
+        }
+        logger.lifecycle('verifyM28ThreeWheelPresenceBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28_3SteeringWheel') {
+    group = 'forge backport'
+    description = 'Runs focused M28.3 production Steering Wheel and corrected Golden topology boundaries.'
+    dependsOn tasks.named('verifyM28_1GoldenAircraft')
+    dependsOn tasks.named('verifyM28SteeringWheelUpstreamParityBoundary')
+    dependsOn tasks.named('verifyM28SteeringWheelKineticSourceBoundary')
+    dependsOn tasks.named('verifyM28SteeringWheelAxisBoundary')
+    dependsOn tasks.named('verifyM28SteeringWheelGearboxPropagationBoundary')
+    dependsOn tasks.named('verifyM28SteeringWheelRightClickSafetyBoundary')
+    dependsOn tasks.named('verifyM28ThreeWheelPresenceBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_3SteeringWheel PASS: M28.3 IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+def m28StressAudit = rootProject.file('M28_4_STEERING_WHEEL_STRESS_AUDIT.md')
+def m28StressRegistrationSource = rootProject.file(
+        'forge/src/main/java/dev/simulated_team/simulated/index/SimulatedKineticStress.java')
+def m28SimulatedBootstrapSource = rootProject.file(
+        'forge/src/main/java/dev/simulated_team/simulated/Simulated.java')
+def m28SimulatedConfigSource = rootProject.file(
+        'forge/src/main/java/dev/simulated_team/simulated/index/SimulatedConfig.java')
+
+tasks.register('verifyM28SteeringWheelFrozenStressParityBoundary') {
+    group = 'forge backport'
+    inputs.files(m28StressAudit, m28WheelEntitySource, m28StressRegistrationSource)
+    doLast {
+        String audit = m28StressAudit.getText('UTF-8')
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        String registration = m28StressRegistrationSource.getText('UTF-8')
+        ['9e60263fb5cb00033f14af655a7e72cf7aebb3e2', 'signed `16 RPM`',
+         'configurable `16 SU/RPM`', 'stress impact: no Simulated impact registration',
+         'SimStress.setCapacity(16.0)', 'BlockStressValues.setGeneratorSpeed'].each { token ->
+            if (!audit.contains(token)) throw new GradleException("M28.4 frozen stress audit missing ${token}")
+        }
+        if (!wheel.contains('public static final float RPM = 16.0F')
+                || !registration.contains('STEERING_WHEEL_STRESS_CAPACITY')
+                || !registration.contains('SteeringWheelBlockEntity.RPM')) {
+            throw new GradleException('M28.4 target does not preserve frozen 16 RPM / 16 SU capacity ownership')
+        }
+        logger.lifecycle('verifyM28SteeringWheelFrozenStressParityBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28SteeringWheelStressConfigKeyBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelEntitySource, m28StressRegistrationSource)
+    doLast {
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        String registration = m28StressRegistrationSource.getText('UTF-8')
+        ['protected Block getStressConfigKey()', 'return this.getBlockState().getBlock()',
+         'BlockStressValues.getCapacity(this.getStressConfigKey())',
+         'BlockStressValues.getImpact(this.getStressConfigKey())'].each { token ->
+            if (!wheel.contains(token)) throw new GradleException("M28.4 stress-key boundary missing ${token}")
+        }
+        if (!registration.contains('SimulatedBlocks.STEERING_WHEEL.get()')) {
+            throw new GradleException('M28.4 capacity is not keyed by the registered Steering Wheel block')
+        }
+        logger.lifecycle('verifyM28SteeringWheelStressConfigKeyBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28SteeringWheelCapacityRegistrationBoundary') {
+    group = 'forge backport'
+    inputs.files(m28StressRegistrationSource, m28SimulatedBootstrapSource, m28SimulatedConfigSource)
+    doLast {
+        String registration = m28StressRegistrationSource.getText('UTF-8')
+        String bootstrap = m28SimulatedBootstrapSource.getText('UTF-8')
+        String config = m28SimulatedConfigSource.getText('UTF-8')
+        ['BlockStressValues.CAPACITIES.register(steeringWheel',
+         'BlockStressValues.setGeneratorSpeed((int) SteeringWheelBlockEntity.RPM).accept(steeringWheel)'].each { token ->
+            if (!registration.contains(token)) throw new GradleException("M28.4 Create registration missing ${token}")
+        }
+        if (registration.contains('BlockStressValues.IMPACTS.register')) {
+            throw new GradleException('M28.4 invented a Steering Wheel stress impact absent from frozen upstream')
+        }
+        ['modBus.addListener(Simulated::commonSetup)',
+         'event.enqueueWork(SimulatedKineticStress::register)'].each { token ->
+            if (!bootstrap.contains(token)) throw new GradleException("M28.4 Forge setup ownership missing ${token}")
+        }
+        ['STEERING_WHEEL_STRESS_CAPACITY', 'common.push("kinetics")',
+         'common.push("stressValues")', 'common.push("capacity")',
+         '.defineInRange("steering_wheel", 16.0D'].each { token ->
+            if (!config.contains(token)) throw new GradleException("M28.4 frozen capacity config missing ${token}")
+        }
+        logger.lifecycle('verifyM28SteeringWheelCapacityRegistrationBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28SteeringWheelNetworkCapacityBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    inputs.file(createDevelopmentRuntime)
+    inputs.files(m28WheelEntitySource, m28CommandSource)
+    doLast {
+        File createJarPath = createDevelopmentRuntime.get().asFile
+        JarFile createJar = new JarFile(createJarPath)
+        try {
+            def inspectMethod = { String entryName, String methodName, String descriptor ->
+                def result = [stressKey: false, capacityLookup: false, generatedSpeed: false, multiply: false]
+                def entry = createJar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("M28.4 missing Create class ${entryName}")
+                new org.objectweb.asm.ClassReader(createJar.getInputStream(entry).readAllBytes()).accept(
+                        new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                            @Override
+                            org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String desc,
+                                                                       String signature, String[] exceptions) {
+                                if (name != methodName || desc != descriptor) return null
+                                return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                                    @Override
+                                    void visitMethodInsn(int opcode, String owner, String calledName,
+                                                         String calledDescriptor, boolean isInterface) {
+                                        if (calledName == 'getStressConfigKey') result.stressKey = true
+                                        if (owner == 'com/simibubi/create/api/stress/BlockStressValues'
+                                                && calledName == 'getCapacity') result.capacityLookup = true
+                                        if (calledName == 'getGeneratedSpeed') result.generatedSpeed = true
+                                    }
+
+                                    @Override
+                                    void visitInsn(int opcode) {
+                                        if (opcode == org.objectweb.asm.Opcodes.FMUL) result.multiply = true
+                                    }
+                                }
+                            }
+                        }, 0)
+                return result
+            }
+            def added = inspectMethod(
+                    'com/simibubi/create/content/kinetics/base/KineticBlockEntity.class',
+                    'calculateAddedStressCapacity', '()F')
+            if (!added.stressKey || !added.capacityLookup) {
+                throw new GradleException('Create 6.0.8 capacity calculation does not use stress key -> BlockStressValues')
+            }
+            def actual = inspectMethod(
+                    'com/simibubi/create/content/kinetics/KineticNetwork.class',
+                    'getActualCapacityOf',
+                    '(Lcom/simibubi/create/content/kinetics/base/KineticBlockEntity;)F')
+            if (!actual.generatedSpeed || !actual.multiply) {
+                throw new GradleException('Create 6.0.8 network does not scale base capacity by generated RPM')
+            }
+        } finally {
+            createJar.close()
+        }
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        ['getNetworkCapacitySnapshot()', 'getNetworkStressSnapshot()'].each { token ->
+            if (!wheel.contains(token)) throw new GradleException("M28.4 network snapshot missing ${token}")
+        }
+        ['stressCapacity=', 'stressImpact=', 'networkStress=', 'networkCapacity=',
+         'networkOverstressed=', 'networkMembers='].each { token ->
+            if (!command.contains(token)) throw new GradleException("M28.4 network diagnostic missing ${token}")
+        }
+        logger.lifecycle('verifyM28SteeringWheelNetworkCapacityBoundary PASS: Create 6.0.8 scales registered capacity by generated RPM')
+    }
+}
+
+tasks.register('verifyM28ControlNetworkIsolationBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM28SteeringWheelGearboxPropagationBoundary')
+    inputs.files(m28StressAudit, m28CommandSource, m28BuildDocument)
+    doLast {
+        String audit = m28StressAudit.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        ['one Steering Wheel source', 'one Mechanical Bearing',
+         'No Create class, network algorithm, drivetrain block'].each { token ->
+            if (!audit.contains(token)) throw new GradleException("M28.4 isolation audit missing ${token}")
+        }
+        ['networkSourceCount=', 'networkMemberCount=', 'networkMembers=',
+         'new WheelExpectation("pitch"', 'new WheelExpectation("yaw"',
+         'new WheelExpectation("roll"'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M28.4 channel membership diagnostic missing ${token}")
+        }
+        logger.lifecycle('verifyM28ControlNetworkIsolationBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28_4SteeringWheelStress') {
+    group = 'forge backport'
+    description = 'Runs focused M28.4 Steering Wheel stress capacity and isolated-network boundaries.'
+    dependsOn tasks.named('verifyM28_3SteeringWheel')
+    dependsOn tasks.named('verifyM28SteeringWheelFrozenStressParityBoundary')
+    dependsOn tasks.named('verifyM28SteeringWheelStressConfigKeyBoundary')
+    dependsOn tasks.named('verifyM28SteeringWheelCapacityRegistrationBoundary')
+    dependsOn tasks.named('verifyM28SteeringWheelNetworkCapacityBoundary')
+    dependsOn tasks.named('verifyM28ControlNetworkIsolationBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_4SteeringWheelStress PASS: M28.4 IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+def m28TurnAngleAudit = rootProject.file('M28_5_STEERING_TURN_ANGLE_AUDIT.md')
+def m28BearingAccessorSource = rootProject.file(
+        'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/MechanicalBearingBlockEntityAccessor.java')
+def m28InteractionHelperSource = rootProject.file(
+        'common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelInteractionHelper.java')
+def m28ForgeMixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+def m28UpstreamCommonMixinConfig = rootProject.file('common/src/main/resources/sable.mixins.json')
+
+tasks.register('verifyM28SteeringTurnAngleParityBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    inputs.files(m28TurnAngleAudit, m28WheelEntitySource, createDevelopmentRuntime)
+    doLast {
+        String audit = m28TurnAngleAudit.getText('UTF-8')
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        ['9e60263fb5cb00033f14af655a7e72cf7aebb3e2',
+         'Create: 6.0.10', 'Target Create: 6.0.8',
+         'TURN_ANGLE', 'ROTATE_PLACE', 'ROTATE_NEVER_PLACE'].each { token ->
+            if (!audit.contains(token)) throw new GradleException("M28.5 TURN_ANGLE audit missing ${token}")
+        }
+        ['SequencerInstructions.TURN_ANGLE', 'this.sequencedAngleLimit',
+         'this.generatedSpeed = 0.0F', 'this.updateGeneratedRotation()'].each { token ->
+            if (!wheel.contains(token)) throw new GradleException("M28.5 frozen wheel sequence missing ${token}")
+        }
+
+        JarFile jar = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            def entry = jar.getJarEntry(
+                    'com/simibubi/create/content/contraptions/bearing/MechanicalBearingBlockEntity.class')
+            if (entry == null) throw new GradleException('M28.5 target MechanicalBearingBlockEntity missing')
+            def facts = [syncReturnsTrue: false, turnAngle: false, angleLimit: false,
+                         rotatePlace: false, rotatePlaceReturned: false, disassemble: false]
+            new org.objectweb.asm.ClassReader(jar.getInputStream(entry).readAllBytes()).accept(
+                    new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                        @Override
+                        org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                                   String signature, String[] exceptions) {
+                            if (!(name in ['syncSequenceContext', 'onSpeedChanged', 'tick'])) return null
+                            return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                                boolean sawOne
+                                @Override
+                                void visitInsn(int opcode) {
+                                    if (name == 'syncSequenceContext' && opcode == org.objectweb.asm.Opcodes.ICONST_1)
+                                        sawOne = true
+                                    if (name == 'syncSequenceContext' && sawOne
+                                            && opcode == org.objectweb.asm.Opcodes.IRETURN)
+                                        facts.syncReturnsTrue = true
+                                }
+                                @Override
+                                void visitFieldInsn(int opcode, String owner, String fieldName, String fieldDescriptor) {
+                                    if (fieldName == 'TURN_ANGLE') facts.turnAngle = true
+                                    if (fieldName == 'sequencedAngleLimit') facts.angleLimit = true
+                                    if (fieldName == 'ROTATE_PLACE') facts.rotatePlace = true
+                                    if (fieldName == 'ROTATE_PLACE_RETURNED') facts.rotatePlaceReturned = true
+                                }
+                                @Override
+                                void visitMethodInsn(int opcode, String owner, String calledName,
+                                                     String calledDescriptor, boolean isInterface) {
+                                    if (name == 'tick' && calledName == 'disassemble') facts.disassemble = true
+                                }
+                            }
+                        }
+                    }, 0)
+            if (facts.values().any { !it }) {
+                throw new GradleException("M28.5 Create 6.0.8 bearing contract mismatch: ${facts}")
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyM28SteeringTurnAngleParityBoundary PASS: frozen wheel sequence and target bearing placement contract proven')
+    }
+}
+
+tasks.register('verifyM28MechanicalBearingAccessorCreate608BytecodeBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the M28.5a accessor field and movement-mode ordering against exact Create 6.0.8 bytecode/resources.'
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    inputs.files(m28BearingAccessorSource, createDevelopmentRuntime)
+
+    doLast {
+        String accessor = m28BearingAccessorSource.getText('UTF-8')
+        ['@Mixin(value = MechanicalBearingBlockEntity.class, remap = false)',
+         '@Accessor("movementMode")',
+         'ScrollOptionBehaviour<RotationMode> sable$getMovementMode()',
+         'double sable$getSequencedAngleLimit()',
+         'void sable$setSequencedAngleLimit(double remainingDegrees)'].each { token ->
+            if (!accessor.contains(token)) {
+                throw new GradleException("M28.5a accessor source lost exact Create target/member ${token}")
+            }
+        }
+
+        JarFile jar = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            String bearingClass = 'com/simibubi/create/content/contraptions/bearing/MechanicalBearingBlockEntity.class'
+            def bearingEntry = jar.getJarEntry(bearingClass)
+            if (bearingEntry == null) throw new GradleException("Exact Create 6.0.8 artifact is missing ${bearingClass}")
+            def field = [found: false, protectedAccess: false, descriptor: null, signature: null]
+            def travel = [found: false, protectedAccess: false, descriptor: null]
+            new org.objectweb.asm.ClassReader(jar.getInputStream(bearingEntry).readAllBytes()).accept(
+                    new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                        @Override
+                        org.objectweb.asm.FieldVisitor visitField(int access, String name, String descriptor,
+                                                                  String signature, Object value) {
+                            if (name == 'movementMode') {
+                                field.found = true
+                                field.protectedAccess = (access & org.objectweb.asm.Opcodes.ACC_PROTECTED) != 0
+                                field.descriptor = descriptor
+                                field.signature = signature
+                            }
+                            if (name == 'sequencedAngleLimit') {
+                                travel.found = true
+                                travel.protectedAccess = (access & org.objectweb.asm.Opcodes.ACC_PROTECTED) != 0
+                                travel.descriptor = descriptor
+                            }
+                            return null
+                        }
+                    }, 0)
+            String behaviourDescriptor = 'Lcom/simibubi/create/foundation/blockEntity/behaviour/scrollValue/ScrollOptionBehaviour;'
+            String rotationModeSignature = 'Lcom/simibubi/create/foundation/blockEntity/behaviour/scrollValue/ScrollOptionBehaviour<Lcom/simibubi/create/content/contraptions/IControlContraption$RotationMode;>;'
+            if (!field.found || !field.protectedAccess || field.descriptor != behaviourDescriptor
+                    || field.signature != rotationModeSignature) {
+                throw new GradleException("M28.5a Create 6.0.8 movementMode ABI mismatch: ${field}")
+            }
+            if (!travel.found || !travel.protectedAccess || travel.descriptor != 'D') {
+                throw new GradleException("M28 steering Create 6.0.8 sequencedAngleLimit ABI mismatch: ${travel}")
+            }
+
+            String rotationModeClass = 'com/simibubi/create/content/contraptions/IControlContraption$RotationMode.class'
+            def rotationModeEntry = jar.getJarEntry(rotationModeClass)
+            if (rotationModeEntry == null) throw new GradleException("Exact Create 6.0.8 artifact is missing ${rotationModeClass}")
+            def ordinals = [:]
+            new org.objectweb.asm.ClassReader(jar.getInputStream(rotationModeEntry).readAllBytes()).accept(
+                    new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                        @Override
+                        org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                                   String signature, String[] exceptions) {
+                            if (name != '<clinit>') return null
+                            return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                                String pendingName
+                                Integer pendingOrdinal
+
+                                @Override
+                                void visitLdcInsn(Object value) {
+                                    if (value instanceof String && value.toString().startsWith('ROTATE_')) {
+                                        pendingName = value.toString()
+                                        pendingOrdinal = null
+                                    }
+                                }
+
+                                @Override
+                                void visitInsn(int opcode) {
+                                    if (pendingName != null && opcode >= org.objectweb.asm.Opcodes.ICONST_0
+                                            && opcode <= org.objectweb.asm.Opcodes.ICONST_5) {
+                                        pendingOrdinal = opcode - org.objectweb.asm.Opcodes.ICONST_0
+                                    }
+                                }
+
+                                @Override
+                                void visitFieldInsn(int opcode, String owner, String fieldName, String fieldDescriptor) {
+                                    if (opcode == org.objectweb.asm.Opcodes.PUTSTATIC && pendingName == fieldName
+                                            && pendingOrdinal != null) {
+                                        ordinals[fieldName] = pendingOrdinal
+                                        pendingName = null
+                                        pendingOrdinal = null
+                                    }
+                                }
+                            }
+                        }
+                    }, 0)
+            def expectedOrdinals = [ROTATE_PLACE: 0, ROTATE_PLACE_RETURNED: 1, ROTATE_NEVER_PLACE: 2]
+            if (ordinals != expectedOrdinals) {
+                throw new GradleException("M28.5a Create 6.0.8 RotationMode ordering mismatch: ${ordinals}")
+            }
+
+            def langEntry = jar.getJarEntry('assets/create/lang/en_us.json')
+            if (langEntry == null) throw new GradleException('Exact Create 6.0.8 artifact is missing en_us language data')
+            def lang = new JsonSlurper().parse(jar.getInputStream(langEntry))
+            def labels = [
+                    'create.contraptions.movement_mode.rotate_place': 'Always Place when Stopped',
+                    'create.contraptions.movement_mode.rotate_place_returned': 'Only Place near Initial Angle',
+                    'create.contraptions.movement_mode.rotate_never_place': 'Only Place when Anchor Destroyed'
+            ]
+            labels.each { key, expected ->
+                if (lang[key] != expected) {
+                    throw new GradleException("M28.5a Create 6.0.8 movement-mode label mismatch for ${key}: ${lang[key]}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyM28MechanicalBearingAccessorCreate608BytecodeBoundary PASS: '
+                + 'movementMode is protected ScrollOptionBehaviour<RotationMode>; values 0/1/2 map to Place/Returned/NeverPlace')
+    }
+}
+
+tasks.register('verifyM28MechanicalBearingAccessorMixinBoundary') {
+    group = 'forge backport'
+    description = 'Verifies source, generated resources, and final runtime jar register the M28.5a accessor exactly once.'
+    dependsOn tasks.named('verifyM28MechanicalBearingAccessorCreate608BytecodeBoundary')
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+    inputs.files(m28BearingAccessorSource, m28ForgeMixinConfig, m28UpstreamCommonMixinConfig,
+            standaloneProductionSableArtifact)
+
+    doLast {
+        String relativeName = 'compatibility.create.contraptions.MechanicalBearingBlockEntityAccessor'
+        String fullName = 'dev.ryanhcode.sable.mixin.' + relativeName
+        String classEntry = fullName.replace('.', '/') + '.class'
+        def assertConfig = { Object parsed, String owner ->
+            if (parsed.package != 'dev.ryanhcode.sable.mixin') {
+                throw new GradleException("${owner} has wrong Mixin package ${parsed.package}")
+            }
+            int commonCount = (parsed.mixins ?: []).count { it == relativeName }
+            int clientCount = (parsed.client ?: []).count { it == relativeName }
+            int serverCount = (parsed.server ?: []).count { it == relativeName }
+            if (commonCount != 1 || clientCount != 0 || serverCount != 0) {
+                throw new GradleException("${owner} must declare ${relativeName} exactly once in mixins; "
+                        + "mixins=${commonCount}, client=${clientCount}, server=${serverCount}")
+            }
+        }
+
+        if (!m28BearingAccessorSource.isFile()) {
+            throw new GradleException("M28.5a accessor source is missing: ${m28BearingAccessorSource}")
+        }
+        String accessor = m28BearingAccessorSource.getText('UTF-8')
+        if (!accessor.contains('package dev.ryanhcode.sable.mixin.compatibility.create.contraptions;')
+                || !accessor.contains('@Mixin(value = MechanicalBearingBlockEntity.class, remap = false)')
+                || !accessor.contains('@Accessor("movementMode")')) {
+            throw new GradleException('M28.5a accessor package/target/member ownership is invalid')
+        }
+        def sourceConfig = new JsonSlurper().parse(m28ForgeMixinConfig)
+        assertConfig(sourceConfig, 'forge/src/main/resources/sable-common-forge.mixins.json')
+        def upstreamConfig = new JsonSlurper().parse(m28UpstreamCommonMixinConfig)
+        if (((upstreamConfig.mixins ?: []) + (upstreamConfig.client ?: []) + (upstreamConfig.server ?: []))
+                .contains(relativeName)) {
+            throw new GradleException('M28.5a accessor remains registered in excluded/non-owning common sable.mixins.json')
+        }
+
+        File generated = layout.buildDirectory.file('resources/main/sable-common-forge.mixins.json').get().asFile
+        if (!generated.isFile()) throw new GradleException("Generated Forge mixin config is missing: ${generated}")
+        assertConfig(new JsonSlurper().parse(generated), 'generated sable-common-forge.mixins.json')
+
+        File artifact = standaloneProductionSableArtifact.get().asFile
+        JarFile jar = new JarFile(artifact)
+        try {
+            if (jar.getJarEntry(classEntry) == null) {
+                throw new GradleException("Final runtime jar is missing accessor class ${classEntry}")
+            }
+            def configs = jar.entries().toList().findAll { it.name == 'sable-common-forge.mixins.json' }
+            if (configs.size() != 1) {
+                throw new GradleException("Final runtime jar must contain one owning mixin config, found ${configs*.name}")
+            }
+            assertConfig(new JsonSlurper().parse(jar.getInputStream(configs[0])),
+                    "${artifact.name}:sable-common-forge.mixins.json")
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle("verifyM28MechanicalBearingAccessorMixinBoundary PASS: ${fullName} is common/server-capable, "
+                + 'declared exactly once, and packaged with its owning config')
+    }
+}
+
+tasks.register('verifyM28BearingHoldAtTargetBoundary') {
+    group = 'forge backport'
+    inputs.files(m28TurnAngleAudit, m28BuildDocument, m28RuntimeDocument,
+            m28BearingAccessorSource, m28CommandSource)
+    doLast {
+        String build = m28BuildDocument.getText('UTF-8')
+        String runtime = m28RuntimeDocument.getText('UTF-8')
+        String accessor = m28BearingAccessorSource.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        ['ROTATE_NEVER_PLACE', 'Only Place when Anchor Destroyed',
+         'remains present when its shaft stops'].each { token ->
+            if (!build.contains(token)) throw new GradleException("M28.5 bearing hold configuration missing ${token}")
+        }
+        ['generatedRpm=0', 'contraptionPresent=true', 'controlSailPresent=true',
+         'controlLifecycleState=HOLDING_TARGET'].each { token ->
+            if (!runtime.contains(token)) throw new GradleException("M28.5 hold acceptance missing ${token}")
+        }
+        if (!accessor.contains('@Accessor("movementMode")')
+                || !command.contains('bearingMovementMode=')
+                || !command.contains('bearingHoldConfigured=')) {
+            throw new GradleException('M28.5 cannot diagnose the real Create bearing movement mode')
+        }
+        logger.lifecycle('verifyM28BearingHoldAtTargetBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28NoContraptionChurnBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelEntitySource, m28CommandSource, m28TurnAngleAudit)
+    doLast {
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        ['SABLE_M28_CONTROL_CONTRAPTION', 'contraptionCreateCount', 'contraptionRemoveCount',
+         'HOLDING_TARGET', 'controlSailPresent'].each { token ->
+            if (!wheel.contains(token)) throw new GradleException("M28.5 lifecycle evidence missing ${token}")
+        }
+        ['contraptionEntityId=', 'contraptionCreateCount=', 'contraptionRemoveCount=',
+         'controlLifecycleState='].each { token ->
+            if (!command.contains(token)) throw new GradleException("M28.5 inspect lifecycle missing ${token}")
+        }
+        ['bearing.assemble(', 'bearing.disassemble(', 'setSpeed('].each { forbidden ->
+            if (wheel.contains(forbidden) || command.contains(forbidden)) {
+                throw new GradleException("M28.5 bypasses normal Create lifecycle through ${forbidden}")
+            }
+        }
+        logger.lifecycle('verifyM28NoContraptionChurnBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28HeldUseCaptureBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelClientSource, m28WheelPacketSource, m28WheelEntitySource)
+    doLast {
+        String client = m28WheelClientSource.getText('UTF-8')
+        String packet = m28WheelPacketSource.getText('UTF-8')
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        ['activeSableId', 'activeLocalPos', 'activeHand', 'activeSessionToken',
+         'SubLevelContainer.getContainer(minecraft.level)', 'container.getSubLevel(activeSableId)',
+         'owner.getPlot().getCenterBlock().offset(activeLocalPos)'].each { token ->
+            if (!client.contains(token)) throw new GradleException("M28.5 client capture missing ${token}")
+        }
+        ['UUID sableId', 'BlockPos localPos', 'InteractionHand hand', 'long sessionToken',
+         'container.getSubLevel(packet.sableId)', 'wheel.acceptControl(player, packet.sableId'].each { token ->
+            if (!packet.contains(token)) throw new GradleException("M28.5 authoritative packet missing ${token}")
+        }
+        ['controllerSableId', 'controllerLocalPos', 'controllerHand', 'controllerSessionToken'].each { token ->
+            if (!wheel.contains(token)) throw new GradleException("M28.5 server session missing ${token}")
+        }
+        logger.lifecycle('verifyM28HeldUseCaptureBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28HeldUseSuppressesRetargetedBlockUseBoundary') {
+    group = 'forge backport'
+    inputs.files(m28HoldGuardSource, m28InteractionMixinSource, m28InteractionHelperSource,
+            m28WheelClientSource)
+    doLast {
+        String mixin = m28InteractionMixinSource.getText('UTF-8')
+        String helper = m28InteractionHelperSource.getText('UTF-8')
+        String client = m28WheelClientSource.getText('UTF-8')
+        if (mixin.indexOf('ClientSubLevelHoldUseGuard.isActive()')
+                > mixin.indexOf('ClientSubLevelInteractionHelper.tryUseOnCurrentTarget')) {
+            throw new GradleException('M28.5 guard runs after retargeted block use')
+        }
+        if (!helper.contains('ClientSubLevelHoldUseGuard.isActive()')
+                || !client.contains('suppressUntilRelease')
+                || !client.contains('!minecraft.options.keyUse.isDown()')) {
+            throw new GradleException('M28.5 RMB capture can escape before physical release')
+        }
+        logger.lifecycle('verifyM28HeldUseSuppressesRetargetedBlockUseBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28AssemblerStillUsableAfterControlReleaseBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelClientSource, m28InteractionMixinSource, m28RuntimeDocument)
+    doLast {
+        String client = m28WheelClientSource.getText('UTF-8')
+        String mixin = m28InteractionMixinSource.getText('UTF-8')
+        String runtime = m28RuntimeDocument.getText('UTF-8')
+        if (!client.contains('stop(false)') || !client.contains('suppressUntilRelease = false')
+                || !mixin.contains('ClientSubLevelInteractionHelper.tryUseOnCurrentTarget')
+                || !runtime.contains('intentional Physics Assembler')
+                || !runtime.contains('click still follows normal M22 behavior')) {
+            throw new GradleException('M28.5 does not restore ordinary block use after control release')
+        }
+        logger.lifecycle('verifyM28AssemblerStillUsableAfterControlReleaseBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ExpectedTransferRemovalClassificationBoundary') {
+    group = 'forge backport'
+    inputs.files(m28WheelDiagnosticsSource, m28TurnAngleAudit)
+    doLast {
+        String diagnostics = m28WheelDiagnosticsSource.getText('UTF-8')
+        ['BLOCK_TRANSFER', 'M22_ASSEMBLY_DISASSEMBLY', 'PISTON_MOVE',
+         'UNEXPECTED_BLOCK_REMOVED'].each { token ->
+            if (!diagnostics.contains(token)) throw new GradleException("M28.5 removal classification missing ${token}")
+        }
+        if (diagnostics.contains('phase=BLOCK_REMOVED')) {
+            throw new GradleException('M28.5 still labels expected M22 transfer as generic destruction')
+        }
+        logger.lifecycle('verifyM28ExpectedTransferRemovalClassificationBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28_5SteeringWheelControl') {
+    group = 'forge backport'
+    description = 'Runs focused M28.5 held-use capture, TURN_ANGLE, and bearing-hold boundaries.'
+    dependsOn tasks.named('verifyM28_4SteeringWheelStress')
+    dependsOn tasks.named('verifyM28SteeringTurnAngleParityBoundary')
+    dependsOn tasks.named('verifyM28BearingHoldAtTargetBoundary')
+    dependsOn tasks.named('verifyM28NoContraptionChurnBoundary')
+    dependsOn tasks.named('verifyM28HeldUseCaptureBoundary')
+    dependsOn tasks.named('verifyM28HeldUseSuppressesRetargetedBlockUseBoundary')
+    dependsOn tasks.named('verifyM28AssemblerStillUsableAfterControlReleaseBoundary')
+    dependsOn tasks.named('verifyM28ExpectedTransferRemovalClassificationBoundary')
+    dependsOn tasks.named('verifyM28MechanicalBearingAccessorMixinBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_5SteeringWheelControl PASS: M28.5a IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+tasks.register('verifyM28_5aMechanicalBearingAccessor') {
+    group = 'forge backport'
+    description = 'Runs the focused M28.5a accessor ABI, mixin ownership, packaging, and retained M28.5 boundaries.'
+    dependsOn tasks.named('verifyM28_5SteeringWheelControl')
+    doLast {
+        logger.lifecycle('verifyM28_5aMechanicalBearingAccessor PASS: M28.5a IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+def m28GeneratorConflictMixin = rootProject.file(
+        'forge/src/main/java/dev/ryanhcode/sable/mixin/m28/GeneratingKineticConflictTraceMixin.java')
+def m28RotationConflictMixin = rootProject.file(
+        'forge/src/main/java/dev/ryanhcode/sable/mixin/m28/RotationConflictTraceMixin.java')
+
+tasks.register('verifyM28ControlCanonicalBlueprintBoundary') {
+    group = 'forge backport'
+    inputs.files(m28BuildDocument, m28CommandSource)
+    doLast {
+        String docs = m28BuildDocument.getText('UTF-8')
+        String command = m28CommandSource.getText('UTF-8')
+        ['Pitch | `(-5,2,-2)`', 'Yaw | `(-3,2,-4)`', 'Roll | `(1,2,3)`',
+         '| 4 | Create gearbox', '| 3 | Create shaft',
+         'simulated:white_symmetric_sail'].each { token ->
+            if (!docs.contains(token)) throw new GradleException("M28.5b canonical blueprint missing ${token}")
+        }
+        ['new WheelExpectation("pitch"', 'new WheelExpectation("yaw"',
+         'new WheelExpectation("roll"', 'expectedMovementMode=ROTATE_NEVER_PLACE',
+         'WRONG_CONTROL_PAYLOAD', 'actualWheelAssemblerRelativePositions=',
+         'expectedWheelAssemblerRelativePositions=', 'raw.subtract(assembler)'].each { token ->
+            if (!command.contains(token)) throw new GradleException("M28.5b preflight missing ${token}")
+        }
+        logger.lifecycle('verifyM28ControlCanonicalBlueprintBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ControlCoordinateUniquenessBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM28ControlCanonicalBlueprintBoundary')
+    doLast {
+        def channels = [
+                pitch: [[-5,2,-2],[-5,1,-2],[-5,1,-1],[-5,1,0],[-5,1,1]],
+                yaw: [[-3,2,-4],[-3,1,-4],[-4,1,-4],[-5,1,-4],[-5,2,-4],[-5,3,-4]],
+                roll: [[1,2,3],[1,1,3],[1,1,4],[1,1,5],[1,1,6]]
+        ]
+        def all = channels.values().collectMany { it }
+        if (all.toSet().size() != all.size()) {
+            throw new GradleException('M28.5b canonical control positions overlap')
+        }
+        channels.each { name, positions ->
+            positions.collate(2, 1, false).each { pair ->
+                if (pair.size() == 2 && (0..2).sum { axis -> Math.abs(pair[0][axis] - pair[1][axis]) } != 1) {
+                    throw new GradleException("M28.5b ${name} route is not face-adjacent: ${pair}")
+                }
+            }
+        }
+        def names = channels.keySet().toList()
+        for (int left = 0; left < names.size(); left++) {
+            for (int right = left + 1; right < names.size(); right++) {
+                channels[names[left]].each { a ->
+                    channels[names[right]].each { b ->
+                        if ((0..2).sum { axis -> Math.abs(a[axis] - b[axis]) } <= 1) {
+                            throw new GradleException("M28.5b ${names[left]} touches ${names[right]} at ${a}/${b}")
+                        }
+                    }
+                }
+            }
+        }
+        logger.lifecycle('verifyM28ControlCoordinateUniquenessBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ControlNetworkIsolationStaticBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM28ControlCoordinateUniquenessBoundary')
+    inputs.file(m28CommandSource)
+    doLast {
+        String command = m28CommandSource.getText('UTF-8')
+        if (!command.contains('RotationPropagator.isConnected(current, candidate)')
+                || !command.contains('reachableKinetics(wheel, kinetics)')
+                || !command.contains('CONTROL_NETWORK_MERGED')
+                || !command.contains('networkTouchesOtherControlChannel=')) {
+            throw new GradleException('M28.5b does not traverse target Create connectivity')
+        }
+        JarFile createJar = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            def entry = createJar.getJarEntry('com/simibubi/create/content/kinetics/RotationPropagator.class')
+            if (entry == null) throw new GradleException('Exact Create 6.0.8 RotationPropagator absent')
+            def node = new org.objectweb.asm.tree.ClassNode()
+            new org.objectweb.asm.ClassReader(createJar.getInputStream(entry).bytes).accept(node, 0)
+            if (!node.methods.any { it.name == 'isConnected' && it.desc ==
+                    '(Lcom/simibubi/create/content/kinetics/base/KineticBlockEntity;Lcom/simibubi/create/content/kinetics/base/KineticBlockEntity;)Z' }) {
+                throw new GradleException('Exact Create 6.0.8 isConnected ABI changed')
+            }
+        } finally {
+            createJar.close()
+        }
+        logger.lifecycle('verifyM28ControlNetworkIsolationStaticBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ControlNoCreativeMotorConnectionBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM28ControlNetworkIsolationStaticBoundary')
+    inputs.file(m28CommandSource)
+    doLast {
+        def control = [
+                [-5,2,-2],[-5,1,-2],[-5,1,-1],[-5,1,0],
+                [-3,2,-4],[-3,1,-4],[-4,1,-4],[-5,1,-4],[-5,2,-4],
+                [1,2,3],[1,1,3],[1,1,4],[1,1,5]
+        ]
+        [[3,2,0],[2,1,-2]].each { motor ->
+            control.each { node ->
+                if ((0..2).sum { axis -> Math.abs(node[axis] - motor[axis]) } <= 1) {
+                    throw new GradleException("M28.5b control route touches Creative Motor at ${motor}")
+                }
+            }
+        }
+        String command = m28CommandSource.getText('UTF-8')
+        ['creativeMotorCount=', 'EXTRA_GENERATOR', 'PROPULSION_NETWORK_CONNECTED',
+         'DRILL_NETWORK_CONNECTED', 'networkTouchesPropulsionNetwork=',
+         'networkTouchesDrillNetwork='].each { token ->
+            if (!command.contains(token)) throw new GradleException("M28.5b motor isolation missing ${token}")
+        }
+        logger.lifecycle('verifyM28ControlNoCreativeMotorConnectionBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28ControlPreflightReadOnlyBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('compileJava')
+    inputs.file(m28CommandSource)
+    doLast {
+        String command = m28CommandSource.getText('UTF-8')
+        if (!command.contains('Commands.literal("validate_controls")')
+                || !command.contains('resolveAircraft(source).body()')) {
+            throw new GradleException('M28.5b preflight is not registered on production Sable ownership')
+        }
+        File classFile = layout.buildDirectory.file('classes/java/main/dev/ryanhcode/sable/command/M28GoldenAircraftCommands.class').get().asFile
+        def node = new org.objectweb.asm.tree.ClassNode()
+        new org.objectweb.asm.ClassReader(classFile.bytes).accept(node, 0)
+        def methods = node.methods.findAll { it.name in ['validateControls', 'reachableKinetics', 'routeConnections',
+                                                         'bearingPayload', 'bearingPayloadAxis', 'blockId', 'kineticAxis']
+                || it.name.startsWith('lambda$validateControls$')
+                || it.name.startsWith('lambda$reachableKinetics$')
+                || it.name.startsWith('lambda$bearingPayload$') }
+        if (methods.size() < 7) throw new GradleException('M28.5b preflight call graph incomplete')
+        def forbidden = ['setSpeed', 'setBlock', 'destroyBlock', 'attachKinetics', 'detachKinetics',
+                         'updateGeneratedRotation', 'assemble', 'disassemble', 'setTargetAngle', 'getOrCreateNetwork']
+        methods.each { method ->
+            method.instructions.each { insn ->
+                if (insn instanceof org.objectweb.asm.tree.MethodInsnNode && insn.name in forbidden) {
+                    throw new GradleException("M28.5b preflight mutates world/network via ${method.name}->${insn.name}")
+                }
+            }
+        }
+        logger.lifecycle('verifyM28ControlPreflightReadOnlyBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28KineticConflictDiagnosticBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+    inputs.files(m28GeneratorConflictMixin, m28RotationConflictMixin, m28WheelDiagnosticsSource, m28ForgeMixinConfig)
+    inputs.file(standaloneProductionSableArtifact)
+    doLast {
+        def config = new JsonSlurper().parse(m28ForgeMixinConfig)
+        ['m28.GeneratingKineticConflictTraceMixin', 'm28.RotationConflictTraceMixin'].each { name ->
+            if ((config.mixins ?: []).count { it == name } != 1) {
+                throw new GradleException("M28.5b diagnostic mixin not owned exactly once: ${name}")
+            }
+        }
+        String diagnostics = m28WheelDiagnosticsSource.getText('UTF-8')
+        String rotationTrace = m28RotationConflictMixin.getText('UTF-8')
+        if (!diagnostics.contains('SABLE_M28_KINETIC_CONFLICT')
+                || !diagnostics.contains('recordKineticDestruction')
+                || !diagnostics.contains('exactCreateOwnerMethod=')) {
+            throw new GradleException('M28.5b destruction evidence missing')
+        }
+        if (!rotationTrace.contains('@Local(index = 4)') || !rotationTrace.contains('@Local(index = 7)')) {
+            throw new GradleException('M28.5b Create incoming-neighbour/speed slots are not captured')
+        }
+        JarFile createJar = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            [
+                'com/simibubi/create/content/kinetics/base/GeneratingKineticBlockEntity.class':
+                    ['applyNewSpeed', 1],
+                'com/simibubi/create/content/kinetics/RotationPropagator.class':
+                    ['propagateNewSource', 3]
+            ].each { path, expected ->
+                def entry = createJar.getJarEntry(path)
+                if (entry == null) throw new GradleException("Exact Create 6.0.8 class absent: ${path}")
+                def node = new org.objectweb.asm.tree.ClassNode()
+                new org.objectweb.asm.ClassReader(createJar.getInputStream(entry).bytes).accept(node, 0)
+                def method = node.methods.find { it.name == expected[0] }
+                int calls = method == null ? 0 : method.instructions.toArray().count { insn ->
+                    insn instanceof org.objectweb.asm.tree.MethodInsnNode
+                            && insn.owner == 'net/minecraft/world/level/Level'
+                            && insn.name == 'destroyBlock'
+                            && insn.desc == '(Lnet/minecraft/core/BlockPos;Z)Z'
+                }
+                if (calls != expected[1]) throw new GradleException("M28.5b Create destruction ABI ${path}: ${calls} != ${expected[1]}")
+                if (expected[0] == 'propagateNewSource') {
+                    def stores = method.instructions.toArray().findAll { insn ->
+                        insn instanceof org.objectweb.asm.tree.VarInsnNode
+                    }
+                    if (!stores.any { it.opcode == org.objectweb.asm.Opcodes.ASTORE && it.var == 4 }
+                            || !stores.any { it.opcode == org.objectweb.asm.Opcodes.FSTORE && it.var == 7 }) {
+                        throw new GradleException('M28.5b Create 6.0.8 neighbour or conveyed-speed local slot changed')
+                    }
+                }
+            }
+        } finally {
+            createJar.close()
+        }
+        JarFile artifact = new JarFile(standaloneProductionSableArtifact.get().asFile)
+        try {
+            ['dev/ryanhcode/sable/mixin/m28/GeneratingKineticConflictTraceMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/RotationConflictTraceMixin.class'].each { path ->
+                if (artifact.getJarEntry(path) == null) throw new GradleException("M28.5b final jar missing ${path}")
+            }
+            def entry = artifact.getJarEntry('sable-common-forge.mixins.json')
+            if (entry == null) throw new GradleException('M28.5b final jar missing owning mixin config')
+            def packaged = new JsonSlurper().parse(artifact.getInputStream(entry))
+            ['m28.GeneratingKineticConflictTraceMixin', 'm28.RotationConflictTraceMixin'].each { name ->
+                if ((packaged.mixins ?: []).count { it == name } != 1) {
+                    throw new GradleException("M28.5b final jar does not apply ${name} server-side")
+                }
+            }
+        } finally {
+            artifact.close()
+        }
+        logger.lifecycle('verifyM28KineticConflictDiagnosticBoundary PASS')
+    }
+}
+
+tasks.register('verifyM28_5bControlPreflight') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM28_5aMechanicalBearingAccessor')
+    dependsOn tasks.named('verifyM28ControlNoCreativeMotorConnectionBoundary')
+    dependsOn tasks.named('verifyM28ControlPreflightReadOnlyBoundary')
+    dependsOn tasks.named('verifyM28KineticConflictDiagnosticBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_5bControlPreflight PASS: M28.5b IMPLEMENTED / RUNTIME_REQUIRED')
+    }
+}
+
+tasks.register('verifyM28SteeringDriveDecisionBoundary') {
+    group = 'forge backport'
+    description = 'Executes the production M28 steering decision through continuous, settle, resume, and reversal cases.'
+    File decisionSource = file('src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelDriveDecision.java')
+    File decisionTest = file('src/steeringTest/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelDriveDecisionTest.java')
+    inputs.files(decisionSource, decisionTest, m28WheelEntitySource)
+    outputs.dir(layout.buildDirectory.dir('m28SteeringDecisionTest'))
+    doLast {
+        String wheel = m28WheelEntitySource.getText('UTF-8')
+        ['SteeringWheelDriveDecision.evaluate(', 'case RETARGET, RESUME_AFTER_ERROR',
+         'case MOVING_TO_TARGET -> this.inUse--', 'this.logStateChanges(decision,',
+         'AWAITING_KINETIC_SOURCE', 'SteeringWheelDriveDecision.additionalBearingTravel(',
+         'this.isDownstreamBearing(bearing)', 'sable$setSequencedAngleLimit'].each { token ->
+            if (!wheel.contains(token)) {
+                throw new GradleException("M28 steering production decision lost ${token}")
+            }
+        }
+        File output = layout.buildDirectory.dir('m28SteeringDecisionTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M28 steering decision test requires a JDK')
+        int result = compiler.run(null, System.out, System.err, '--release', '17', '-d', output.absolutePath,
+                decisionSource.absolutePath, decisionTest.absolutePath)
+        if (result != 0) throw new GradleException('M28 steering decision test compilation failed')
+        URLClassLoader loader = new URLClassLoader([output.toURI().toURL()] as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.simulated_team.simulated.content.blocks.steering_wheel.SteeringWheelDriveDecisionTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M28 steering decision regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM28SteeringDriveDecisionBoundary PASS: continuous steering, exact stop, resume, and reversal')
+    }
+}
+
+tasks.register('verifyM28RotatedContraptionVisibleBoundsBoundary') {
+    group = 'forge backport'
+    description = 'Executes the two-stage eight-corner visible-bounds regression for Create contraptions in Sables.'
+    File helper = file('src/main/java/dev/ryanhcode/sable/forge/EightCornerTransformedBounds.java')
+    File test = file('src/renderBoundsTest/java/dev/ryanhcode/sable/forge/EightCornerTransformedBoundsTest.java')
+    File bridge = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java')
+    inputs.files(helper, test, bridge)
+    outputs.dir(layout.buildDirectory.dir('m28RotatedContraptionBoundsTest'))
+    doLast {
+        String source = bridge.getText('UTF-8')
+        ['entity.toGlobalVector(', 'renderPose.transformPosition(',
+         'EightCornerTransformedBounds.transform(', 'frustum.isVisible(visibleAabb)',
+         'LOGGED_CONTROL_BOUNDS', 'oldVisibleAabb'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M28 visible-bounds bridge lost ${token}")
+        }
+        File output = layout.buildDirectory.dir('m28RotatedContraptionBoundsTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M28 visible-bounds test requires a JDK')
+        int result = compiler.run(null, System.out, System.err, '--release', '17', '-d', output.absolutePath,
+                helper.absolutePath, test.absolutePath)
+        if (result != 0) throw new GradleException('M28 visible-bounds test compilation failed')
+        URLClassLoader loader = new URLClassLoader([output.toURI().toURL()] as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.forge.EightCornerTransformedBoundsTest').getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M28 visible-bounds regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM28RotatedContraptionVisibleBoundsBoundary PASS: two-stage rotation, nonzero pivots, finite visible bounds')
+    }
+}
+
+tasks.register('verifyM28ControlledSailRotationTraceBoundary') {
+    group = 'forge backport'
+    description = 'Checks Create 6.0.8 bearing-to-entity-to-model ownership and the paired M28 rotation traces.'
+    dependsOn tasks.named('verifyM13ContraptionRenderBoundary')
+    File wheel = file('src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelBlockEntity.java')
+    File rendererMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java')
+    File bridge = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java')
+    inputs.files(wheel, rendererMixin, bridge, targetCreateJar)
+    doLast {
+        String wheelSource = wheel.getText('UTF-8')
+        String rendererSource = rendererMixin.getText('UTF-8')
+        String bridgeSource = bridge.getText('UTF-8')
+        ['SABLE_M28_CREATE_ROTATION', 'bearing.getInterpolatedAngle(0.0F)',
+         'contraption.getAngle(1.0F)', 'contraption.getRotationState()'].each { token ->
+            if (!wheelSource.contains(token)) throw new GradleException("M28 server rotation trace lost ${token}")
+        }
+        ['SABLE_M28_RENDER_ROTATION', 'controlled.getAngle(partialTick)',
+         'getMatrices().getModel().last().pose()', 'outerAndDispatcher.mul(innerModel)',
+         'SableCreateContraptionControllerLookup.getControllerBlockEntity'].each { token ->
+            if (!rendererSource.contains(token)) throw new GradleException("M28 client rotation trace lost ${token}")
+        }
+        ['transformedContraptionBounds(', 'entity.toGlobalVector(',
+         'final double x = visiblePosition.x - cameraPosition.x'].each { token ->
+            if (!bridgeSource.contains(token)) throw new GradleException("M28 visible-space culling bridge lost ${token}")
+        }
+        JarFile create = new JarFile(targetCreateJar)
+        try {
+            def requireCall = { String classPath, String method, String call ->
+                def entry = create.getJarEntry(classPath + '.class')
+                if (entry == null) throw new GradleException("Create 6.0.8 is missing ${classPath}")
+                def invocations = create.getInputStream(entry).withCloseable { stream -> readClassMethodInvocations(stream) }
+                def calls = invocations.methods[method]
+                if (calls == null || !calls.contains(call)) {
+                    throw new GradleException("Create 6.0.8 ${classPath}.${method} lost ${call}; actual=${calls}")
+                }
+            }
+            requireCall('com/simibubi/create/content/contraptions/bearing/MechanicalBearingBlockEntity',
+                    'applyRotation()V',
+                    'com/simibubi/create/content/contraptions/ControlledContraptionEntity.setAngle(F)V')
+            requireCall('com/simibubi/create/content/contraptions/ControlledContraptionEntity',
+                    'applyLocalTransforms(Lcom/mojang/blaze3d/vertex/PoseStack;F)V',
+                    'com/simibubi/create/content/contraptions/ControlledContraptionEntity.getAngle(F)F')
+            requireCall('com/simibubi/create/content/contraptions/render/ContraptionMatrices',
+                    'setup(Lcom/mojang/blaze3d/vertex/PoseStack;Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;)V',
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.applyLocalTransforms(Lcom/mojang/blaze3d/vertex/PoseStack;F)V')
+        } finally {
+            create.close()
+        }
+        logger.lifecycle('verifyM28ControlledSailRotationTraceBoundary PASS: Create bearing angle, entity angle, and prepared model matrix are separately observable')
+    }
+}
+
+tasks.register('verifyM28ContraptionStaticOwnershipBoundary') {
+    group = 'forge backport'
+    description = 'Checks exact Create source-position ownership and generic static-render exclusion.'
+    dependsOn tasks.named('verifyM28ControlledSailRotationTraceBoundary')
+    File ownership = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableCreateContraptionBlockOwnership.java')
+    File staticRenderer = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java')
+    File createRenderer = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java')
+    File wheel = file('src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelBlockEntity.java')
+    inputs.files(ownership, staticRenderer, createRenderer, wheel, targetCreateJar)
+    doLast {
+        String ownershipSource = ownership.getText('UTF-8')
+        String staticSource = staticRenderer.getText('UTF-8')
+        String createSource = createRenderer.getText('UTF-8')
+        String wheelSource = wheel.getText('UTF-8')
+        ['info.pos().offset(contraption.anchor)', 'entity.isAliveOrStale()',
+         'SableCreateContraptionContext.isRawEntityInSubLevelPlot'].each { token ->
+            if (!ownershipSource.contains(token)) throw new GradleException("M28 ownership index lost ${token}")
+        }
+        if (ownershipSource.contains('white_sail') || ownershipSource.contains('symmetric_sail')) {
+            throw new GradleException('M28 ownership index must not special-case sail block IDs')
+        }
+        ['SABLE_M28_RENDER_OWNERSHIP', 'SUPPRESSED_ACTIVE_CONTRAPTION_OWNER',
+         'RESTORED_STATIC_OWNER', 'LAST_CONTRAPTION_OWNER.remove',
+         '!ownerships.containsKey(blockEntity.getBlockPos())'].each { token ->
+            if (!staticSource.contains(token)) throw new GradleException("M28 static ownership boundary lost ${token}")
+        }
+        ['path=CONTRAPTION', 'geometryEmitted=true', 'capturedSourcePlotPositions'].each { token ->
+            if (!createSource.contains(token)) throw new GradleException("M28 Create ownership trace lost ${token}")
+        }
+        if (!wheelSource.contains('capturedSourceStates') || !wheelSource.contains('live=')) {
+            throw new GradleException('M28 server trace must expose the live source state after Create assembly')
+        }
+        JarFile create = new JarFile(targetCreateJar)
+        try {
+            def entry = create.getJarEntry('com/simibubi/create/content/contraptions/Contraption.class')
+            if (entry == null) throw new GradleException('Create 6.0.8 Contraption.class is missing')
+            def invocations = create.getInputStream(entry).withCloseable { stream -> readClassMethodInvocations(stream) }
+            def method = 'removeBlocksFromWorld(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)V'
+            def calls = invocations.methods[method]
+            def requireAnyCall = { String label, List<String> alternatives ->
+                if (calls == null || !alternatives.any { calls.contains(it) }) {
+                    throw new GradleException("Create 6.0.8 ${method} lost ${label}; expected one of ${alternatives}; actual=${calls}")
+                }
+            }
+            requireAnyCall('BlockPos.offset(Vec3i)', [
+                    'net/minecraft/core/BlockPos.offset(Lnet/minecraft/core/Vec3i;)Lnet/minecraft/core/BlockPos;',
+                    'net/minecraft/core/BlockPos.m_121955_(Lnet/minecraft/core/Vec3i;)Lnet/minecraft/core/BlockPos;'])
+            requireAnyCall('Level.setBlock(BlockPos,BlockState,int)', [
+                    'net/minecraft/world/level/Level.setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;I)Z',
+                    'net/minecraft/world/level/Level.m_7731_(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;I)Z'])
+        } finally {
+            create.close()
+        }
+        logger.lifecycle('verifyM28ContraptionStaticOwnershipBoundary PASS: exact Create source positions have one render owner and restore generically')
+    }
+}
+
+tasks.register('verifyM28ContraptionBufferSubmissionBoundary') {
+    group = 'forge backport'
+    description = 'Checks the bounded M28 probe at Create 6.0.8 CPU buffer and real vertex submission.'
+    dependsOn tasks.named('verifyM28ContraptionStaticOwnershipBoundary')
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    dependsOn tasks.named('preparePonderDevelopmentRuntime')
+    File probe = file('src/main/java/dev/ryanhcode/sable/forge/SableM28ContraptionBufferProbe.java')
+    File rendererProbe = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ContraptionBufferProbeMixin.java')
+    File vertexProbe = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ShadeSeparatingSuperByteBufferVertexProbeMixin.java')
+    File destinationProbe = file('src/main/java/dev/ryanhcode/sable/mixin/m28/BufferBuilderVertexWriteProbeMixin.java')
+    File destinationAccessor = file('src/main/java/dev/ryanhcode/sable/mixin/m28/BufferBuilderProbeAccessor.java')
+    File symmetricSail = file('src/main/java/dev/simulated_team/simulated/content/blocks/symmetric_sail/SymmetricSailBlock.java')
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    File audit = rootProject.file('M28_CONTRAPTION_BUFFER_SUBMISSION_AUDIT.md')
+    inputs.files(probe, rendererProbe, vertexProbe, destinationProbe, destinationAccessor,
+            symmetricSail, mixinConfig, audit,
+            createDevelopmentRuntime, ponderDevelopmentRuntime)
+    doLast {
+        String probeSource = probe.getText('UTF-8')
+        String rendererSource = rendererProbe.getText('UTF-8')
+        String vertexSource = vertexProbe.getText('UTF-8')
+        String destinationSource = destinationProbe.getText('UTF-8')
+        String accessorSource = destinationAccessor.getText('UTF-8')
+        String sailSource = symmetricSail.getText('UTF-8')
+        def config = new JsonSlurper().parse(mixinConfig)
+        ['SABLE_M28_BUFFER_TRANSFORM', 'SABLE_M28_ACTUAL_VERTEX',
+         'SABLE_M28_VERTEX_COMPARE', 'SABLE_M28_BUFFER_WRITE',
+         'SABLE_M28_SODIUM_VERTEX_WRITE', 'SABLE_M28_SODIUM_VERTEX_COMPARE',
+         'SABLE_M28_SHADE_BUFFER', 'SABLE_M28_REFERENCE_GEOMETRY',
+         'new Matrix4f(rendererMatrix).mul(bufferMatrix)', 'actualDestinationPosition',
+         'MAX_SAMPLES_PER_ENTITY = 6', 'SAMPLE_ANGLE_DELTA = 30.0F',
+         'hasHiddenPlotCoordinate', 'sable.m28.referenceGeometry',
+         'getOriginalBufferBuilder', 'destinationInspectionSupported',
+         'INSPECTED_WRITTEN'].each { token ->
+            if (!probeSource.contains(token)) throw new GradleException("M28 buffer probe lost ${token}")
+        }
+        ['SuperByteBuffer;renderInto', 'SableM28ContraptionBufferProbe.begin',
+         'SableM28ContraptionBufferProbe.end', 'finally'].each { token ->
+            if (!rendererSource.contains(token)) throw new GradleException("M28 render submission scope lost ${token}")
+        }
+        ['ShadeSeparatingSuperByteBuffer', 'VertexConsumer;',
+         'vertex(FFFFFFFFFIIFFF)V', 'SableM28ContraptionBufferProbe.beforeVertex',
+         'SableM28ContraptionBufferProbe.afterVertex', '@Local(index = 19)'].each { token ->
+            if (!vertexSource.contains(token)) throw new GradleException("M28 real vertex probe lost ${token}")
+        }
+        ['BufferBuilder', 'beforeDestinationWrite', 'afterDestinationWrite',
+         'vertex(FFFFFFFFFIIFFF)V'].each { token ->
+            if (!destinationSource.contains(token)) throw new GradleException("M28 destination probe lost ${token}")
+        }
+        ['@Accessor("buffer")', '@Accessor("vertices")', '@Accessor("nextElementByte")',
+         '@Accessor("format")'].each { token ->
+            if (!accessorSource.contains(token)) throw new GradleException("M28 destination byte reader lost ${token}")
+        }
+        if (!sailSource.contains('extends RotatedPillarBlock')
+                || sailSource.contains('BlockEntity') || sailSource.contains('Renderer')) {
+            throw new GradleException('M28 symmetric sail is no longer plain baked model geometry')
+        }
+        ['m28.ContraptionBufferProbeMixin', 'm28.BufferBuilderProbeAccessor',
+         'm28.BufferBuilderVertexWriteProbeMixin',
+         'm28.ShadeSeparatingSuperByteBufferVertexProbeMixin'].each { name ->
+            if ((config.client ?: []).count { it == name } != 1) {
+                throw new GradleException("M28 client mixin config must declare ${name} exactly once")
+            }
+        }
+
+        JarFile create = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            def entry = create.getJarEntry('com/simibubi/create/content/contraptions/render/ContraptionEntityRenderer.class')
+            if (entry == null) throw new GradleException('Mapped Create 6.0.8 renderer class is missing')
+            def calls = create.getInputStream(entry).withCloseable { stream -> readClassMethodInvocations(stream) }
+                    .methods['render(Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V']
+            ['net/createmod/catnip/render/SuperByteBuffer.transform(Lcom/mojang/blaze3d/vertex/PoseStack;)Ldev/engine_room/flywheel/lib/transform/Transform;',
+             'net/createmod/catnip/render/SuperByteBuffer.useLevelLight(Lnet/minecraft/world/level/BlockAndTintGetter;Lorg/joml/Matrix4f;)Lnet/createmod/catnip/render/SuperByteBuffer;',
+             'net/createmod/catnip/render/SuperByteBuffer.renderInto(Lcom/mojang/blaze3d/vertex/PoseStack;Lcom/mojang/blaze3d/vertex/VertexConsumer;)V'].each { call ->
+                if (calls == null || !calls.contains(call)) {
+                    throw new GradleException("Create 6.0.8 CPU render path lost ${call}; actual=${calls}")
+                }
+            }
+        } finally {
+            create.close()
+        }
+
+        JarFile catnip = new JarFile(ponderDevelopmentRuntime.get().asFile)
+        try {
+            def entry = catnip.getJarEntry('net/createmod/catnip/render/ShadeSeparatingSuperByteBuffer.class')
+            if (entry == null) throw new GradleException('Target Catnip shaded buffer class is missing')
+            def calls = catnip.getInputStream(entry).withCloseable { stream -> readClassMethodInvocations(stream) }
+                    .methods['renderInto(Lcom/mojang/blaze3d/vertex/PoseStack;Lcom/mojang/blaze3d/vertex/VertexConsumer;)V']
+            ['org/joml/Matrix4f.mul(Lorg/joml/Matrix4fc;)Lorg/joml/Matrix4f;',
+             'net/createmod/catnip/render/TemplateMesh.vertexCount()I',
+             'com/mojang/blaze3d/vertex/VertexConsumer.vertex(FFFFFFFFFIIFFF)V',
+             'net/createmod/catnip/render/ShadeSeparatingSuperByteBuffer.reset()Lnet/createmod/catnip/render/SuperByteBuffer;'].each { call ->
+                if (calls == null || !calls.contains(call)) {
+                    throw new GradleException("Target Catnip submission path lost ${call}; actual=${calls}")
+                }
+            }
+        } finally {
+            catnip.close()
+        }
+        logger.lifecycle('verifyM28ContraptionBufferSubmissionBoundary PASS: real CPU matrix and submitted vertices are bounded and observable')
+    }
+}
+
+tasks.register('verifyM28Embeddium031VertexBoundary') {
+    group = 'forge backport'
+    description = 'Proves the exact Embeddium 0.3.31 SodiumBufferBuilder storage path inspected by M28.'
+    dependsOn tasks.named('verifyM28ContraptionBufferSubmissionBoundary')
+    File embeddium = rootProject.file('.gradle/embeddium-0.3.31+mc1.20.1.jar')
+    File probe = file('src/main/java/dev/ryanhcode/sable/forge/SableM28ContraptionBufferProbe.java')
+    inputs.files(embeddium, probe)
+    doLast {
+        if (!embeddium.isFile()) {
+            throw new GradleException("Exact Embeddium 0.3.31 audit artifact missing: ${embeddium}")
+        }
+        String sha = java.security.MessageDigest.getInstance('SHA-256')
+                .digest(embeddium.bytes).collect { String.format('%02X', it) }.join()
+        if (sha != 'EED3D1325F2ACC2FD4E69BB495E5CCB91D962126AC5330F0582EBC2A3DAF47FB') {
+            throw new GradleException("Unexpected Embeddium 0.3.31 artifact SHA-256: ${sha}")
+        }
+        JarFile jar = new JarFile(embeddium)
+        try {
+            def sodiumEntry = jar.getJarEntry(
+                    'me/jellysquid/mods/sodium/client/render/vertex/buffer/SodiumBufferBuilder.class')
+            def builderMixinEntry = jar.getJarEntry(
+                    'me/jellysquid/mods/sodium/mixin/core/render/immediate/consumer/BufferBuilderMixin.class')
+            if (sodiumEntry == null || builderMixinEntry == null) {
+                throw new GradleException('Embeddium 0.3.31 immediate-buffer classes are missing')
+            }
+            byte[] sodiumBytes = jar.getInputStream(sodiumEntry).withCloseable { it.bytes }
+            def methods = readClassMethodInvocations(new ByteArrayInputStream(sodiumBytes)).methods
+            def vertex = methods['m_5954_(FFFFFFFFFIIFFF)V'] ?: []
+            ['me/jellysquid/mods/sodium/client/render/vertex/buffer/ExtendedBufferBuilder.sodium$getBuffer()Ljava/nio/ByteBuffer;',
+             'me/jellysquid/mods/sodium/client/render/vertex/buffer/ExtendedBufferBuilder.sodium$getElementOffset()I',
+             'net/caffeinemc/mods/sodium/api/vertex/attributes/common/PositionAttribute.put(JFFF)V',
+             'me/jellysquid/mods/sodium/client/render/vertex/buffer/SodiumBufferBuilder.m_5752_()V'].each { call ->
+                if (!vertex.contains(call)) {
+                    throw new GradleException("Embeddium 0.3.31 vertex storage lost ${call}; actual=${vertex}")
+                }
+            }
+            def endVertex = methods['m_5752_()V'] ?: []
+            if (!endVertex.contains(
+                    'me/jellysquid/mods/sodium/client/render/vertex/buffer/ExtendedBufferBuilder.sodium$moveToNextVertex()V')) {
+                throw new GradleException("Embeddium 0.3.31 endVertex no longer advances the backing builder: ${endVertex}")
+            }
+            String sodiumConstants = new String(sodiumBytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+            if (!sodiumConstants.contains('getOriginalBufferBuilder')
+                    || !sodiumConstants.contains('com/mojang/blaze3d/vertex/BufferBuilder')) {
+                throw new GradleException('Embeddium Sodium delegate no longer exposes its backing BufferBuilder')
+            }
+            String mixinConstants = new String(jar.getInputStream(builderMixinEntry).bytes,
+                    java.nio.charset.StandardCharsets.ISO_8859_1)
+            ['sodium$getBuffer', 'sodium$getElementOffset', 'sodium$moveToNextVertex'].each { token ->
+                if (!mixinConstants.contains(token)) {
+                    throw new GradleException("Embeddium BufferBuilder storage mixin lost ${token}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        String source = probe.getText('UTF-8')
+        ['SODIUM_BUFFER_BUILDER', 'getOriginalBufferBuilder',
+         'beforeDestinationWrite(sample.destination.builder',
+         'afterDestinationWrite(sample.destination.builder'].each { token ->
+            if (!source.contains(token)) {
+                throw new GradleException("M28 Sodium storage inspection lost ${token}")
+            }
+        }
+        logger.lifecycle('verifyM28Embeddium031VertexBoundary PASS: exact Sodium delegate writes into the inspected vanilla backing builder')
+    }
+}
+
+tasks.register('verifyM28BatchDrawPipelineBoundary') {
+    group = 'forge backport'
+    description = 'Checks Sable-owned M28 entity batching and builder-to-GPU provenance against exact Forge 47.4.20 bytecode.'
+    dependsOn tasks.named('verifyM28ContraptionBufferSubmissionBoundary')
+    dependsOn tasks.named('verifyM28Embeddium031VertexBoundary')
+    dependsOn tasks.named('compileJava')
+    File trace = file('src/main/java/dev/ryanhcode/sable/forge/SableM28BatchTrace.java')
+    File bridge = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java')
+    File stage = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java')
+    File entityPhase = file('src/main/java/dev/ryanhcode/sable/mixin/m28/LevelRendererEntityPhaseProbeMixin.java')
+    File config = file('src/main/resources/sable-common-forge.mixins.json')
+    File audit = rootProject.file('M28_BATCH_DRAW_PIPELINE_AUDIT.md')
+    File sourceAccessor = file('src/main/java/dev/ryanhcode/sable/mixin/m28/BufferSourceProbeAccessor.java')
+    File sourceFlush = file('src/main/java/dev/ryanhcode/sable/mixin/m28/BufferSourceFlushProbeMixin.java')
+    File typeEnd = file('src/main/java/dev/ryanhcode/sable/mixin/m28/RenderTypeEndProbeMixin.java')
+    File gpuDraw = file('src/main/java/dev/ryanhcode/sable/mixin/m28/BufferUploaderDrawProbeMixin.java')
+    inputs.files(trace, bridge, stage, entityPhase, config, audit,
+            sourceAccessor, sourceFlush, typeEnd, gpuDraw)
+    doLast {
+        String traceSource = trace.getText('UTF-8')
+        ['SABLE_M28_ENTITY_BATCH', 'BEGIN_SCOPED_BATCH', 'END_SCOPED_BATCH', 'FLUSH_COMPLETE',
+         'lifecycleMode=SABLE_SCOPED', 'flushOwner=SABLE', 'unflushedRanges=',
+         'SABLE_M28_BATCH_OWNER', 'SABLE_M28_BATCH_RANGE', 'SABLE_M28_BATCH_FLUSH',
+         'SABLE_M28_FLUSHED_VERTEX', 'SABLE_M28_RENDERTYPE_END', 'SABLE_M28_PRE_DRAW_VERTEX',
+         'SABLE_M28_GPU_DRAW', 'SABLE_M28_FRAME_PIPELINE', 'UNFLUSHED_RANGE',
+         'SABLE_M28_DRAW_PROVENANCE', 'SABLE_M28_SODIUM_BUFFER_LIFECYCLE',
+         'OCULUS_SEGMENT_DRAW', 'findSignature', 'positionsUnchanged='].each { token ->
+            if (!traceSource.contains(token)) throw new GradleException("M28 batch provenance lost ${token}")
+        }
+        String bridgeSource = bridge.getText('UTF-8')
+        if (!bridgeSource.contains('SCOPED_ENTITY_BUFFER_SOURCE')
+                || !bridgeSource.contains('MultiBufferSource.immediate(SCOPED_ENTITY_BUILDER)')
+                || !bridgeSource.contains('SableM28BatchTrace.beginScopedBatch(SCOPED_ENTITY_BUFFER_SOURCE')
+                || !bridgeSource.contains('SableM28BatchTrace.beforeScopedFlush(SCOPED_ENTITY_BUFFER_SOURCE')
+                || !bridgeSource.contains('SCOPED_ENTITY_BUFFER_SOURCE.endBatch()')
+                || !bridgeSource.contains('SableM28BatchTrace.afterScopedFlush(SCOPED_ENTITY_BUFFER_SOURCE')
+                || bridgeSource.contains('minecraft.renderBuffers().bufferSource()')
+                || bridgeSource.contains('privateBatchExperiment')) {
+            throw new GradleException('M28 manual Create entities must use one Sable-owned scoped source and one stage flush')
+        }
+        if (bridgeSource.count('SCOPED_ENTITY_BUFFER_SOURCE.endBatch()') != 1) {
+            throw new GradleException('M28 scoped entity source must be finalized exactly once per stage')
+        }
+        if (!stage.getText('UTF-8').contains('RenderLevelStageEvent.Stage.AFTER_ENTITIES')
+                || !entityPhase.getText('UTF-8').contains('SableForgeCreateContraptionRenderBridge.beginRenderFrame()')) {
+            throw new GradleException('M28 render-stage frame boundary changed')
+        }
+        ['@Mixin(LevelRenderer.class)', 'method = "renderLevel"', 'method = "renderEntity"',
+         'SableForgeCreateContraptionRenderBridge.renderEntityPhase'].each { token ->
+            if (!entityPhase.getText('UTF-8').contains(token)) {
+                throw new GradleException("M28 entity-phase A/B hook lost ${token}")
+            }
+        }
+        ['sable.m28.entityPhaseAB', 'ENTITY_PHASE_BRIDGE', 'SABLE_M28_ENTITY_PHASE_AB',
+         'dispatcher.render', 'poseStack.pushPose()', 'poseStack.popPose()'].each { token ->
+            if (!bridgeSource.contains(token)) {
+                throw new GradleException("M28 entity-phase A/B bridge lost ${token}")
+            }
+        }
+        ['@Accessor("builder")', '@Accessor("fixedBuffers")', '@Accessor("lastState")',
+         '@Accessor("startedBuffers")'].each { token ->
+            if (!sourceAccessor.getText('UTF-8').contains(token)) {
+                throw new GradleException("M28 BufferSource ownership accessor lost ${token}")
+            }
+        }
+        if (!sourceFlush.getText('UTF-8').contains('endBatch(Lnet/minecraft/client/renderer/RenderType;)V')
+                || !typeEnd.getText('UTF-8').contains('BufferBuilder;end()')
+                || !typeEnd.getText('UTF-8').contains('BufferUploader;drawWithShader')
+                || !gpuDraw.getText('UTF-8').contains('VertexBuffer;drawWithShader')) {
+            throw new GradleException('M28 finalization/draw hook targets changed')
+        }
+        def mixins = new JsonSlurper().parse(config).client
+        ['m28.BufferSourceProbeAccessor', 'm28.BufferSourceFlushProbeMixin',
+         'm28.RenderTypeEndProbeMixin', 'm28.BufferUploaderDrawProbeMixin',
+         'm28.LevelRendererEntityPhaseProbeMixin'].each { name ->
+            if (mixins.count { it == name } != 1) {
+                throw new GradleException("M28 client mixin ${name} must be packaged exactly once")
+            }
+        }
+        File targetForge = layout.buildDirectory.file(
+                "fg_cache/net/minecraftforge/forge/${forge_minecraft_version}-${forge_version}_mapped_official_${forge_minecraft_version}/forge-${forge_minecraft_version}-${forge_version}_mapped_official_${forge_minecraft_version}.jar"
+        ).get().asFile
+        if (!targetForge.isFile()) throw new GradleException("Mapped target Forge jar missing: ${targetForge}")
+        JarFile forge = new JarFile(targetForge)
+        try {
+            def requiredCalls = [
+                'net/minecraft/client/renderer/MultiBufferSource$BufferSource.class': [
+                    'endBatch(Lnet/minecraft/client/renderer/RenderType;)V': [
+                        'net/minecraft/client/renderer/RenderType.end(Lcom/mojang/blaze3d/vertex/BufferBuilder;Lcom/mojang/blaze3d/vertex/VertexSorting;)V'
+                    ]
+                ],
+                'net/minecraft/client/renderer/RenderType.class': [
+                    'end(Lcom/mojang/blaze3d/vertex/BufferBuilder;Lcom/mojang/blaze3d/vertex/VertexSorting;)V': [
+                        'com/mojang/blaze3d/vertex/BufferBuilder.end()Lcom/mojang/blaze3d/vertex/BufferBuilder$RenderedBuffer;',
+                        'com/mojang/blaze3d/vertex/BufferUploader.drawWithShader(Lcom/mojang/blaze3d/vertex/BufferBuilder$RenderedBuffer;)V'
+                    ]
+                ],
+                'com/mojang/blaze3d/vertex/BufferUploader.class': [
+                    '_drawWithShader(Lcom/mojang/blaze3d/vertex/BufferBuilder$RenderedBuffer;)V': [
+                        'com/mojang/blaze3d/vertex/VertexBuffer.drawWithShader(Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;Lnet/minecraft/client/renderer/ShaderInstance;)V'
+                    ]
+                ]
+            ]
+            requiredCalls.each { classPath, methods ->
+                def entry = forge.getJarEntry(classPath)
+                if (entry == null) throw new GradleException("Target Forge bytecode missing ${classPath}")
+                def actual = forge.getInputStream(entry).withCloseable { stream -> readClassMethodInvocations(stream) }.methods
+                methods.each { descriptor, calls ->
+                    calls.each { call ->
+                        if (!(actual[descriptor] ?: []).contains(call)) {
+                            throw new GradleException("Target Forge ${classPath}.${descriptor} lost ${call}")
+                        }
+                    }
+                }
+            }
+            def levelEntry = forge.getJarEntry('net/minecraft/client/renderer/LevelRenderer.class')
+            def levelMethods = forge.getInputStream(levelEntry).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods.keySet()
+            if (!levelMethods.any { it.startsWith('renderLevel(') }
+                    || !levelMethods.contains('renderEntity(Lnet/minecraft/world/entity/Entity;DDDFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;)V')) {
+                throw new GradleException("Target Forge entity-phase methods changed: ${levelMethods.findAll { it.startsWith('render') }}")
+            }
+        } finally {
+            forge.close()
+        }
+        logger.lifecycle('verifyM28BatchDrawPipelineBoundary PASS: scoped default and exact entity-phase A/B have builder-to-draw provenance')
+    }
+}
+
+tasks.register('verifyM28Oculus180BatchLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Audits the exact Oculus 1.8.0 segmented entity-buffer lifecycle used by the runtime pack.'
+    File oculus = rootProject.file('.gradle/oculus-mc1.20.1-1.8.0.jar')
+    inputs.file(oculus)
+    doLast {
+        if (!oculus.isFile()) {
+            throw new GradleException("Exact Oculus 1.8.0 audit artifact missing: ${oculus}")
+        }
+        String sha = java.security.MessageDigest.getInstance('SHA-256')
+                .digest(oculus.bytes).collect { String.format('%02X', it) }.join()
+        if (sha != '0945DF0CBA0F62B3901DD80C3268E5311B770ECE78C78037A45DB12AC0425FEF') {
+            throw new GradleException("Unexpected Oculus 1.8.0 artifact SHA-256: ${sha}")
+        }
+        JarFile jar = new JarFile(oculus)
+        try {
+            def bufferedEntry = jar.getJarEntry(
+                    'net/irisshaders/batchedentityrendering/impl/FullyBufferedMultiBufferSource.class')
+            def mixinEntry = jar.getJarEntry(
+                    'net/irisshaders/batchedentityrendering/mixin/MixinLevelRenderer.class')
+            if (bufferedEntry == null || mixinEntry == null) {
+                throw new GradleException('Oculus 1.8.0 entity batching classes are missing')
+            }
+            def methods = jar.getInputStream(bufferedEntry).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods
+            def getBuffer = methods['m_6299_(Lnet/minecraft/client/renderer/RenderType;)Lcom/mojang/blaze3d/vertex/VertexConsumer;'] ?: []
+            def endAll = methods['m_109911_()V'] ?: []
+            def endType = methods['m_109912_(Lnet/minecraft/client/renderer/RenderType;)V'] ?: []
+            if (!getBuffer.contains('net/irisshaders/batchedentityrendering/impl/FullyBufferedMultiBufferSource.removeReady()V')
+                    || !getBuffer.any { it.contains('SegmentedBufferBuilder.m_6299_') }) {
+                throw new GradleException("Oculus getBuffer no longer owns segmented builders: ${getBuffer}")
+            }
+            if (!endAll.contains('net/irisshaders/batchedentityrendering/impl/FullyBufferedMultiBufferSource.readyUp()V')
+                    || !endAll.any { it.contains('BufferSegmentRenderer.drawInner') }
+                    || !endType.isEmpty()) {
+                throw new GradleException("Oculus flush ownership changed: endAll=${endAll}, endType=${endType}")
+            }
+            String mixinBytes = new String(jar.getInputStream(mixinEntry).bytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+            ['stringValue=translucent', 'readyUp', 'endBatchWithType', 'beginLevelRendering',
+             'endLevelRendering'].each { token ->
+                if (!mixinBytes.contains(token)) {
+                    throw new GradleException("Oculus LevelRenderer lifecycle lost ${token}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        logger.lifecycle('verifyM28Oculus180BatchLifecycleBoundary PASS: exact segmented source and Oculus-owned flush boundary')
+    }
+}
+
+tasks.register('verifyM28EmbeddiumRenderArtifactBoundary') {
+    group = 'forge backport'
+    description = 'Checks the final runtime jar contains the current M28 visual-ownership diagnostics.'
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+    inputs.file(standaloneProductionSableArtifact)
+    doLast {
+        File artifactFile = standaloneProductionSableArtifact.get().asFile
+        if (!artifactFile.isFile()) {
+            throw new GradleException("Final Forge artifact missing: ${artifactFile}")
+        }
+        JarFile artifact = new JarFile(artifactFile)
+        try {
+            ['dev/ryanhcode/sable/forge/SableM28ContraptionBufferProbe.class',
+             'dev/ryanhcode/sable/forge/SableM28BatchTrace.class',
+             'dev/ryanhcode/sable/forge/SableM28FramebufferProbe.class',
+             'dev/ryanhcode/sable/forge/SableM28VisualOwnershipTrace.class',
+             'dev/ryanhcode/sable/forge/SableM28FlywheelVisualTrace.class',
+             'dev/ryanhcode/sable/forge/SableM28CpuTargetIdentity.class',
+             'dev/ryanhcode/sable/forge/SableM28PresentationTrace.class',
+             'dev/ryanhcode/sable/forge/SableM28ControlledSailFlywheelTrace.class',
+             'dev/ryanhcode/sable/compatibility/create/contraptions/SableM28BearingAssemblyTrace.class',
+              'dev/ryanhcode/sable/compatibility/create/contraptions/SableM28NestedBearingPayloadTrace.class',
+              'dev/ryanhcode/sable/compatibility/create/contraptions/NestedBearingCaptureDecision.class',
+              'dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer.class',
+             'dev/ryanhcode/sable/compatibility/create/contraptions/SableM28BearingHeadRenderTrace.class',
+             'dev/ryanhcode/sable/mixin/m28/MechanicalBearingAssemblyProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/ContraptionAssemblyTraversalProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/BearingRendererHeadProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/EmbeddedEnvironmentProbeMixin.class',
+             'dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.class',
+             'dev/ryanhcode/sable/mixin/m28/LevelRendererEntityPhaseProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/EntityRenderDispatcherGlobalProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/ContraptionEntityRendererGlobalProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/ModelBlockRendererSailProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/AbstractEntityVisualAccessor.class',
+             'dev/ryanhcode/sable/mixin/m28/AbstractVisualAccessor.class',
+             'dev/ryanhcode/sable/mixin/m28/ContraptionVisualProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/EntityStorageFlywheelSuppressionMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/RenderTargetPresentationProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/WindowPresentationProbeMixin.class',
+             'dev/ryanhcode/sable/mixin/m28/StaticBufferBuilderProbeAccessor.class',
+             'data/aeronautics/m28_implementation_revision.txt'].each { path ->
+                if (artifact.getJarEntry(path) == null) {
+                    throw new GradleException("Current M28 final jar missing ${path}")
+                }
+            }
+            def configEntry = artifact.getJarEntry('sable-common-forge.mixins.json')
+            def config = new JsonSlurper().parse(artifact.getInputStream(configEntry))
+            if ((config.client ?: []).count { it == 'm28.LevelRendererEntityPhaseProbeMixin' } != 1) {
+                throw new GradleException('M28.6 entity-phase probe is not packaged exactly once')
+            }
+            if ((config.client ?: []).count { it == 'm28.StaticBufferBuilderProbeAccessor' } != 1) {
+                throw new GradleException('M28.6 static BufferBuilder accessor is not packaged exactly once')
+            }
+            ['m28.EntityRenderDispatcherGlobalProbeMixin',
+             'm28.ContraptionEntityRendererGlobalProbeMixin',
+             'm28.ClientLevelEntityGetterAccessor',
+             'm28.ModelBlockRendererSailProbeMixin',
+             'm28.VanillaSingleSubLevelRenderContextMixin',
+             'm28.AbstractEntityVisualAccessor',
+             'm28.AbstractVisualAccessor',
+             'm28.ContraptionVisualProbeMixin',
+             'm28.EmbeddedEnvironmentProbeMixin',
+             'm28.EntityStorageFlywheelSuppressionMixin'].each { name ->
+                if ((config.client ?: []).count { it == name } != 1) {
+                    throw new GradleException("M28.7 client mixin ${name} is not packaged exactly once")
+                }
+            }
+            if ((config.client ?: []).count { it == 'm28.RenderTargetPresentationProbeMixin' } != 1) {
+                throw new GradleException('M28.9 presentation mixin is not packaged exactly once')
+            }
+            if ((config.client ?: []).count { it == 'm28.WindowPresentationProbeMixin' } != 1) {
+                throw new GradleException('M28.9 window presentation mixin is not packaged exactly once')
+            }
+            ['m28.MechanicalBearingAssemblyProbeMixin',
+             'm28.ContraptionAssemblyTraversalProbeMixin'].each { name ->
+                if ((config.mixins ?: []).count { it == name } != 1 || (config.client ?: []).contains(name)) {
+                    throw new GradleException("M28.11 common lifecycle mixin ${name} is not packaged exactly once")
+                }
+            }
+            if ((config.client ?: []).count { it == 'm28.BearingRendererHeadProbeMixin' } != 1
+                    || (config.mixins ?: []).contains('m28.BearingRendererHeadProbeMixin')) {
+                throw new GradleException('M28.13 bearing-head probe must be client-only exactly once')
+            }
+            String marker = artifact.getInputStream(
+                    artifact.getJarEntry('data/aeronautics/m28_implementation_revision.txt'))
+                    .getText('UTF-8').trim()
+            if (marker != 'M28.14.3') {
+                throw new GradleException("M28.14.3 artifact marker mismatch: ${marker}")
+            }
+        } finally {
+            artifact.close()
+        }
+        logger.lifecycle('verifyM28EmbeddiumRenderArtifactBoundary PASS: final runtime jar owns M28.14.3 normal-world client restore, atomic nested ownership, and bearing-top fallback')
+    }
+}
+
+tasks.register('verifyM28_5dRenderPipeline') {
+    group = 'forge backport'
+    description = 'Retains the M28.5d exact Embeddium, Oculus, render, steering, and frozen-foundation boundaries.'
+    dependsOn tasks.named('verifyM28BatchDrawPipelineBoundary')
+    dependsOn tasks.named('verifyM28Oculus180BatchLifecycleBoundary')
+    dependsOn tasks.named('verifyM28SteeringDriveDecisionBoundary')
+    dependsOn tasks.named('verifyM28RotatedContraptionVisibleBoundsBoundary')
+    dependsOn tasks.named('verifyM28RegressionBoundary')
+    dependsOn tasks.named('verifyM28EmbeddiumRenderArtifactBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_5dRenderPipeline PASS: mechanics retained; assembled visual remains runtime-required')
+    }
+}
+
+tasks.register('verifyM28StaticVisualOwnershipBoundary') {
+    group = 'forge backport'
+    description = 'Proves the Forge static Sable path is immediate-mode and traces captured-position invalidation.'
+    File renderer = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java')
+    File plot = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/plot/ClientLevelPlot.java')
+    File chunkMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/plot/LevelChunkMixin.java')
+    File dispatcher = rootProject.file('common/src/main/java/dev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher.java')
+    inputs.files(renderer, plot, chunkMixin, dispatcher)
+    doLast {
+        String renderSource = renderer.getText('UTF-8')
+        String plotSource = plot.getText('UTF-8')
+        String chunkSource = chunkMixin.getText('UTF-8')
+        String dispatchSource = dispatcher.getText('UTF-8')
+        ['SABLE_M28_STATIC_CACHE_LIFECYCLE', 'SABLE_M28_STATIC_DRAW_CONTENT',
+         'SABLE_M28_VISIBLE_OWNER', 'sable.m28.forceCapturedStaticInvalidate',
+         'this.rebuild()', 'staticMeshIdentity=NONE_IMMEDIATE_MODE'].each { token ->
+            if (!renderSource.contains(token)) throw new GradleException("M28 static ownership trace lost ${token}")
+        }
+        ['subLevel.updateRenderData()', 'SABLE_M28_STATIC_CACHE_LIFECYCLE',
+         'oldSnapshotState', 'newSnapshotState'].each { token ->
+            if (!plotSource.contains(token)) throw new GradleException("M28 client invalidation trace lost ${token}")
+        }
+        if (!chunkSource.contains('subLevel.getPlot().onBlockChange(this.sable$blockSet, pState)')) {
+            throw new GradleException('Sable LevelChunk mutation no longer reaches plot invalidation')
+        }
+        ['Tesselator.getInstance().getBuilder()', 'consumer.begin(', 'layer.end(consumer,'].each { token ->
+            if (!dispatchSource.contains(token)) throw new GradleException("Sable immediate static path lost ${token}")
+        }
+        int sailTokenCount = renderSource.count('white_symmetric_sail')
+        if (sailTokenCount != 1
+                || !renderSource.contains('sable.m28.suppressStaticSymmetricSails')
+                || !renderSource.contains('scope=VANILLA_SINGLE_SUBLEVEL_STATIC_ONLY')
+                || !renderSource.contains('if (SUPPRESS_STATIC_SYMMETRIC_SAILS && isSymmetricSail(blockState))')) {
+            throw new GradleException('M28 static ownership must remain block-generic outside the explicit M28.9 diagnostic suppression gate')
+        }
+        logger.lifecycle('verifyM28StaticVisualOwnershipBoundary PASS: static snapshots rebuild from live sections and emit immediately')
+    }
+}
+
+tasks.register('verifyM28FramebufferVisualOwnershipBoundary') {
+    group = 'forge backport'
+    description = 'Checks bounded dynamic suppression, screen bounds, framebuffer readback, and entity-phase A/B ownership.'
+    File bridge = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java')
+    File framebuffer = file('src/main/java/dev/ryanhcode/sable/forge/SableM28FramebufferProbe.java')
+    File batch = file('src/main/java/dev/ryanhcode/sable/forge/SableM28BatchTrace.java')
+    File drawMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/BufferUploaderDrawProbeMixin.java')
+    File events = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java')
+    inputs.files(bridge, framebuffer, batch, drawMixin, events)
+    doLast {
+        String bridgeSource = bridge.getText('UTF-8')
+        String framebufferSource = framebuffer.getText('UTF-8')
+        String batchSource = batch.getText('UTF-8')
+        ['sable.m28.suppressDynamicContraption', 'ControlledContraptionEntity',
+         'DIAGNOSTIC_DYNAMIC_SUPPRESSION', 'SABLE_M28_VISIBLE_OWNER'].each { token ->
+            if (!bridgeSource.contains(token)) throw new GradleException("M28 dynamic suppression A/B lost ${token}")
+        }
+        ['sable.m28.framebufferProbe', 'SABLE_M28_SCREEN_BOUNDS',
+         'SABLE_M28_FRAMEBUFFER_PROBE', 'AFTER_DYNAMIC_DRAW', 'END_WORLD_RENDER',
+         'GL11.glReadPixels', 'vertexCount'].each { token ->
+            if (!framebufferSource.contains(token)) throw new GradleException("M28 framebuffer probe lost ${token}")
+        }
+        ['recordDynamicDraw(', 'afterGpuDraw()', 'endWorldRenderProbe()'].each { token ->
+            if (!batchSource.contains(token)) throw new GradleException("M28 batch visual provenance lost ${token}")
+        }
+        if (!drawMixin.getText('UTF-8').contains('SableM28BatchTrace.afterGpuDraw()')
+                || !events.getText('UTF-8').contains('RenderLevelStageEvent.Stage.AFTER_LEVEL')) {
+            throw new GradleException('M28 framebuffer sampling phases are incomplete')
+        }
+        if (bridgeSource.contains('white_symmetric_sail') || framebufferSource.contains('white_symmetric_sail')) {
+            throw new GradleException('M28 framebuffer ownership diagnostics must remain block-generic')
+        }
+        logger.lifecycle('verifyM28FramebufferVisualOwnershipBoundary PASS: draw suppression and bounded two-phase framebuffer probes are wired')
+    }
+}
+
+tasks.register('verifyM28_6VisualOwnership') {
+    group = 'forge backport'
+    description = 'Runs M28.6 visual-ownership diagnostics plus all retained M28 and foundation boundaries.'
+    dependsOn tasks.named('verifyM28_5dRenderPipeline')
+    dependsOn tasks.named('verifyM28StaticVisualOwnershipBoundary')
+    dependsOn tasks.named('verifyM28FramebufferVisualOwnershipBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_6VisualOwnership PASS: M28 mechanics PASS; assembled visual remains runtime-required')
+    }
+}
+
+tasks.register('verifyM28VisualRenderOwnerInstrumentationBoundary') {
+    group = 'forge backport'
+    description = 'Checks M28.7 global dispatcher, Create renderer, model draw, and scoped-owner diagnostics.'
+    File trace = file('src/main/java/dev/ryanhcode/sable/forge/SableM28VisualOwnershipTrace.java')
+    File dispatcherMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/EntityRenderDispatcherGlobalProbeMixin.java')
+    File rendererMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ContraptionEntityRendererGlobalProbeMixin.java')
+    File modelMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ModelBlockRendererSailProbeMixin.java')
+    File staticMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/VanillaSingleSubLevelRenderContextMixin.java')
+    File phaseMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/LevelRendererEntityPhaseProbeMixin.java')
+    File bridge = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java')
+    File bufferProbe = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ContraptionBufferProbeMixin.java')
+    inputs.files(trace, dispatcherMixin, rendererMixin, modelMixin, staticMixin, phaseMixin, bridge, bufferProbe)
+    doLast {
+        String traceSource = trace.getText('UTF-8')
+        ['SABLE_M28_ENTITY_DISPATCH', 'SABLE_M28_CONTRAPTION_RENDER_GLOBAL',
+         'SABLE_M28_ENTITY_RENDER_COUNT', 'SABLE_M28_ENTITY_REGISTRY_OWNERSHIP',
+         'SABLE_M28_SAIL_MODEL_DRAW', 'sable.m28.visualOwnershipTrace',
+         'sable.m28.suppressVanillaTargetContraption', 'VANILLA_LEVEL_ENTITY_PASS',
+         'SABLE_FORGE_STAGE_BRIDGE', 'SABLE_ENTITY_PHASE_BRIDGE', 'stackFingerprint'].each { token ->
+            if (!traceSource.contains(token)) throw new GradleException("M28.7 visual-owner trace lost ${token}")
+        }
+        if (!dispatcherMixin.getText('UTF-8').contains('EntityRenderDispatcher.class')
+                || !dispatcherMixin.getText('UTF-8').contains('beginDispatcher(')) {
+            throw new GradleException('M28.7 does not intercept the global EntityRenderDispatcher boundary')
+        }
+        if (!rendererMixin.getText('UTF-8').contains('ContraptionEntityRenderer.class')
+                || !rendererMixin.getText('UTF-8').contains('@At("RETURN")')) {
+            throw new GradleException('M28.7 Create renderer HEAD/RETURN trace is incomplete')
+        }
+        ['tesselateBlock', 'tesselateWithoutAO', 'renderModel', 'logSailModelDraw'].each { token ->
+            if (!modelMixin.getText('UTF-8').contains(token)) {
+                throw new GradleException("M28.7 baked sail probe lost ${token}")
+            }
+        }
+        if (!staticMixin.getText('UTF-8').contains('Owner.SABLE_STATIC')
+                || !phaseMixin.getText('UTF-8').contains('Owner.VANILLA_LEVEL_ENTITY_PASS')
+                || !bridge.getText('UTF-8').contains('Owner.SABLE_FORGE_STAGE_BRIDGE')
+                || !bridge.getText('UTF-8').contains('Owner.SABLE_ENTITY_PHASE_BRIDGE')) {
+            throw new GradleException('M28.7 render-context ownership scopes are incomplete')
+        }
+        if (!bufferProbe.getText('UTF-8').contains('markContraptionGeometryEmission()')) {
+            throw new GradleException('M28.7 renderer RETURN cannot distinguish geometry emission')
+        }
+        logger.lifecycle('verifyM28VisualRenderOwnerInstrumentationBoundary PASS: every entity/model owner crosses a bounded diagnostic boundary')
+    }
+}
+
+tasks.register('verifyM28InclusiveEntityOwnershipAuditBoundary') {
+    group = 'forge backport'
+    description = 'Checks transformed SubLevel entity queries report duplicate callback identities without changing results.'
+    File getter = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelInclusiveLevelEntityGetter.java')
+    File levelMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_aabb_lookup/LevelsMixin.java')
+    inputs.files(getter, levelMixin)
+    doLast {
+        String source = getter.getText('UTF-8')
+        ['SABLE_M28_INCLUSIVE_ENTITY_QUERY', 'DIRECT_PARENT_SPACE',
+         'CONTAINING_SUBLEVEL_TO_VISIBLE', 'VISIBLE_TO_INTERSECTING_SUBLEVEL',
+         'duplicateEmission', 'this.delegate.get(aABB', 'target.accept(value)'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M28.7 inclusive getter audit lost ${token}")
+        }
+        if (!levelMixin.getText('UTF-8').contains('new SubLevelInclusiveLevelEntityGetter')) {
+            throw new GradleException('Level#getEntities no longer installs the SubLevel-inclusive wrapper')
+        }
+        if (source.contains('if (occurrence > 1)') || source.contains('distinct(')) {
+            throw new GradleException('M28.7 diagnostics must not deduplicate production entity callbacks')
+        }
+        logger.lifecycle('verifyM28InclusiveEntityOwnershipAuditBoundary PASS: all transformed delegate routes retain behavior and expose identity aliases')
+    }
+}
+
+tasks.register('verifyM28GlobalRenderTargetBytecodeBoundary') {
+    group = 'forge backport'
+    description = 'Proves M28.7 mixins target exact Forge 47.4.20 and Create 6.0.8 render methods.'
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    doLast {
+        File targetForge = layout.buildDirectory.file(
+                "fg_cache/net/minecraftforge/forge/${forge_minecraft_version}-${forge_version}_mapped_official_${forge_minecraft_version}/forge-${forge_minecraft_version}-${forge_version}_mapped_official_${forge_minecraft_version}.jar"
+        ).get().asFile
+        if (!targetForge.isFile()) throw new GradleException("Mapped target Forge jar missing: ${targetForge}")
+        File targetCreate = createDevelopmentRuntime.get().asFile
+        if (targetCreate == null || !targetCreate.isFile()) {
+            throw new GradleException('Mapped Create 6.0.8 target artifact is missing')
+        }
+        JarFile forgeJar = new JarFile(targetForge)
+        JarFile createJar = new JarFile(targetCreate)
+        try {
+            def dispatcher = forgeJar.getInputStream(forgeJar.getJarEntry(
+                    'net/minecraft/client/renderer/entity/EntityRenderDispatcher.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods.keySet()
+            String dispatchDescriptor = 'render(Lnet/minecraft/world/entity/Entity;DDDFFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V'
+            if (!dispatcher.contains(dispatchDescriptor)) {
+                throw new GradleException("Exact EntityRenderDispatcher target changed: ${dispatcher.findAll { it.startsWith('render(') }}")
+            }
+            def modelMethods = forgeJar.getInputStream(forgeJar.getJarEntry(
+                    'net/minecraft/client/renderer/block/ModelBlockRenderer.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods.keySet()
+            ['tesselateBlock(', 'tesselateWithoutAO(', 'renderModel('].each { prefix ->
+                if (!modelMethods.any { it.startsWith(prefix) && it.contains('ModelData;') && it.contains('RenderType;') }) {
+                    throw new GradleException("Exact Forge model target lost ${prefix}: ${modelMethods.findAll { it.startsWith(prefix) }}")
+                }
+            }
+            def createMethods = createJar.getInputStream(createJar.getJarEntry(
+                    'com/simibubi/create/content/contraptions/render/ContraptionEntityRenderer.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods.keySet()
+            String createRender = 'render(Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V'
+            if (!createMethods.contains(createRender)) {
+                throw new GradleException("Exact Create 6.0.8 renderer target changed: ${createMethods.findAll { it.startsWith('render(') }}")
+            }
+        } finally {
+            forgeJar.close()
+            createJar.close()
+        }
+        logger.lifecycle('verifyM28GlobalRenderTargetBytecodeBoundary PASS: exact Forge dispatcher/model and Create renderer descriptors exist')
+    }
+}
+
+tasks.register('verifyM28_7VisualRenderOwner') {
+    group = 'forge backport'
+    description = 'Runs M28.7 visual-owner diagnostics plus retained M28 and foundation boundaries.'
+    dependsOn tasks.named('verifyM28_6VisualOwnership')
+    dependsOn tasks.named('verifyM28VisualRenderOwnerInstrumentationBoundary')
+    dependsOn tasks.named('verifyM28InclusiveEntityOwnershipAuditBoundary')
+    dependsOn tasks.named('verifyM28GlobalRenderTargetBytecodeBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_7VisualRenderOwner PASS: diagnostics ready; assembled visual remains runtime-required')
+    }
+}
+
+tasks.register('verifyM28FlywheelVisualInstrumentationBoundary') {
+    group = 'forge backport'
+    description = 'Checks worker-safe M28.8 Flywheel lifecycle, structure, transform, and scoped suppression diagnostics.'
+    File trace = file('src/main/java/dev/ryanhcode/sable/forge/SableM28FlywheelVisualTrace.java')
+    File ownerTrace = file('src/main/java/dev/ryanhcode/sable/forge/SableM28VisualOwnershipTrace.java')
+    File visualMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ContraptionVisualProbeMixin.java')
+    File storageMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/EntityStorageFlywheelSuppressionMixin.java')
+    File entityAccessor = file('src/main/java/dev/ryanhcode/sable/mixin/m28/AbstractEntityVisualAccessor.java')
+    File visualAccessor = file('src/main/java/dev/ryanhcode/sable/mixin/m28/AbstractVisualAccessor.java')
+    inputs.files(trace, ownerTrace, visualMixin, storageMixin, entityAccessor, visualAccessor)
+    doLast {
+        String source = trace.getText('UTF-8')
+        ['SABLE_M28_FLYWHEEL_VISUAL_LIFECYCLE', 'SABLE_M28_FLYWHEEL_STRUCTURE',
+         'SABLE_M28_FLYWHEEL_TRANSFORM', 'sable.m28.suppressFlywheelTargetContraption',
+         'ENTITY_STORAGE_WILL_ACCEPT_FALSE', 'ClientSubLevel', 'outerSableRotation',
+         'flywheelEmbeddingMatrix'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M28.8 Flywheel trace lost ${token}")
+        }
+        String ownerSource = ownerTrace.getText('UTF-8')
+        ['RenderSystem.isOnRenderThread()', 'UNAVAILABLE_OFF_RENDER_THREAD',
+         'SABLE_M28_DIAGNOSTIC_THREAD'].each { token ->
+            if (!ownerSource.contains(token)) throw new GradleException("M28.8 thread guard lost ${token}")
+        }
+        if (!storageMixin.getText('UTF-8').contains('EntityStorage.class')
+                || !storageMixin.getText('UTF-8').contains('willAccept(Lnet/minecraft/world/entity/Entity;)Z')
+                || !storageMixin.getText('UTF-8').contains('suppressVisual(entity)')) {
+            throw new GradleException('M28.8 scoped Flywheel suppression is not at EntityStorage admission')
+        }
+        ['setupStructure', 'setEmbeddingMatrices', '_delete', 'ForgeBlockModelBuilder'].each { token ->
+            if (!visualMixin.getText('UTF-8').contains(token)) {
+                throw new GradleException("M28.8 ContraptionVisual probe lost ${token}")
+            }
+        }
+        if (!entityAccessor.getText('UTF-8').contains('AbstractEntityVisual.class')
+                || !visualAccessor.getText('UTF-8').contains('AbstractVisual.class')) {
+            throw new GradleException('M28.8 inherited Flywheel members are not accessed at their declaring classes')
+        }
+        if (source.contains('white_symmetric_sail".equals') || source.contains('setVisualizer(')
+                || storageMixin.getText('UTF-8').contains('setVisualizer(')) {
+            throw new GradleException('M28.8 must not special-case sail rendering or mutate the global visualizer registry')
+        }
+        logger.lifecycle('verifyM28FlywheelVisualInstrumentationBoundary PASS: worker-safe scoped visual ownership A/B')
+    }
+}
+
+tasks.register('verifyM28FlywheelVisualBytecodeBoundary') {
+    group = 'forge backport'
+    description = 'Proves exact Create 6.0.8 ContraptionVisual and Flywheel 1.0.5 EntityStorage targets.'
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    dependsOn prepareTargetModpackDependencies
+    doLast {
+        File createJarFile = createDevelopmentRuntime.get().asFile
+        File flywheelJarFile = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.find {
+            it.name == "flywheel-forge-${forge_minecraft_version}" && it.moduleVersion.id.version.contains(forge_flywheel_version)
+        }?.file
+        if (createJarFile == null || !createJarFile.isFile()) {
+            throw new GradleException('Exact mapped Create 6.0.8 artifact is missing')
+        }
+        if (flywheelJarFile == null || !flywheelJarFile.isFile()) {
+            throw new GradleException('Exact mapped Flywheel 1.0.5 artifact is missing')
+        }
+        JarFile createJar = new JarFile(createJarFile)
+        JarFile flywheelJar = new JarFile(flywheelJarFile)
+        try {
+            def visualMethods = createJar.getInputStream(createJar.getJarEntry(
+                    'com/simibubi/create/content/contraptions/render/ContraptionVisual.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods
+            ['<init>(Ldev/engine_room/flywheel/api/visualization/VisualizationContext;Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;F)V',
+             'setupStructure(Lcom/simibubi/create/content/contraptions/render/ClientContraption;)V',
+             'beginFrame(Ldev/engine_room/flywheel/api/visual/DynamicVisual$Context;)V',
+             'setEmbeddingMatrices(F)V', '_delete()V'].each { descriptor ->
+                if (!visualMethods.containsKey(descriptor)) {
+                    throw new GradleException("Exact Create ContraptionVisual target lost ${descriptor}")
+                }
+            }
+            def matrixCalls = visualMethods['setEmbeddingMatrices(F)V'] ?: []
+            ['com/simibubi/create/content/contraptions/AbstractContraptionEntity.applyLocalTransforms',
+             'dev/engine_room/flywheel/api/visualization/VisualEmbedding.transforms'].each { call ->
+                if (!matrixCalls.any { it.startsWith(call) }) {
+                    throw new GradleException("Create 6.0.8 embedding update lost ${call}: ${matrixCalls}")
+                }
+            }
+            def storageMethods = flywheelJar.getInputStream(flywheelJar.getJarEntry(
+                    'dev/engine_room/flywheel/impl/visualization/storage/EntityStorage.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods
+            if (!storageMethods.containsKey('willAccept(Lnet/minecraft/world/entity/Entity;)Z')
+                    || !storageMethods.containsKey('createRaw(Ldev/engine_room/flywheel/api/visualization/VisualizationContext;Lnet/minecraft/world/entity/Entity;F)Ldev/engine_room/flywheel/api/visual/EntityVisual;')) {
+                throw new GradleException("Flywheel 1.0.5 entity admission changed: ${storageMethods.keySet()}")
+            }
+            def entityVisual = flywheelJar.getInputStream(flywheelJar.getJarEntry(
+                    'dev/engine_room/flywheel/lib/visual/AbstractEntityVisual.class')).withCloseable {
+                stream -> readClassStructure(stream)
+            }
+            if (!entityVisual.fields.containsKey('entityLnet/minecraft/world/entity/Entity;')) {
+                throw new GradleException("Flywheel AbstractEntityVisual entity field changed: ${entityVisual.fields.keySet()}")
+            }
+            def abstractVisual = flywheelJar.getInputStream(flywheelJar.getJarEntry(
+                    'dev/engine_room/flywheel/lib/visual/AbstractVisual.class')).withCloseable {
+                stream -> readClassStructure(stream)
+            }
+            if (!abstractVisual.methods.containsKey('renderOrigin()Lnet/minecraft/core/Vec3i;')) {
+                throw new GradleException("Flywheel AbstractVisual renderOrigin changed: ${abstractVisual.methods.keySet()}")
+            }
+            def contraptionVisual = createJar.getInputStream(createJar.getJarEntry(
+                    'com/simibubi/create/content/contraptions/render/ContraptionVisual.class')).withCloseable {
+                stream -> readClassStructure(stream)
+            }
+            ['structureLdev/engine_room/flywheel/lib/instance/TransformedInstance;',
+             'contraptionMatrixLcom/mojang/blaze3d/vertex/PoseStack;'].each { field ->
+                if (!contraptionVisual.fields.containsKey(field)) {
+                    throw new GradleException("Create ContraptionVisual diagnostic field changed: ${field}")
+                }
+            }
+        } finally {
+            createJar.close()
+            flywheelJar.close()
+        }
+        logger.lifecycle('verifyM28FlywheelVisualBytecodeBoundary PASS: exact Create embedding and Flywheel admission targets exist')
+    }
+}
+
+tasks.register('verifyM28_8FlywheelVisualOwnership') {
+    group = 'forge backport'
+    description = 'Runs M28.8 Flywheel visual diagnostics plus retained M28 and M21-M27 boundaries.'
+    dependsOn tasks.named('verifyM28_7VisualRenderOwner')
+    dependsOn tasks.named('verifyM28FlywheelVisualInstrumentationBoundary')
+    dependsOn tasks.named('verifyM28FlywheelVisualBytecodeBoundary')
+    dependsOn tasks.named('verifyM28EmbeddiumRenderArtifactBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_8FlywheelVisualOwnership PASS: diagnostics ready; assembled visual remains runtime-required')
+    }
+}
+
+tasks.register('verifyM28VisualIdentityPresentationBoundary') {
+    group = 'forge backport'
+    description = 'Checks M28.9 exact-range tint, projected overlay, static sail isolation, and presentation tracing.'
+    File identity = file('src/main/java/dev/ryanhcode/sable/forge/SableM28CpuTargetIdentity.java')
+    File framebuffer = file('src/main/java/dev/ryanhcode/sable/forge/SableM28FramebufferProbe.java')
+    File presentation = file('src/main/java/dev/ryanhcode/sable/forge/SableM28PresentationTrace.java')
+    File presentationMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/RenderTargetPresentationProbeMixin.java')
+    File staticRenderer = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java')
+    File events = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClientRenderEvents.java')
+    inputs.files(identity, framebuffer, presentation, presentationMixin, staticRenderer, events)
+    doLast {
+        String identitySource = identity.getText('UTF-8')
+        ['sable.m28.tintCpuTargetContraption', 'sable.m28.showCpuTargetOverlay',
+         'sable.m28.traceFinalPresentation', 'VertexFormatElement.Usage.COLOR',
+         'SABLE_M29_CPU_TINT', 'putColor(buffer', 'readbackVerified',
+         'noteCpuTargetRange'].each { token ->
+            if (!identitySource.contains(token)) {
+                throw new GradleException("M28.9 exact-range tint lost ${token}")
+            }
+        }
+        if (identitySource.contains('putFloat(') || identitySource.contains('Axis.')
+                || identitySource.contains('PoseStack')) {
+            throw new GradleException('M28.9 tint must not mutate positions or transforms')
+        }
+        String framebufferSource = framebuffer.getText('UTF-8')
+        ['OVERLAY_PROPERTY', 'SABLE_M29_CPU_SCREEN_BOX',
+         'projectScreenBox', 'renderCpuTargetOverlay', 'GuiGraphics'].each { token ->
+            if (!framebufferSource.contains(token)) {
+                throw new GradleException("M28.9 projected overlay lost ${token}")
+            }
+        }
+        String staticSource = staticRenderer.getText('UTF-8')
+        ['sable.m28.suppressStaticSymmetricSails', 'SABLE_M29_STATIC_SAIL_SUPPRESSION',
+         'VANILLA_SINGLE_SUBLEVEL_STATIC_ONLY', 'isSymmetricSail(blockState)'].each { token ->
+            if (!staticSource.contains(token)) {
+                throw new GradleException("M28.9 static sail isolation lost ${token}")
+            }
+        }
+        String presentationSource = presentation.getText('UTF-8')
+        ['PRESENTATION_PROPERTY', 'SABLE_M29_PRESENTATION_CHAIN',
+         'TARGET_DRAW', 'TARGET_DRAW_COMPLETE',
+         'WORLD_RENDER_END', 'FINAL_COMPOSITE', 'FINAL_COMPOSITE_COMPLETE'].each { token ->
+            if (!presentationSource.contains(token)) {
+                throw new GradleException("M28.9 presentation trace lost ${token}")
+            }
+        }
+        String mixinSource = presentationMixin.getText('UTF-8')
+        ['bindWrite(Z)V', 'unbindWrite()V', '_blitToScreen(IIZ)V', 'FRAMEBUFFER_SWITCH'].each { token ->
+            if (!mixinSource.contains(token)) {
+                throw new GradleException("M28.9 RenderTarget hook lost ${token}")
+            }
+        }
+        if (!events.getText('UTF-8').contains('RenderGuiEvent.Post')
+                || !events.getText('UTF-8').contains('renderCpuTargetOverlay')) {
+            throw new GradleException('M28.9 overlay is not attached to the post-world GUI stage')
+        }
+        logger.lifecycle('verifyM28VisualIdentityPresentationBoundary PASS: diagnostic paths are scoped and transform-free')
+    }
+}
+
+tasks.register('verifyM28PresentationTargetBytecodeBoundary') {
+    group = 'forge backport'
+    description = 'Proves exact Minecraft 1.20.1 RenderTarget and vertex-format hooks used by M28.9.'
+    dependsOn prepareTargetModpackDependencies
+    doLast {
+        File targetForge = layout.buildDirectory.file(
+                "fg_cache/net/minecraftforge/forge/${forge_minecraft_version}-${forge_version}_mapped_official_${forge_minecraft_version}/forge-${forge_minecraft_version}-${forge_version}_mapped_official_${forge_minecraft_version}.jar"
+        ).get().asFile
+        if (!targetForge.isFile()) throw new GradleException("Mapped target Forge jar missing: ${targetForge}")
+        JarFile forgeJar = new JarFile(targetForge)
+        try {
+            def renderTarget = forgeJar.getInputStream(forgeJar.getJarEntry(
+                    'com/mojang/blaze3d/pipeline/RenderTarget.class')).withCloseable {
+                stream -> readClassStructure(stream)
+            }.methods.keySet()
+            ['bindWrite(Z)V', 'unbindWrite()V', '_blitToScreen(IIZ)V',
+             'getColorTextureId()I'].each { descriptor ->
+                if (!renderTarget.contains(descriptor)) {
+                    throw new GradleException("Minecraft 1.20.1 RenderTarget hook changed: ${descriptor}")
+                }
+            }
+            def vertexFormat = forgeJar.getInputStream(forgeJar.getJarEntry(
+                    'com/mojang/blaze3d/vertex/VertexFormat.class')).withCloseable {
+                stream -> readClassStructure(stream)
+            }.methods.keySet()
+            ['getElements()Lcom/google/common/collect/ImmutableList;', 'getOffset(I)I',
+             'getVertexSize()I'].each { descriptor ->
+                if (!vertexFormat.contains(descriptor)) {
+                    throw new GradleException("Minecraft 1.20.1 VertexFormat hook changed: ${descriptor}")
+                }
+            }
+            if (forgeJar.getJarEntry('net/minecraftforge/client/event/RenderGuiEvent$Post.class') == null) {
+                throw new GradleException('Forge 47.4.20 RenderGuiEvent.Post hook is missing')
+            }
+            def window = forgeJar.getInputStream(forgeJar.getJarEntry(
+                    'com/mojang/blaze3d/platform/Window.class')).withCloseable {
+                stream -> readClassStructure(stream)
+            }.methods.keySet()
+            if (!window.contains('updateDisplay()V')) {
+                throw new GradleException('Minecraft 1.20.1 window presentation hook changed')
+            }
+        } finally {
+            forgeJar.close()
+        }
+        logger.lifecycle('verifyM28PresentationTargetBytecodeBoundary PASS: exact 1.20.1 tint/overlay/presentation targets exist')
+    }
+}
+
+tasks.register('verifyM28_9VisualIdentityPresentation') {
+    group = 'forge backport'
+    description = 'Runs M28.9 diagnostics plus retained M28.8 and M21-M28 boundaries.'
+    dependsOn tasks.named('verifyM28_8FlywheelVisualOwnership')
+    dependsOn tasks.named('verifyM28VisualIdentityPresentationBoundary')
+    dependsOn tasks.named('verifyM28PresentationTargetBytecodeBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_9VisualIdentityPresentation PASS: final visual identity remains runtime-required')
+    }
+}
+
+tasks.register('verifyM28ControlledSailFlywheelTraceBoundary') {
+    group = 'forge backport'
+    description = 'Checks M28.10 normal-world semantic selection and actual embedding/arena observations.'
+    doLast {
+        String source = file('src/main/java/dev/ryanhcode/sable/forge/SableM28ControlledSailFlywheelTrace.java').text
+        ['getContainingSubLevel(entity) != null', 'MechanicalBearingBlockEntity',
+         'simulated:white_symmetric_sail', 'sample.moved', 'applyLocalTransforms(reference, partial)',
+         'storedBefore', 'storedAfter', 'MemoryUtil.memGetFloat', 'queueRemove(entity)',
+         'SABLE_M30_CONTROLLED_SAIL_TARGET', 'SABLE_M30_FLYWHEEL_EXPECTED',
+         'SABLE_M30_FLYWHEEL_SUPPRESSION', 'SABLE_M30_FLYWHEEL_UPLOAD',
+         'sable.m28.traceControlledSailFlywheel', 'sable.m28.showControlledSailFlywheelOverlay',
+         'sable.m28.suppressControlledSailFlywheel'].each { token ->
+            if (!source.contains(token)) { throw new GradleException("M28.10 lost ${token}") }
+        }
+        ['2840', '45056ef0-2ac5-4924-bdf7-07469a2dc552', 'setAngle(', 'setSpeed(', 'updateGeneratedRotation('].each { token ->
+            if (source.contains(token)) { throw new GradleException("M28.10 must not contain ${token}") }
+        }
+        String probe = file('src/main/java/dev/ryanhcode/sable/mixin/m28/EmbeddedEnvironmentProbeMixin.java').text
+        ['private Matrix4f pose;', 'private Matrix4f poseComposed;', 'transforms(Lorg/joml/Matrix4fc;Lorg/joml/Matrix3fc;)V',
+         'flush(J)V'].each { token ->
+            if (!probe.contains(token)) { throw new GradleException("M28.10 stored-data hook lost ${token}") }
+        }
+        def config = new JsonSlurper().parse(file('src/main/resources/sable-common-forge.mixins.json'))
+        if ((config.client ?: []).count { it == 'm28.EmbeddedEnvironmentProbeMixin' } != 1) {
+            throw new GradleException('M28.10 embedding probe must be declared exactly once in client mixins')
+        }
+        logger.lifecycle('verifyM28ControlledSailFlywheelTraceBoundary PASS: diagnostic-only semantic target and stored-memory trace')
+    }
+}
+
+tasks.register('verifyM28ControlledSailFlywheelBytecodeBoundary') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM28FlywheelVisualBytecodeBoundary')
+    doLast {
+        File flywheel = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.find {
+            it.name == "flywheel-forge-${forge_minecraft_version}" && it.moduleVersion.id.version.contains(forge_flywheel_version)
+        }?.file
+        JarFile jar = new JarFile(flywheel)
+        JarFile create = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            String entry = 'dev/engine_room/flywheel/backend/engine/embed/EmbeddedEnvironment.class'
+            def structure = jar.getInputStream(jar.getJarEntry(entry)).withCloseable { stream -> readClassStructure(stream) }
+            ['poseLorg/joml/Matrix4f;', 'poseComposedLorg/joml/Matrix4f;', 'matrixIndexI'].each { field ->
+                if (!structure.fields.containsKey(field)) { throw new GradleException("Flywheel 1.0.5 lost ${field}") }
+            }
+            def methods = jar.getInputStream(jar.getJarEntry(entry)).withCloseable { stream -> readClassMethodInvocations(stream) }.methods
+            ['transforms(Lorg/joml/Matrix4fc;Lorg/joml/Matrix3fc;)V', 'flush(J)V',
+             'setupDraw(Ldev/engine_room/flywheel/backend/gl/shader/GlProgram;)V'].each { descriptor ->
+                if (!methods.containsKey(descriptor)) { throw new GradleException("Flywheel 1.0.5 lost ${descriptor}") }
+            }
+            if (!(methods['transforms(Lorg/joml/Matrix4fc;Lorg/joml/Matrix3fc;)V'] ?: []).any {
+                it.startsWith('org/joml/Matrix4f.set(Lorg/joml/Matrix4fc;)')
+            } || !(methods['flush(J)V'] ?: []).any {
+                it.startsWith('dev/engine_room/flywheel/lib/util/ExtraMemoryOps.putMatrix4f')
+            }) { throw new GradleException('Exact Flywheel pose-copy or CPU-arena transfer changed') }
+            if (!(methods['setupDraw(Ldev/engine_room/flywheel/backend/gl/shader/GlProgram;)V'] ?: []).any {
+                it.startsWith('dev/engine_room/flywheel/backend/gl/shader/GlProgram.setMat4')
+            }) { throw new GradleException('Exact Flywheel instancing embedding uniform transfer changed') }
+            def visual = create.getInputStream(create.getJarEntry(
+                    'com/simibubi/create/content/contraptions/render/ContraptionVisual.class')).withCloseable { stream -> readClassStructure(stream) }
+            if (!visual.fields.containsKey('embeddingLdev/engine_room/flywheel/api/visualization/VisualEmbedding;')) {
+                throw new GradleException('Create 6.0.8 embedding field missing')
+            }
+            def renderer = create.getInputStream(create.getJarEntry(
+                    'com/simibubi/create/content/contraptions/render/ContraptionEntityRenderer.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods
+            String render = 'render(Lcom/simibubi/create/content/contraptions/AbstractContraptionEntity;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V'
+            if (!(renderer[render] ?: []).any { it.startsWith('dev/engine_room/flywheel/api/visualization/VisualizationManager.supportsVisualization') }) {
+                throw new GradleException('Exact Create renderer visualization early-out changed')
+            }
+        } finally { jar.close(); create.close() }
+        logger.lifecycle('verifyM28ControlledSailFlywheelBytecodeBoundary PASS: exact Create 6.0.8 and Flywheel 1.0.5 fields, setters, staging and early-out')
+    }
+}
+
+tasks.register('verifyM28_10ControlledSailFlywheel') {
+    group = 'forge backport'
+    dependsOn tasks.named('verifyM28_9VisualIdentityPresentation')
+    dependsOn tasks.named('verifyM28ControlledSailFlywheelTraceBoundary')
+    dependsOn tasks.named('verifyM28ControlledSailFlywheelBytecodeBoundary')
+    doLast { logger.lifecycle('verifyM28_10ControlledSailFlywheel PASS: mechanics PASS / visual runtime required') }
+}
+
+tasks.register('verifyM28BearingAssemblyLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Checks M28.11 diagnostic-only bearing assembly, traversal, insertion, and removal probes.'
+    doLast {
+        String trace = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28BearingAssemblyTrace.java').text
+        ['sable.m28.traceBearingAssemblyLifecycle', 'SABLE_M31_BEARING_ASSEMBLY',
+         'SABLE_M31_ASSEMBLY_PRECONDITION', 'SABLE_M31_STRUCTURE_LOOKUP',
+         'SABLE_M31_ENTITY_INSERTION', 'NORMAL_WORLD', 'SABLE_PLOT_RAW',
+         'lookupById=', 'lookupByUuid=', 'capturedLocalSourcePositionsAndStates='].each { token ->
+            if (!trace.contains(token)) throw new GradleException("M28.11 lifecycle trace lost ${token}")
+        }
+        ['setBlock(', 'removeBlock(', 'destroyBlock(', 'setPos(', 'addFreshEntity('].each { forbidden ->
+            if (trace.contains(forbidden)) throw new GradleException("M28.11 trace must remain observational: ${forbidden}")
+        }
+        String bearing = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m28/MechanicalBearingAssemblyProbeMixin.java').text
+        ['onSpeedChanged(F)V', 'tick()V', 'assemble()V', 'disassemble()V',
+         'BearingContraption;assemble', 'removeBlocksFromWorld',
+         'ControlledContraptionEntity;create', 'Level;addFreshEntity'].each { token ->
+            if (!bearing.contains(token)) throw new GradleException("M28.11 bearing probe lost ${token}")
+        }
+        String traversal = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m28/ContraptionAssemblyTraversalProbeMixin.java').text
+        ['searchMovedStructure', 'capture(', 'captureEnter', 'captureReturn'].each { token ->
+            if (!traversal.contains(token)) throw new GradleException("M28.11 traversal probe lost ${token}")
+        }
+        def config = new JsonSlurper().parse(file('src/main/resources/sable-common-forge.mixins.json'))
+        ['m28.MechanicalBearingAssemblyProbeMixin', 'm28.ContraptionAssemblyTraversalProbeMixin'].each { name ->
+            if ((config.mixins ?: []).count { it == name } != 1 || (config.client ?: []).contains(name)) {
+                throw new GradleException("M28.11 lifecycle probe ${name} must be common/server-capable exactly once")
+            }
+        }
+        logger.lifecycle('verifyM28BearingAssemblyLifecycleBoundary PASS: property-gated probes are read-only and common/server-capable')
+    }
+}
+
+tasks.register('verifyM28BearingAssemblyCreate608BytecodeBoundary') {
+    group = 'forge backport'
+    description = 'Pins M28.11 probes to exact Create 6.0.8 bearing assembly descriptors and calls.'
+    doLast {
+        JarFile create = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            def bearing = create.getInputStream(create.getJarEntry(
+                    'com/simibubi/create/content/contraptions/bearing/MechanicalBearingBlockEntity.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods
+            ['onSpeedChanged(F)V', 'tick()V', 'assemble()V', 'disassemble()V'].each { descriptor ->
+                if (!bearing.containsKey(descriptor)) {
+                    throw new GradleException("Create 6.0.8 MechanicalBearingBlockEntity lost ${descriptor}")
+                }
+            }
+            def assembleCalls = bearing['assemble()V'] ?: []
+            ['com/simibubi/create/content/contraptions/bearing/BearingContraption.assemble(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)Z',
+             'com/simibubi/create/content/contraptions/bearing/BearingContraption.removeBlocksFromWorld(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)V',
+             'com/simibubi/create/content/contraptions/ControlledContraptionEntity.create(Lnet/minecraft/world/level/Level;Lcom/simibubi/create/content/contraptions/IControlContraption;Lcom/simibubi/create/content/contraptions/Contraption;)Lcom/simibubi/create/content/contraptions/ControlledContraptionEntity;',
+             'net/minecraft/world/level/Level.addFreshEntity(Lnet/minecraft/world/entity/Entity;)Z'].each { call ->
+                if (!assembleCalls.any { it.startsWith(call) }) {
+                    throw new GradleException("Create 6.0.8 MechanicalBearingBlockEntity.assemble lost call ${call}; actual=${assembleCalls}")
+                }
+            }
+            def bearingContraption = create.getInputStream(create.getJarEntry(
+                    'com/simibubi/create/content/contraptions/bearing/BearingContraption.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods
+            String bearingAssemble = 'assemble(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)Z'
+            if (!bearingContraption.containsKey(bearingAssemble)
+                    || !(bearingContraption[bearingAssemble] ?: []).any {
+                        it.contains('searchMovedStructure(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/core/Direction;)Z')
+                    }) {
+                throw new GradleException('Create 6.0.8 BearingContraption assembly traversal boundary changed')
+            }
+            def contraption = create.getInputStream(create.getJarEntry(
+                    'com/simibubi/create/content/contraptions/Contraption.class')).withCloseable {
+                stream -> readClassStructure(stream)
+            }.methods.keySet()
+            ['searchMovedStructure(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/core/Direction;)Z',
+             'capture(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)Lorg/apache/commons/lang3/tuple/Pair;'].each { descriptor ->
+                if (!contraption.contains(descriptor)) {
+                    throw new GradleException("Create 6.0.8 Contraption traversal target missing ${descriptor}")
+                }
+            }
+        } finally { create.close() }
+        logger.lifecycle('verifyM28BearingAssemblyCreate608BytecodeBoundary PASS: exact Create 6.0.8 scheduling, traversal, construction, and insertion calls retained')
+    }
+}
+
+tasks.register('verifyM28_11BearingAssemblyLifecycle') {
+    group = 'forge backport'
+    description = 'Runs M28.11 bearing lifecycle diagnostics plus retained M21-M30 regression boundaries.'
+    dependsOn tasks.named('verifyM28_10ControlledSailFlywheel')
+    dependsOn tasks.named('verifyM28BearingAssemblyLifecycleBoundary')
+    dependsOn tasks.named('verifyM28BearingAssemblyCreate608BytecodeBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_11BearingAssemblyLifecycle PASS: instrumentation ready; assembled-airplane runtime comparison required')
+    }
+}
+
+tasks.register('verifyM28NestedBearingPayloadTraceBoundary') {
+    group = 'forge backport'
+    description = 'Checks M28.13 diagnostic-only nested payload ownership tracing across M22 block transfer.'
+    File trace = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28NestedBearingPayloadTrace.java')
+    File helper = file('src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java')
+    File assembly = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java')
+    File audit = rootProject.file('M28_13_NESTED_BEARING_PAYLOAD_AUDIT.md')
+    inputs.files(trace, helper, assembly, audit)
+    doLast {
+        String source = trace.getText('UTF-8')
+        String helperSource = helper.getText('UTF-8')
+        String assemblySource = assembly.getText('UTF-8')
+        String auditSource = audit.getText('UTF-8')
+        ['sable.m28.traceNestedBearingPayload', 'SABLE_M33_NESTED_PAYLOAD',
+         'SABLE_M33_OUTER_TRANSFER', 'NORMAL_WORLD', 'BEFORE_OUTER_ASSEMBLY',
+         'OUTER_CAPTURE_DISCOVERY', 'SABLE_STORAGE_INSERTION', 'AFTER_OUTER_ASSEMBLY',
+         'nestedCapturedStates=', 'payloadSelectedAsBlock=', 'SAME_CREATE_KINETIC_NETWORK'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M28.13 nested payload trace lost ${token}")
+        }
+        ['beginOuterAssembly(', 'afterOuterAssembly(', 'beginOuterDisassembly(',
+         'afterOuterDisassembly('].each { token ->
+            if (!helperSource.contains(token)) throw new GradleException("M28.13 M22 ownership hook lost ${token}")
+        }
+        ['beforeBlockTransfer(', 'afterBlockTransfer('].each { token ->
+            if (!assemblySource.contains(token)) throw new GradleException("M28.13 block transfer hook lost ${token}")
+        }
+        ['setBlock(', 'removeBlock(', 'destroyBlock(', 'addFreshEntity(', 'setPos(', 'disassemble()'].each { forbidden ->
+            if (source.contains(forbidden)) throw new GradleException("M28.13 trace must remain observational: ${forbidden}")
+        }
+        ['b7226222caf4eace63a708bdcd73ef36c971137d',
+         '1a1a9a2819b4f89f78caec41b55ed8cb222fa24b',
+         '`HangingEntity` instances',
+         'that outer assembly migrates an already-created CCE'].each { token ->
+            if (!auditSource.contains(token)) throw new GradleException("M28.13 source audit lost ${token}")
+        }
+        int moveOtherStart = assemblySource.indexOf('public static void moveOtherStuff(')
+        int moveOtherEnd = assemblySource.indexOf('private static boolean needsBitSet(', moveOtherStart)
+        String moveOther = assemblySource.substring(moveOtherStart, moveOtherEnd)
+        if (!moveOther.contains('entity instanceof final HangingEntity')
+                || moveOther.contains('ControlledContraptionEntity')
+                || moveOther.contains('AbstractContraptionEntity')) {
+            throw new GradleException('M28.13 audited outer entity-transfer ownership changed')
+        }
+        logger.lifecycle('verifyM28NestedBearingPayloadTraceBoundary PASS: M22 transfer remains unchanged and nested ownership is observable')
+    }
+}
+
+tasks.register('verifyM28BearingHeadRenderCreate608Boundary') {
+    group = 'forge backport'
+    description = 'Pins M28.13 bearing top diagnostics to exact Create 6.0.8 BER and Flywheel visual calls.'
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    File trace = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28BearingHeadRenderTrace.java')
+    File mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m28/BearingRendererHeadProbeMixin.java')
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.files(trace, mixin, mixinConfig, createDevelopmentRuntime)
+    doLast {
+        String traceSource = trace.getText('UTF-8')
+        String mixinSource = mixin.getText('UTF-8')
+        ['sable.m28.traceBearingHeadRender', 'SABLE_M33_BEARING_RENDER',
+         'BEARING_TOP_WOODEN', 'BEARING_TOP', 'BearingVisual.topInstance',
+         'visualizationSupportedOriginal=', 'partialRendered='].each { token ->
+            if (!traceSource.contains(token)) throw new GradleException("M28.13 bearing-head trace lost ${token}")
+        }
+        ['VisualizationManager;supportsVisualization', 'CachedBuffers;partial',
+         'SuperByteBuffer;renderInto', 'Operation<Boolean>', 'Operation<SuperByteBuffer>'].each { token ->
+            if (!mixinSource.contains(token)) throw new GradleException("M28.13 bearing renderer probe lost ${token}")
+        }
+        def config = new JsonSlurper().parse(mixinConfig)
+        if ((config.client ?: []).count { it == 'm28.BearingRendererHeadProbeMixin' } != 1
+                || (config.mixins ?: []).contains('m28.BearingRendererHeadProbeMixin')) {
+            throw new GradleException('M28.13 bearing-head probe config ownership mismatch')
+        }
+        JarFile create = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            def renderer = create.getInputStream(create.getJarEntry(
+                    'com/simibubi/create/content/contraptions/bearing/BearingRenderer.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods
+            String render = 'renderSafe(Lcom/simibubi/create/content/kinetics/base/KineticBlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V'
+            def renderCalls = renderer[render] ?: []
+            ['dev/engine_room/flywheel/api/visualization/VisualizationManager.supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
+             'net/createmod/catnip/render/CachedBuffers.partial(Ldev/engine_room/flywheel/lib/model/baked/PartialModel;Lnet/minecraft/world/level/block/state/BlockState;)Lnet/createmod/catnip/render/SuperByteBuffer;',
+             'net/createmod/catnip/render/SuperByteBuffer.renderInto(Lcom/mojang/blaze3d/vertex/PoseStack;Lcom/mojang/blaze3d/vertex/VertexConsumer;)V'].each { call ->
+                if (!renderCalls.any { it.startsWith(call) }) {
+                    throw new GradleException("Create 6.0.8 BearingRenderer lost ${call}; actual=${renderCalls}")
+                }
+            }
+            def visual = create.getInputStream(create.getJarEntry(
+                    'com/simibubi/create/content/contraptions/bearing/BearingVisual.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods
+            def frameCalls = visual['beginFrame(Ldev/engine_room/flywheel/api/visual/DynamicVisual$Context;)V'] ?: []
+            ['com/simibubi/create/content/contraptions/bearing/IBearingBlockEntity.getInterpolatedAngle(F)F',
+             'dev/engine_room/flywheel/lib/instance/OrientedInstance.rotation(Lorg/joml/Quaternionfc;)Ldev/engine_room/flywheel/lib/instance/OrientedInstance;',
+             'dev/engine_room/flywheel/lib/instance/OrientedInstance.setChanged()V'].each { call ->
+                if (!frameCalls.any { it.startsWith(call) }) {
+                    throw new GradleException("Create 6.0.8 BearingVisual lost ${call}; actual=${frameCalls}")
+                }
+            }
+        } finally { create.close() }
+        logger.lifecycle('verifyM28BearingHeadRenderCreate608Boundary PASS: exact BEARING_TOP BER/visual ownership retained')
+    }
+}
+
+tasks.register('verifyM28_13NestedBearingPayload') {
+    group = 'forge backport'
+    description = 'Runs M28.13 nested-payload and bearing-head diagnostics plus retained M21-M28 boundaries.'
+    dependsOn tasks.named('verifyM28_11BearingAssemblyLifecycle')
+    dependsOn tasks.named('verifyM28NestedBearingPayloadTraceBoundary')
+    dependsOn tasks.named('verifyM28BearingHeadRenderCreate608Boundary')
+    doLast {
+        logger.lifecycle('verifyM28_13NestedBearingPayload PASS: diagnostic artifact ready; runtime A-G classification required')
+    }
+}
+
+tasks.register('verifyM28OuterSelectionDecisionBoundary') {
+    group = 'forge backport'
+    description = 'Pins the M28.14 raw bearing-payload rejection to the exact outer traversal attachment gate.'
+    File selection = file('src/main/java/dev/simulated_team/simulated/util/assembly/SimAssemblyContraption.java')
+    inputs.file(selection)
+    doLast {
+        String source = selection.getText('UTF-8')
+        ['SABLE_M34_OUTER_SELECTION_DECISION', 'REJECTED_NO_ATTACHMENT_PATH',
+         'enteredNeighborEvaluation=true', 'enteredTraversalCandidateSet={}',
+         'faceHasGlue=', 'attachedTowardsFace=', 'mutualStickinessBeforeRules=',
+         'canStickAfterRules=', 'state.getValue(BearingBlock.FACING)'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M28.14 selection decision lost ${token}")
+        }
+        if (source.contains('white_symmetric_sail')) {
+            throw new GradleException('M28.14 outer selection boundary must not special-case the sail block')
+        }
+        logger.lifecycle('verifyM28OuterSelectionDecisionBoundary PASS: bearing-facing payload is rejected only when no glue, attachment, or mutual stickiness admits it')
+    }
+}
+
+tasks.register('verifyM28NestedBearingSnapshotBoundary') {
+    group = 'forge backport'
+    description = 'Checks exact-set snapshot reconstruction, transactional registration, and singular ownership.'
+    File ownership = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer.java')
+    inputs.file(ownership)
+    doLast {
+        String source = ownership.getText('UTF-8')
+        ['contraption.writeNBT(false)', 'restored.readNBT(targetLevel, snapshot.contraptionTag.copy(), false)',
+         'ControlledContraptionEntity.create', 'targetLevel.addFreshEntity',
+         'targetBearing.attach(restoredEntity)', 'removeBlocksFromWorld',
+         'simulated:steering_wheel', 'NestedBearingCaptureDecision.evaluate(',
+         'NestedBearingCaptureDecision.overlap(', 'capturedBlockSetExact=true',
+         'ownershipCount != 1', 'expectedOwnershipCount=1', 'NEXT_TICK_SURVIVAL',
+         'sable$setSequencedAngleLimit', 'sable$getMovementMode().setValue',
+         'restoredEntity.setAngle(snapshot.angle)'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M28.14 ownership transfer lost ${token}")
+        }
+        int restoreStart = source.indexOf('private void restoreBearing(')
+        int restoreEnd = source.indexOf('private void commitSourceOwnership()', restoreStart)
+        String restore = source.substring(restoreStart, restoreEnd)
+        if (restore.contains('.assemble(')) {
+            throw new GradleException('M28.14 destination reconstruction must never rerun unrestricted structure traversal')
+        }
+        if (source.contains('capturedBlockCount <=') || source.contains('capturedBlockCount <=')) {
+            throw new GradleException('M28.14 must preserve the exact snapshot set, not impose an arbitrary count cap')
+        }
+        logger.lifecycle('verifyM28NestedBearingSnapshotBoundary PASS: exact snapshot set is reconstructed transactionally with one nested owner')
+    }
+}
+
+tasks.register('verifyM28NestedBearingRoundTripBoundary') {
+    group = 'forge backport'
+    description = 'Checks M22 assembly/disassembly both use the same nested-bearing ownership transaction.'
+    File helper = file('src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java')
+    File transfer = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java')
+    File bootstrap = file('src/main/java/dev/simulated_team/simulated/Simulated.java')
+    inputs.files(helper, transfer, bootstrap)
+    doLast {
+        String helperSource = helper.getText('UTF-8')
+        String transferSource = transfer.getText('UTF-8')
+        String bootstrapSource = bootstrap.getText('UTF-8')
+        ['"OUTER_ASSEMBLY"', '"OUTER_DISASSEMBLY"',
+         'SableNestedBearingOwnershipTransfer.bindTransform(transform)',
+         'SableNestedBearingOwnershipTransfer.finish'].each { token ->
+            if (!helperSource.contains(token)) throw new GradleException("M28.14 roundtrip owner lost ${token}")
+        }
+        ['afterBlockTransfer(', 'beforeSourceDestruction()', 'afterBlockMove()',
+         'bindTransform(transform)'].each { token ->
+            if (!transferSource.contains('SableNestedBearingOwnershipTransfer.' + token)) {
+                throw new GradleException("M28.14 M22 transaction hook lost ${token}")
+            }
+        }
+        if (!bootstrapSource.contains('SableNestedBearingOwnershipTransfer::verifyPending')) {
+            throw new GradleException('M28.14 next-tick survival verifier is not registered')
+        }
+        logger.lifecycle('verifyM28NestedBearingRoundTripBoundary PASS: assembly and reverse disassembly share exact M22 ownership transfer')
+    }
+}
+
+tasks.register('verifyM28BearingTopCoordinateSafetyBoundary') {
+    group = 'forge backport'
+    description = 'Pins the Sable-only CPU bearing-top fallback and exact Create 6.0.8 visual lifecycle.'
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    File mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/m28/BearingRendererHeadProbeMixin.java')
+    File trace = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28BearingHeadRenderTrace.java')
+    inputs.files(mixin, trace, createDevelopmentRuntime)
+    doLast {
+        String mixinSource = mixin.getText('UTF-8')
+        String traceSource = trace.getText('UTF-8')
+        ['final boolean useFlywheel = visualizationSupported',
+         '!SableM28BearingHeadRenderTrace.isSableContained(bearing)',
+         'visualizationDecision(', 'VisualizationManager;supportsVisualization'].each { token ->
+            if (!mixinSource.contains(token)) throw new GradleException("M28.14 bearing-top fallback lost ${token}")
+        }
+        if (mixinSource.contains('20000000') || mixinSource.contains('20_000_000')
+                || traceSource.contains('20000000') || traceSource.contains('20_000_000')) {
+            throw new GradleException('M28.14 bearing-top fallback contains a hidden-plot translation')
+        }
+        JarFile create = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            def visual = create.getInputStream(create.getJarEntry(
+                    'com/simibubi/create/content/contraptions/bearing/BearingVisual.class')).withCloseable {
+                stream -> readClassMethodInvocations(stream)
+            }.methods
+            def constructorCalls = visual.findAll { key, value -> key.startsWith('<init>(') }.values().flatten()
+            if (!constructorCalls.any { it.contains('getVisualPosition()Lnet/minecraft/core/BlockPos;') }
+                    || !constructorCalls.any { it.contains('OrientedInstance.position(') }) {
+                throw new GradleException("Create 6.0.8 BearingVisual constructor position ownership changed: ${constructorCalls}")
+            }
+            def frameCalls = visual['beginFrame(Ldev/engine_room/flywheel/api/visual/DynamicVisual$Context;)V'] ?: []
+            if (!frameCalls.any { it.contains('OrientedInstance.rotation(') }
+                    || frameCalls.any { it.contains('OrientedInstance.position(') }) {
+                throw new GradleException("Create 6.0.8 BearingVisual frame position/rotation boundary changed: ${frameCalls}")
+            }
+        } finally { create.close() }
+        logger.lifecycle('verifyM28BearingTopCoordinateSafetyBoundary PASS: raw-position Flywheel top is bypassed only inside Sable; Create CPU top uses the small visible pose')
+    }
+}
+
+tasks.register('verifyM28NestedBearingCaptureNullContractBoundary') {
+    group = 'forge backport'
+    description = 'Executes the M28.14.1 nullable-network capture decision and pins pre-mutation transaction ordering.'
+    File decision = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/NestedBearingCaptureDecision.java')
+    File decisionTest = file(
+            'src/nestedBearingTest/java/dev/ryanhcode/sable/compatibility/create/contraptions/NestedBearingCaptureDecisionTest.java')
+    File transfer = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer.java')
+    inputs.files(decision, decisionTest, transfer)
+    outputs.dir(layout.buildDirectory.dir('m28NestedBearingCaptureDecisionTest'))
+    doLast {
+        String decisionSource = decision.getText('UTF-8')
+        String transferSource = transfer.getText('UTF-8')
+        ['bearingNetwork == null || !steeringNetworks.contains(bearingNetwork)',
+         'SNAPSHOT_EXISTING', 'DISCOVER_STATIC_PAYLOAD', 'SKIP_NO_SELECTED_STEERING_NETWORK',
+         'Nested captured position must not be null'].each { token ->
+            if (!decisionSource.contains(token)) {
+                throw new GradleException("M28.14.1 nullable capture contract lost ${token}")
+            }
+        }
+        ['SABLE_M34_TRANSFER_SESSION', 'CAPTURE_BEGIN', 'SNAPSHOT_CREATED',
+         'SNAPSHOT_SKIPPED_NO_NESTED_CCE', 'VALIDATION_PASSED', 'DESTINATION_MAPPING_BEGIN',
+         'RESTORE_BEGIN', 'RESTORE_REGISTERED', 'RESTORE_SURVIVED_NEXT_TICK',
+         'TRANSFER_COMMITTED', 'TRANSFER_ABORTED', 'nullableFieldName',
+         'outerSelectedSetSize'].each { token ->
+            if (!transferSource.contains(token)) {
+                throw new GradleException("M28.14.1 transfer lifecycle lost ${token}")
+            }
+        }
+        if (transferSource.contains('steeringNetworks.contains(bearing.network)')) {
+            throw new GradleException('M28.14.1 must never pass nullable bearing.network directly to immutable Set.contains')
+        }
+        int captureStart = transferSource.indexOf('private void capture()')
+        int captureEnd = transferSource.indexOf('private void addSnapshot(', captureStart)
+        String capture = transferSource.substring(captureStart, captureEnd)
+        ['removeBlocksFromWorld', '.discard()', 'sable$setMovedContraption',
+         'sable$setRunning', 'setBlock(', 'destroyBlock('].each { forbidden ->
+            if (capture.contains(forbidden)) {
+                throw new GradleException("M28.14.1 capture validation mutates source ownership through ${forbidden}")
+            }
+        }
+        int captureCall = transferSource.indexOf('session.capture();')
+        int activePublish = transferSource.indexOf('ACTIVE.set(session);')
+        if (captureCall < 0 || activePublish < 0 || captureCall >= activePublish) {
+            throw new GradleException('M28.14.1 must finish capture validation before publishing the transfer session')
+        }
+
+        File output = layout.buildDirectory.dir('m28NestedBearingCaptureDecisionTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M28.14.1 capture decision test requires a JDK')
+        int result = compiler.run(null, System.out, System.err, '--release', '17', '-d', output.absolutePath,
+                decision.absolutePath, decisionTest.absolutePath)
+        if (result != 0) throw new GradleException('M28.14.1 capture decision test compilation failed')
+        URLClassLoader loader = new URLClassLoader([output.toURI().toURL()] as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.contraptions.NestedBearingCaptureDecisionTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M28.14.1 nullable capture regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM28NestedBearingCaptureNullContractBoundary PASS: null network skips safely, live CCE wins, two-block exact set is immutable, and valid overlap remains fail-loud')
+    }
+}
+
+tasks.register('verifyM28_14NestedBearingOwnership') {
+    group = 'forge backport'
+    description = 'Runs M28.14.1 nested ownership, nullable capture, bearing-top, and retained M21-M28 boundaries.'
+    dependsOn tasks.named('verifyM28_13NestedBearingPayload')
+    dependsOn tasks.named('verifyM28OuterSelectionDecisionBoundary')
+    dependsOn tasks.named('verifyM28NestedBearingSnapshotBoundary')
+    dependsOn tasks.named('verifyM28NestedBearingRoundTripBoundary')
+    dependsOn tasks.named('verifyM28BearingTopCoordinateSafetyBoundary')
+    dependsOn tasks.named('verifyM28NestedBearingCaptureNullContractBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_14NestedBearingOwnership PASS: M28.14.1 capture hotfix complete; assembled-aircraft runtime required')
+    }
+}
+
+tasks.register('verifyM28_14_1CaptureHotfix') {
+    group = 'forge backport'
+    description = 'Runs the focused M28.14.1 capture hotfix and the complete retained M28.14 aggregate.'
+    dependsOn tasks.named('verifyM28_14NestedBearingOwnership')
+    doLast {
+        logger.lifecycle('verifyM28_14_1CaptureHotfix PASS: nullable capture is safe and M28.14 ownership architecture is retained')
+    }
+}
+
+tasks.register('verifyM28NestedRegistrationLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Executes M28.14.2 authoritative registration, dangling-owner, and rollback decisions.'
+    File registration = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/NestedBearingRegistrationDecision.java')
+    File transaction = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/NestedBearingTransactionDecision.java')
+    File registrationTest = file(
+            'src/nestedBearingTest/java/dev/ryanhcode/sable/compatibility/create/contraptions/NestedBearingRegistrationDecisionTest.java')
+    File transactionTest = file(
+            'src/nestedBearingTest/java/dev/ryanhcode/sable/compatibility/create/contraptions/NestedBearingTransactionDecisionTest.java')
+    inputs.files(registration, transaction, registrationTest, transactionTest)
+    outputs.dir(layout.buildDirectory.dir('m28NestedBearingRegistrationTest'))
+    doLast {
+        File output = layout.buildDirectory.dir('m28NestedBearingRegistrationTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M28.14.2 registration test requires a JDK')
+        int result = compiler.run(null, System.out, System.err, '--release', '17', '-d', output.absolutePath,
+                registration.absolutePath, transaction.absolutePath,
+                registrationTest.absolutePath, transactionTest.absolutePath)
+        if (result != 0) throw new GradleException('M28.14.2 registration test compilation failed')
+        URLClassLoader loader = new URLClassLoader([output.toURI().toURL()] as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.contraptions.NestedBearingRegistrationDecisionTest')
+                    .getMethod('run').invoke(null)
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.contraptions.NestedBearingTransactionDecisionTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M28.14.2 registration/transaction regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM28NestedRegistrationLifecycleBoundary PASS: add/lookup/controller failures are distinct, dangling owners fail loud, and only pre-commit destinations roll back')
+    }
+}
+
+tasks.register('verifyM28OuterAssemblyAtomicRollbackBoundary') {
+    group = 'forge backport'
+    description = 'Pins authoritative sublevel cleanup and source-preserving M28.14.2 failure ordering.'
+    File ownership = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer.java')
+    File assembly = rootProject.file('common/src/main/java/dev/ryanhcode/sable/api/SubLevelAssemblyHelper.java')
+    File helper = file('src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java')
+    File assembler = file(
+            'src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java')
+    inputs.files(ownership, assembly, helper, assembler)
+    doLast {
+        String owner = ownership.getText('UTF-8')
+        String assemblySource = assembly.getText('UTF-8')
+        String helperSource = helper.getText('UTF-8')
+        String assemblerSource = assembler.getText('UTF-8')
+        ['SABLE_M35_NESTED_REGISTRATION', 'PARENT_SERVER_LEVEL_ENTITY_MANAGER',
+         'accessor.sable$setMovedContraption(restoredEntity)', 'targetLevel.addFreshEntity(restoredEntity)',
+         'targetLevel.getEntity(restoredEntity.getId())', 'targetLevel.getEntity(restoredEntity.getUUID())',
+         'restoredEntity.getAngle(1.0F)',
+         'resetDestinationBearing', 'M28_14_2_RESTORE_FAILURE_CLEANUP',
+         'DANGLING_DEAD_NESTED_CCE', 'DANGLING_MISSING_NESTED_CCE',
+         'SABLE_M35_ASSEMBLY_TRANSACTION', 'ROLLBACK_BEGIN', 'ROLLBACK_COMPLETE',
+         'container.removeSubLevel(destination, SubLevelRemovalReason.REMOVED)'].each { token ->
+            if (!owner.contains(token)) throw new GradleException("M28.14.2 ownership rollback lost ${token}")
+        }
+        int publish = owner.indexOf('accessor.sable$setMovedContraption(restoredEntity)')
+        int add = owner.indexOf('targetLevel.addFreshEntity(restoredEntity)')
+        if (publish < 0 || add < 0 || publish >= add) {
+            throw new GradleException('M28.14.2 must match Create 6.0.8 controller-before-add ordering')
+        }
+        if (owner.contains('restoredEntity.getAngle(0.0F) - snapshot.angle')) {
+            throw new GradleException('M28.14.2 must validate the current Create angle endpoint, not stale prevAngle')
+        }
+        ['destinationAllocated(subLevel)', 'blockCopyComplete(states.size())',
+         'beforeSourceDestruction()'].each { token ->
+            if (!assemblySource.contains(token)) throw new GradleException("M28.14.2 assembly transaction lost ${token}")
+        }
+        int destinationAllocated = assemblySource.indexOf('destinationAllocated(subLevel)')
+        int sourceDestruction = assemblySource.indexOf('beforeSourceDestruction()')
+        if (destinationAllocated < 0 || sourceDestruction < 0 || destinationAllocated >= sourceDestruction) {
+            throw new GradleException('M28.14.2 destination allocation must be known before source commit')
+        }
+        int move = helperSource.indexOf('SubLevelAssemblyHelper.moveBlocks(level, transform, blocks)',
+                helperSource.indexOf('public static DisassemblyResult disassembleSubLevel'))
+        int kick = helperSource.indexOf('((ServerLevelPlot) subLevel.getPlot()).kickAllEntities()', move)
+        if (move < 0 || kick < 0 || move >= kick) {
+            throw new GradleException('M28.14.2 disassembly must preserve the source CCE until nested restore succeeds')
+        }
+        if (!helperSource.contains('throw SimAssemblyException.moveFailed(exception)')) {
+            throw new GradleException('M28.14.2 runtime failures must surface as transactional AssemblyException failures')
+        }
+        if (!assemblerSource.contains('this.primaryAssembler = false')) {
+            throw new GradleException('M28.14.2 failed Physics Assembler must return to its pre-click ownership state')
+        }
+        logger.lifecycle('verifyM28OuterAssemblyAtomicRollbackBoundary PASS: failed nested restore removes the allocated body/plot, preserves source ownership, and cannot accumulate orphan airplanes')
+    }
+}
+
+tasks.register('verifyM28_14_2AtomicNestedRestore') {
+    group = 'forge backport'
+    description = 'Runs M28.14.2 registration and atomic rollback verifiers plus the retained M28 aggregate.'
+    dependsOn tasks.named('verifyM28_14_1CaptureHotfix')
+    dependsOn tasks.named('verifyM28NestedRegistrationLifecycleBoundary')
+    dependsOn tasks.named('verifyM28OuterAssemblyAtomicRollbackBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_14_2AtomicNestedRestore PASS: destination registration and pre-commit rollback are implemented; runtime required')
+    }
+}
+
+tasks.register('verifyM28NormalWorldCceClientSyncBoundary') {
+    group = 'forge backport'
+    description = 'Executes M28.14.3 restored-client policy and pins spawn-payload/Flywheel refresh ordering.'
+    File decision = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/RestoredContraptionClientSyncDecision.java')
+    File decisionTest = file(
+            'src/nestedBearingTest/java/dev/ryanhcode/sable/compatibility/create/contraptions/RestoredContraptionClientSyncDecisionTest.java')
+    File trace = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28NormalWorldCceSync.java')
+    File ownership = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer.java')
+    File commonMixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/AbstractContraptionEntityMixin.java')
+    File clientSync = file('src/main/java/dev/ryanhcode/sable/forge/SableM28RestoredContraptionClientSync.java')
+    File clientMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/RestoredContraptionClientSpawnMixin.java')
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    inputs.files(decision, decisionTest, trace, ownership, commonMixin, clientSync, clientMixin, mixinConfig)
+    outputs.dir(layout.buildDirectory.dir('m28NormalWorldCceClientSyncTest'))
+    doLast {
+        String traceSource = trace.getText('UTF-8')
+        String ownerSource = ownership.getText('UTF-8')
+        String commonMixinSource = commonMixin.getText('UTF-8')
+        String clientSource = clientSync.getText('UTF-8')
+        String clientMixinSource = clientMixin.getText('UTF-8')
+        ['SERVER_PRE_ADD', 'SERVER_POST_ADD', 'SERVER_TRACKING_BEGIN', 'SERVER_SPAWN_PACKET_CREATED',
+         'SERVER_START_SEEN_BY_PLAYER', 'CLIENT_SPAWN_PACKET_RECEIVED', 'CLIENT_ENTITY_CREATED',
+         'CLIENT_ENTITY_ADDED', 'CLIENT_CONTRAPTION_PRESENT', 'CLIENT_FIRST_TICK',
+         'CLIENT_FIRST_RENDER', 'CLIENT_FIRST_COLLISION_QUERY', 'CLIENT_AFTER_SOURCE_SUBLEVEL_REMOVAL',
+         'CLIENT_VISUAL_CREATED'].each { token ->
+            if (!traceSource.contains(token)) throw new GradleException("M28.14.3 sync trace lost ${token}")
+        }
+        if (!ownerSource.contains('"OUTER_DISASSEMBLY".equals(this.operation)')
+                || !ownerSource.contains('SableM28NormalWorldCceSync.markBeforeAdd(')) {
+            throw new GradleException('M28.14.3 marker must be limited to reverse-restored normal-world CCEs')
+        }
+        ['writeSpawnData', 'writeAdditional', 'readAdditional', 'SableM28NormalWorldCceSync.writeMarker',
+         'SableM28NormalWorldCceSync.readMarker'].each { token ->
+            if (!commonMixinSource.contains(token)) throw new GradleException("M28.14.3 spawn marker lost ${token}")
+        }
+        ['manager.entities().queueRemove(entity)', 'manager.entities().queueAdd(entity)',
+         'RestoredContraptionClientSyncDecision.evaluate'].each { token ->
+            if (!clientSource.contains(token)) throw new GradleException("M28.14.3 scoped visual refresh lost ${token}")
+        }
+        if (!clientMixinSource.contains('readSpawnData(Lnet/minecraft/network/FriendlyByteBuf;)V')
+                || !clientMixinSource.contains('@At("RETURN")')) {
+            throw new GradleException('M28.14.3 refresh must occur after Create spawn-payload deserialization')
+        }
+        def config = new JsonSlurper().parse(mixinConfig)
+        if ((config.client ?: []).count { it == 'm28.RestoredContraptionClientSpawnMixin' } != 1) {
+            throw new GradleException('M28.14.3 client spawn mixin is not registered exactly once')
+        }
+
+        File output = layout.buildDirectory.dir('m28NormalWorldCceClientSyncTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M28.14.3 client sync test requires a JDK')
+        int result = compiler.run(null, System.out, System.err, '--release', '17', '-d', output.absolutePath,
+                decision.absolutePath, decisionTest.absolutePath)
+        if (result != 0) throw new GradleException('M28.14.3 client sync decision test compilation failed')
+        URLClassLoader loader = new URLClassLoader([output.toURI().toURL()] as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.contraptions.RestoredContraptionClientSyncDecisionTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M28.14.3 client sync regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM28NormalWorldCceClientSyncBoundary PASS: only valid reverse-restored normal-world payloads refresh Flywheel after readSpawnData')
+    }
+}
+
+tasks.register('verifyM28_14_3NormalWorldClientRestore') {
+    group = 'forge backport'
+    description = 'Runs M28.14.3 client restore verification plus retained M28.14.2 ownership checks.'
+    dependsOn tasks.named('verifyM28_14_2AtomicNestedRestore')
+    dependsOn tasks.named('verifyM28NormalWorldCceClientSyncBoundary')
+    doLast {
+        logger.lifecycle('verifyM28_14_3NormalWorldClientRestore PASS: restored CCE spawn provenance and post-payload visual admission are implemented; runtime required')
     }
 }

@@ -4,6 +4,8 @@ import com.simibubi.create.content.contraptions.AssemblyException;
 import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.SubLevelAssemblyHelper;
+import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NestedBearingPayloadTrace;
+import dev.ryanhcode.sable.compatibility.create.contraptions.SableNestedBearingOwnershipTransfer;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
@@ -90,7 +92,30 @@ public final class SimAssemblyHelper {
                 + " assemblerIncluded=" + containsPhysicsAssembler(serverLevel, blocks)
                 + " selectedPlatformBlocks=not_computed"
                 + " selectionSha256=" + selectionDigest(serverLevel, blocks));
-        final ServerSubLevel subLevel = SubLevelAssemblyHelper.assembleBlocks(serverLevel, anchor, blocks, bounds);
+        SableM28NestedBearingPayloadTrace.beginOuterAssembly(serverLevel, selfPos, anchor, blocks,
+                contraption.getCheckedBlocks(), contraption.getRejectedBlocks());
+        ServerSubLevel subLevel = null;
+        boolean nestedOwnershipStarted = false;
+        boolean nestedOwnershipTransferred = false;
+        try {
+            SableNestedBearingOwnershipTransfer.begin(serverLevel, blocks, "OUTER_ASSEMBLY");
+            nestedOwnershipStarted = true;
+            subLevel = SubLevelAssemblyHelper.assembleBlocks(serverLevel, anchor, blocks, bounds);
+            if (subLevel != null) {
+                final SubLevelAssemblyHelper.AssemblyTransform traceTransform =
+                        new SubLevelAssemblyHelper.AssemblyTransform(anchor, subLevel.getPlot().getCenterBlock(),
+                                0, Rotation.NONE, serverLevel);
+                SableM28NestedBearingPayloadTrace.afterOuterAssembly(subLevel, traceTransform);
+            }
+            nestedOwnershipTransferred = subLevel != null;
+        } catch (final RuntimeException exception) {
+            throw SimAssemblyException.moveFailed(exception);
+        } finally {
+            if (nestedOwnershipStarted) {
+                SableNestedBearingOwnershipTransfer.finish(nestedOwnershipTransferred);
+            }
+            SableM28NestedBearingPayloadTrace.endOuterAssembly();
+        }
         if (subLevel == null) {
             logReassemblyFailure(level, selfPos, toAssemble, true, "searched", blocks.size(), bounds,
                     "SABLE_ASSEMBLE_RETURNED_NULL", "SubLevelAssemblyHelper.assembleBlocks");
@@ -153,15 +178,27 @@ public final class SimAssemblyHelper {
         if (!occupied.isEmpty()) {
             throw SimAssemblyException.occupied(occupied);
         }
+        SableM28NestedBearingPayloadTrace.beginOuterDisassembly(level, subLevel, transform, blocks);
+        try {
+            SableNestedBearingOwnershipTransfer.begin(level, blocks, "OUTER_DISASSEMBLY");
+        } catch (final RuntimeException | AssemblyException exception) {
+            SableM28NestedBearingPayloadTrace.endOuterAssembly();
+            throw exception;
+        }
+        SableNestedBearingOwnershipTransfer.bindTransform(transform);
 
         final List<AABB> rawGlueBoxes = collectGlueBoxes(level, plotAabb(plotBounds));
         logGlueRoundTrip("BEFORE_DISASSEMBLY", "subLevelGlueCount=" + rawGlueBoxes.size()
                 + " subLevelGlueBounds=" + describeGlueBounds(rawGlueBoxes));
         final int blockEntityCount = countBlockEntities(level, blocks);
-        ((ServerLevelPlot) subLevel.getPlot()).kickAllEntities();
+        boolean nestedOwnershipTransferred = false;
         try {
             SubLevelAssemblyHelper.moveBlocks(level, transform, blocks);
+            SableM28NestedBearingPayloadTrace.afterOuterDisassembly(level, transform);
+            nestedOwnershipTransferred = true;
         } catch (final RuntimeException exception) {
+            SableNestedBearingOwnershipTransfer.finish(false);
+            SableM28NestedBearingPayloadTrace.endOuterAssembly();
             restoreMissingGlues(level, rawGlueBoxes);
             logBodySnapshot(level, subLevel, "after_disassembly_move_failed_source_preserved", expectedSourceBlocks);
             final List<AABB> preservedGlueBoxes = collectGlueBoxes(level, plotAabb(plotBounds));
@@ -170,6 +207,8 @@ public final class SimAssemblyHelper {
                     + " subLevelGlueBounds=" + describeGlueBounds(preservedGlueBoxes));
             throw SimAssemblyException.moveFailed(exception);
         }
+        SableNestedBearingOwnershipTransfer.finish(nestedOwnershipTransferred);
+        ((ServerLevelPlot) subLevel.getPlot()).kickAllEntities();
         final GlueMoveResult glueMoveResult = moveSubLevelGluesToParent(level, rawGlueBoxes, transform);
         logGlueRoundTrip("AFTER_DISASSEMBLY", "parentGlueCount=" + glueMoveResult.restoredGlueCount()
                 + " restoredGlueCount=" + glueMoveResult.restoredGlueCount()

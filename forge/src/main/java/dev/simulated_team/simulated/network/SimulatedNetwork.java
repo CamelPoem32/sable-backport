@@ -9,7 +9,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
 
 public final class SimulatedNetwork {
 
-    public static final String PROTOCOL_VERSION = "m28-steering-wheel";
+    public static final String PROTOCOL_VERSION = "m28.5-steering-wheel-capture";
     public static final ResourceLocation CHANNEL_ID = Simulated.path("main");
 
     private static SimpleChannel channel;

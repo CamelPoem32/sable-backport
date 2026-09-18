@@ -10,6 +10,8 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.companion.math.Pose3d;
+import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NestedBearingPayloadTrace;
+import dev.ryanhcode.sable.compatibility.create.contraptions.SableNestedBearingOwnershipTransfer;
 import dev.ryanhcode.sable.index.SableTags;
 import dev.ryanhcode.sable.platform.SableAssemblyPlatform;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
@@ -99,12 +101,14 @@ public class SubLevelAssemblyHelper {
         }
 
         final ServerSubLevel subLevel = (ServerSubLevel) container.allocateNewSubLevel(pose);
+        SableNestedBearingOwnershipTransfer.destinationAllocated(subLevel);
 
         final LevelPlot plot = subLevel.getPlot();
         plot.newEmptyChunk(plot.getCenterChunk());
 
         final BlockPos plotAnchor = plot.getCenterBlock();
         final SubLevelAssemblyHelper.AssemblyTransform transform = new SubLevelAssemblyHelper.AssemblyTransform(anchor, plotAnchor, 0, Rotation.NONE, level);
+        SableNestedBearingOwnershipTransfer.bindTransform(transform);
         SubLevelAssemblyHelper.moveOtherStuff(level, transform, blocks, bounds);
         SubLevelAssemblyHelper.moveBlocks(level, transform, blocks);
 
@@ -373,6 +377,9 @@ public class SubLevelAssemblyHelper {
             try {
                 final BlockState subLevelState = transform.apply(state);
 
+                SableM28NestedBearingPayloadTrace.beforeBlockTransfer(
+                        level, resultingLevel, block, newPos, state);
+
                 if (state.getBlock() instanceof final BlockSubLevelAssemblyListener listener) {
                     listener.beforeMove(level, resultingLevel, state, block, newPos);
                 }
@@ -415,6 +422,11 @@ public class SubLevelAssemblyHelper {
                     newBlockEntity.load(tag);
                 }
 
+                SableM28NestedBearingPayloadTrace.afterBlockTransfer(
+                        level, resultingLevel, block, newPos, state);
+                SableNestedBearingOwnershipTransfer.afterBlockTransfer(
+                        level, resultingLevel, block, newPos);
+
                 if (state.getBlock() instanceof final BlockSubLevelAssemblyListener listener) {
                     listener.afterMove(level, resultingLevel, state, block, newPos);
                 }
@@ -431,6 +443,10 @@ public class SubLevelAssemblyHelper {
             throw new IllegalStateException("Strict block move copy phase failed: sourceBlocks="
                     + sourceBlockCount + " copiedBlocks=" + states.size() + " copyFailures=" + copyFailures);
         }
+
+        SableNestedBearingOwnershipTransfer.blockCopyComplete(states.size());
+
+        SableNestedBearingOwnershipTransfer.beforeSourceDestruction();
 
         int i = 0;
         for (final BlockPos untransformed : blocks) {
@@ -466,6 +482,7 @@ public class SubLevelAssemblyHelper {
             final BlockState subLevelState = airState;
             resultingLevel.sendBlockUpdated(block, Blocks.STONE.defaultBlockState(), subLevelState, 3);
         }
+        SableNestedBearingOwnershipTransfer.afterBlockMove();
     }
 
     public static void markAndNotifyBlock(final Level level, final BlockPos pPos, @Nullable final LevelChunk levelchunk, final BlockState oldState, final BlockState newState, final int pFlags, final int pRecursionLeft) {
