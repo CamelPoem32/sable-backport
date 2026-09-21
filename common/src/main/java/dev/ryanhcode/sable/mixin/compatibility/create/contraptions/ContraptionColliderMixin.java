@@ -12,6 +12,7 @@ import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NormalWorld
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.Pose3d;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
@@ -182,7 +183,7 @@ public class ContraptionColliderMixin {
                                            final AABB rawAabb,
                                            final AABB visibleAabb,
                                            final String phase) {
-        if (!SABLE$LOGGED_COLLISION.add(entity.getId())) {
+        if (!SableDiagnosticFlags.TRACE_M13 || !SABLE$LOGGED_COLLISION.add(entity.getId())) {
             return;
         }
         Sable.LOGGER.info("SABLE_M13_COLLISION entityId={} containingSubLevel={} rawCollisionAabb={} "

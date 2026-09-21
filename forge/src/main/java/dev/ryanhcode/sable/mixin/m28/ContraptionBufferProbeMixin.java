@@ -9,6 +9,8 @@ import com.simibubi.create.content.contraptions.render.ContraptionEntityRenderer
 import dev.ryanhcode.sable.forge.SableM28ContraptionBufferProbe;
 import dev.ryanhcode.sable.forge.SableM28BatchTrace;
 import dev.ryanhcode.sable.forge.SableM28VisualOwnershipTrace;
+import dev.ryanhcode.sable.forge.SableM29SailVisualLifecycle;
+import net.createmod.catnip.animation.AnimationTickHolder;
 import net.createmod.catnip.render.SuperByteBuffer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
@@ -44,10 +46,17 @@ public abstract class ContraptionBufferProbeMixin {
                                                  final VertexConsumer consumer,
                                                  final Operation<Void> original,
                                                  final AbstractContraptionEntity entity) {
+        SableM29SailVisualLifecycle.cpuRenderEligible(entity, AnimationTickHolder.getPartialTicks());
+        if (!SableM28ContraptionBufferProbe.enabled()) {
+            original.call(buffer, rendererPose, consumer);
+            SableM29SailVisualLifecycle.cpuGeometrySubmitted(entity);
+            return;
+        }
         SableM28ContraptionBufferProbe.begin(entity, buffer, rendererPose, consumer);
         SableM28VisualOwnershipTrace.markContraptionGeometryEmission();
         try {
             original.call(buffer, rendererPose, consumer);
+            SableM29SailVisualLifecycle.cpuGeometrySubmitted(entity);
         } finally {
             SableM28ContraptionBufferProbe.end(consumer);
         }

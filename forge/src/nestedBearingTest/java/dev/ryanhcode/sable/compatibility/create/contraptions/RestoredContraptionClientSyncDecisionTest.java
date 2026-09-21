@@ -20,6 +20,18 @@ public final class RestoredContraptionClientSyncDecisionTest {
         expect(RestoredContraptionClientSyncDecision.Action.NONE,
                 RestoredContraptionClientSyncDecision.evaluate(false, true, true, 2, 2),
                 "ordinary Create contraption");
+        expectReason(RestoredContraptionClientSyncDecision.Reason.ACCEPTED,
+                RestoredContraptionClientSyncDecision.evaluateDetailed(
+                        true, true, true, false, 2, 2, 2, 2),
+                "valid symmetric-sail payload");
+        expectReason(RestoredContraptionClientSyncDecision.Reason.SYMMETRIC_SAIL_COUNT_MISMATCH,
+                RestoredContraptionClientSyncDecision.evaluateDetailed(
+                        true, true, true, false, 2, 2, 2, 1),
+                "symmetric-sail mismatch");
+        expectReason(RestoredContraptionClientSyncDecision.Reason.ENTITY_REMOVED,
+                RestoredContraptionClientSyncDecision.evaluateDetailed(
+                        true, true, true, true, 2, 2, 2, 2),
+                "removed restored entity");
     }
 
     private static void expect(final RestoredContraptionClientSyncDecision.Action expected,
@@ -27,6 +39,14 @@ public final class RestoredContraptionClientSyncDecisionTest {
                                final String scenario) {
         if (expected != actual) {
             throw new AssertionError(scenario + ": expected " + expected + " but got " + actual);
+        }
+    }
+
+    private static void expectReason(final RestoredContraptionClientSyncDecision.Reason expected,
+                                     final RestoredContraptionClientSyncDecision.Decision actual,
+                                     final String scenario) {
+        if (expected != actual.reason()) {
+            throw new AssertionError(scenario + ": expected " + expected + " but got " + actual.reason());
         }
     }
 }

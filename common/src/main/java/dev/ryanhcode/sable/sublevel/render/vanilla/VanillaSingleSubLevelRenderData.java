@@ -14,6 +14,7 @@ import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
 import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.PrioritizeChunkUpdates;
@@ -116,6 +117,9 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
     }
 
     private void logBlockEntityScan(final BlockEntity blockEntity, @Nullable final BlockEntityRenderer<?> blockEntityRenderer) {
+        if (!SableDiagnosticFlags.TRACE_STATIC_RENDERING) {
+            return;
+        }
         final BlockPos plotPos = blockEntity.getBlockPos();
         final BlockPos localPos = plotPos.subtract(this.subLevel.getPlot().getCenterBlock());
         final String key = this.subLevel.getUniqueId() + ":" + plotPos.asLong() + ":" + blockEntity.getClass().getName();
@@ -140,7 +144,9 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
         if (this.forceCapturedStaticInvalidation(contraptionOwnerships)) {
             contraptionOwnerships = SableCreateContraptionBlockOwnership.index(this.subLevel);
         }
-        this.logActiveContraptionOwnership(contraptionOwnerships, layer);
+        if (TRACE_M28_STATIC_CACHE || FORCE_CAPTURED_STATIC_INVALIDATE) {
+            this.logActiveContraptionOwnership(contraptionOwnerships, layer);
+        }
         for (final RenderBlock block : this.renderBlocks) {
             final BlockState blockState = block.state();
             final Ownership ownership = contraptionOwnerships.get(block.pos());
@@ -176,7 +182,7 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
             final boolean pistonSolidFallback = createPistonModelFallback
                     && RenderType.solid().equals(layer)
                     && visibleQuadCount > 0;
-            if (createPistonModelFallback) {
+            if (createPistonModelFallback && SableDiagnosticFlags.TRACE_STATIC_RENDERING) {
                 final String key = this.subLevel.getUniqueId() + ":" + block.pos().asLong() + ":" + blockState;
                 if (LOGGED_CREATE_PISTON_MODEL.add(key)) {
                     Sable.LOGGER.info("SABLE_M14_PISTON_STATIC_MODEL stage=MODEL_FALLBACK_ENTERED id={} localPos={} "
@@ -194,7 +200,7 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
                 continue;
             }
 
-            if (!this.loggedDraw) {
+            if (SableDiagnosticFlags.TRACE_STATIC_RENDERING && !this.loggedDraw) {
                 this.loggedDraw = true;
                 Sable.LOGGER.info("SABLE_RENDER phase=draw id={} name={} storedBlocks={} firstPos={} state={} layer={}",
                         this.subLevel.getUniqueId(), this.subLevel.getName(), this.renderBlocks.size(), block.pos(),
@@ -208,8 +214,10 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
                     LEVEL_WRAPPER, bakedModel, blockState, block.pos(), stack, consumer, RANDOM, block.seed(),
                     OverlayTexture.NO_OVERLAY, layer);
             final int vertexEnd = staticVertexCount(consumer);
-            this.logRestoredStaticBlock(block, blockState, layer, vertexStart, vertexEnd, bakedModel);
-            if (createPistonModelFallback) {
+            if (TRACE_M28_STATIC_CACHE || FORCE_CAPTURED_STATIC_INVALIDATE) {
+                this.logRestoredStaticBlock(block, blockState, layer, vertexStart, vertexEnd, bakedModel);
+            }
+            if (createPistonModelFallback && SableDiagnosticFlags.TRACE_STATIC_RENDERING) {
                 final String key = this.subLevel.getUniqueId() + ":" + block.pos().asLong() + ":" + layer;
                 if (LOGGED_CREATE_PISTON_DRAW.add(key)) {
                     Sable.LOGGER.info("SABLE_M14_PISTON_STATIC_MODEL stage=MODEL_DRAW_CALLED id={} localPos={} "
@@ -224,7 +232,8 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
             renderedBlocks++;
         }
 
-        if (this.renderBlocks.size() > 1 && renderedBlocks > 0 && this.loggedM10RenderLayers.add(layer)) {
+        if (SableDiagnosticFlags.TRACE_STATIC_RENDERING && this.renderBlocks.size() > 1
+                && renderedBlocks > 0 && this.loggedM10RenderLayers.add(layer)) {
             Sable.LOGGER.info("SABLE_M10_RENDER id={} storedBlocks={} renderedBlocks={} layer={}",
                     this.subLevel.getUniqueId(), this.renderBlocks.size(), renderedBlocks, layer);
         }
@@ -345,6 +354,9 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
     private void logStaticModelDecision(final RenderBlock block, final BlockState blockState, final RenderType layer,
                                         final String decision, final boolean fallbackAttempted,
                                         final int visibleQuadCount) {
+        if (!SableDiagnosticFlags.TRACE_STATIC_RENDERING) {
+            return;
+        }
         final String key = this.subLevel.getUniqueId() + ":" + block.pos().asLong() + ":" + layer + ":" + decision;
         if (!LOGGED_SKIPPED_BLOCKS.add(key)) {
             return;
@@ -469,7 +481,7 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
             this.visibleSectionCount = visibleSections.size();
         }
 
-        if (!this.loggedState || !this.renderBlocks.isEmpty()) {
+        if (SableDiagnosticFlags.TRACE_STATIC_RENDERING && (!this.loggedState || !this.renderBlocks.isEmpty())) {
             this.loggedState = true;
             Sable.LOGGER.info("SABLE_RENDER phase=state id={} name={} storedBlocks={} bounds={}",
                     this.subLevel.getUniqueId(), this.subLevel.getName(), this.renderBlocks.size(), bounds);

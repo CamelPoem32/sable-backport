@@ -7,6 +7,7 @@ import dev.ryanhcode.sable.api.physics.mass.MassData;
 import dev.ryanhcode.sable.command.M24SimulatedSystemsCommands;
 import dev.ryanhcode.sable.command.M27AerodynamicsCommands;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 import dev.simulated_team.simulated.index.SimulatedBlockEntityTypes;
@@ -112,12 +113,14 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
         M27AerodynamicsCommands.onM22AssemblyCreated(
                 level, parentAssemblerPos, result.subLevel(), result.offset());
 
-        Sable.LOGGER.info("SABLE_M22_ASSEMBLY_TRANSFORM parentAnchor={} localAnchor={} rawAnchor={} visibleOrigin={} visibleDeltaAfterAssembly={}",
-                this.getBlockPos().toShortString(),
-                result.offset().toShortString(),
-                result.subLevel().getPlot().getCenterBlock().toShortString(),
-                result.subLevel().logicalPose().position(),
-                result.visibleDeltaAfterAssembly());
+        if (SableDiagnosticFlags.TRACE_OUTER_TRANSFER) {
+            Sable.LOGGER.info("SABLE_M22_ASSEMBLY_TRANSFORM parentAnchor={} localAnchor={} rawAnchor={} visibleOrigin={} visibleDeltaAfterAssembly={}",
+                    this.getBlockPos().toShortString(),
+                    result.offset().toShortString(),
+                    result.subLevel().getPlot().getCenterBlock().toShortString(),
+                    result.subLevel().logicalPose().position(),
+                    result.visibleDeltaAfterAssembly());
+        }
     }
 
     private void disassemble(final ServerLevel level, final ServerSubLevel subLevel) throws AssemblyException {

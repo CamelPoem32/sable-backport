@@ -14,6 +14,7 @@ import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableCreateContraptionContext;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.mixin.m28.BufferBuilderProbeAccessor;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.createmod.catnip.animation.AnimationTickHolder;
 import net.createmod.catnip.render.SuperByteBuffer;
 import net.createmod.catnip.render.TemplateMesh;
@@ -48,7 +49,14 @@ public final class SableM28ContraptionBufferProbe {
     private SableM28ContraptionBufferProbe() {
     }
 
+    public static boolean enabled() {
+        return SableDiagnosticFlags.TRACE_M28_BUFFER;
+    }
+
     public static void noteLayer(final AbstractContraptionEntity entity, final RenderType layer) {
+        if (!enabled()) {
+            return;
+        }
         if (SableCreateContraptionContext.getContainingSubLevel(entity) instanceof ClientSubLevel
                 || entity instanceof ControlledContraptionEntity
                 && Boolean.getBoolean("sable.m28.normalCreateAB")) {
@@ -58,6 +66,9 @@ public final class SableM28ContraptionBufferProbe {
 
     public static void begin(final AbstractContraptionEntity entity, final SuperByteBuffer buffer,
                              final PoseStack rendererPose, final VertexConsumer consumer) {
+        if (!enabled()) {
+            return;
+        }
         ACTIVE_SAMPLE.remove();
         SableM28CpuTargetIdentity.begin(entity, consumer, PENDING_LAYER.get());
         if (!(entity instanceof final ControlledContraptionEntity controlled)
@@ -272,6 +283,9 @@ public final class SableM28ContraptionBufferProbe {
     }
 
     public static void end(final VertexConsumer consumer) {
+        if (!enabled()) {
+            return;
+        }
         final boolean identityRangeRecorded = SableM28CpuTargetIdentity.end();
         final Sample sample = ACTIVE_SAMPLE.get();
         if (sample != null) {

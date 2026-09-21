@@ -5,6 +5,7 @@ import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsBehaviour;
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsPacket;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.ryanhcode.sable.mixin.m11.create.BlockEntityConfigurationPacketAccessor;
 import dev.ryanhcode.sable.mixin.m11.create.ValueSettingsPacketAccessor;
 import dev.ryanhcode.sable.network.packets.tcp.ServerboundCreateValueSettingsSubLevelPacket;
@@ -52,12 +53,14 @@ public final class ClientSubLevelCreateValueSettingsHelper {
                 accessor.sable$getCtrlDown(),
                 accessor.sable$getBehaviourIndex()));
 
-        Sable.LOGGER.info("SABLE_M11_VALUE_CLIENT sublevel={} localBlockPos={} clientBEClass={} behaviorClass={} requestedValue={} createPacketPath=ValueSettingsPacket sableBridge=true",
-                subLevel.getUniqueId(),
-                localBlockPos,
-                blockEntity == null ? "none" : blockEntity.getClass().getName(),
-                behaviorClass,
-                accessor.sable$getValue());
+        if (SableDiagnosticFlags.TRACE_M11) {
+            Sable.LOGGER.info("SABLE_M11_VALUE_CLIENT sublevel={} localBlockPos={} clientBEClass={} behaviorClass={} requestedValue={} createPacketPath=ValueSettingsPacket sableBridge=true",
+                    subLevel.getUniqueId(),
+                    localBlockPos,
+                    blockEntity == null ? "none" : blockEntity.getClass().getName(),
+                    behaviorClass,
+                    accessor.sable$getValue());
+        }
         return true;
     }
 

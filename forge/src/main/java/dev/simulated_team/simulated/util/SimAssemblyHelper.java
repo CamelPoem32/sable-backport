@@ -12,6 +12,7 @@ import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.plot.LevelPlot;
 import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
@@ -297,6 +298,9 @@ public final class SimAssemblyHelper {
 
     public static void logBodySnapshot(final ServerLevel level, final ServerSubLevel subLevel,
                                        final String phase, final int expectedSourceBlocks) {
+        if (!SableDiagnosticFlags.TRACE_OUTER_TRANSFER) {
+            return;
+        }
         final BodySnapshot snapshot = snapshotBody(level, subLevel, expectedSourceBlocks);
         Sable.LOGGER.info("SABLE_M23_BODY_SNAPSHOT sableId={} phase={} storedBlockCount={} storedBlockEntityCount={} rawBounds={} logicalPose={} assemblerPresent={} assemblerRawPos={} springEndpointCount={} trackingPointCount={} actorCount={} expectedPayloadBlockCount={} actualPayloadBlockCount={} blockSetSha256={}",
                 snapshot.sableId(),
@@ -597,7 +601,9 @@ public final class SimAssemblyHelper {
     }
 
     private static void logGlueRoundTrip(final String phase, final String fields) {
-        Sable.LOGGER.info("SABLE_M22_GLUE_ROUNDTRIP phase={} {}", phase, fields);
+        if (SableDiagnosticFlags.TRACE_OUTER_TRANSFER) {
+            Sable.LOGGER.info("SABLE_M22_GLUE_ROUNDTRIP phase={} {}", phase, fields);
+        }
     }
 
     private static String toHex(final byte[] bytes) {

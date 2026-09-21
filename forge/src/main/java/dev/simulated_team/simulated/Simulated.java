@@ -10,12 +10,17 @@ import dev.simulated_team.simulated.index.SimulatedKineticStress;
 import dev.simulated_team.simulated.network.SimulatedNetwork;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableNestedBearingOwnershipTransfer;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NormalWorldCceSync;
+import dev.ryanhcode.sable.util.SableM29EntityQueryTrace;
+import dev.ryanhcode.sable.forge.SableM28RestoredContraptionClientSync;
+import dev.ryanhcode.sable.forge.SableM29SailVisualLifecycle;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import org.slf4j.Logger;
 
@@ -41,7 +46,9 @@ public final class Simulated {
         modBus.addListener(Simulated::commonSetup);
         MinecraftForge.EVENT_BUS.addListener(Simulated::serverTick);
         MinecraftForge.EVENT_BUS.addListener(Simulated::entityJoined);
+        MinecraftForge.EVENT_BUS.addListener(Simulated::entityLeft);
         MinecraftForge.EVENT_BUS.addListener(Simulated::startTracking);
+        MinecraftForge.EVENT_BUS.addListener(Simulated::levelUnloaded);
 
         LOGGER.info("{} M21 bootstrap initialized from {}", MOD_NAME, BASELINE_COMMIT);
     }
@@ -59,12 +66,28 @@ public final class Simulated {
 
     private static void entityJoined(final EntityJoinLevelEvent event) {
         SableM28NormalWorldCceSync.entityJoined(event.getEntity(), event.getLevel());
+        SableM29SailVisualLifecycle.entityJoined(event.getEntity(), event.getLevel());
+    }
+
+    private static void entityLeft(final EntityLeaveLevelEvent event) {
+        SableM28NormalWorldCceSync.entityLeft(event.getEntity(), event.getLevel());
+        SableM28RestoredContraptionClientSync.entityLeft(event.getEntity(), event.getLevel());
+        SableM29SailVisualLifecycle.entityLeft(event.getEntity(), event.getLevel());
     }
 
     private static void startTracking(final PlayerEvent.StartTracking event) {
         if (event.getEntity() instanceof final net.minecraft.server.level.ServerPlayer player) {
             SableM28NormalWorldCceSync.startTracking(player, event.getTarget());
         }
+    }
+
+    private static void levelUnloaded(final LevelEvent.Unload event) {
+        if (event.getLevel() instanceof final net.minecraft.world.level.Level level) {
+            SableM28RestoredContraptionClientSync.levelUnloaded(level);
+        }
+        SableM29EntityQueryTrace.summaryAndReset("LEVEL_UNLOAD",
+                event.getLevel().getClass().getName() + '@'
+                        + System.identityHashCode(event.getLevel()));
     }
 
     public static ResourceLocation path(final String path) {

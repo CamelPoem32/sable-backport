@@ -18,6 +18,7 @@ import dev.ryanhcode.sable.physics.floating_block.FloatingClusterContainer;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import net.createmod.catnip.math.VecHelper;
@@ -139,9 +140,11 @@ public abstract class AbstractContraptionEntityMixin extends Entity implements K
         this.sable$addToPlot();
         this.sable$addToPipeline(serverLevel);
         this.sable$initialized = true;
-        Sable.LOGGER.info("SABLE_M13_CONTRAPTION phase=registered entityId={} class={} containingSubLevel={} mass={} localBounds={}",
-                this.getId(), this.getClass().getName(), Sable.HELPER.getContaining(this) != null,
-                this.sable$massTracker.getMass(), this.sable$localBounds);
+        if (SableDiagnosticFlags.TRACE_M13) {
+            Sable.LOGGER.info("SABLE_M13_CONTRAPTION phase=registered entityId={} class={} containingSubLevel={} mass={} localBounds={}",
+                    this.getId(), this.getClass().getName(), Sable.HELPER.getContaining(this) != null,
+                    this.sable$massTracker.getMass(), this.sable$localBounds);
+        }
     }
 
     @Inject(method = {"remove", "m_142687_"}, at = @At("HEAD"), remap = false)
@@ -164,8 +167,10 @@ public abstract class AbstractContraptionEntityMixin extends Entity implements K
             physics.getPipeline().remove(this);
         }
 
-        Sable.LOGGER.info("SABLE_M13_CONTRAPTION phase=removed entityId={} class={} reason={} containingSubLevel={}",
-                this.getId(), this.getClass().getName(), removalReason, subLevel != null);
+        if (SableDiagnosticFlags.TRACE_M13) {
+            Sable.LOGGER.info("SABLE_M13_CONTRAPTION phase=removed entityId={} class={} reason={} containingSubLevel={}",
+                    this.getId(), this.getClass().getName(), removalReason, subLevel != null);
+        }
     }
 
     @Unique

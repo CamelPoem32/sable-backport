@@ -5,6 +5,7 @@ import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.mixin.punching.ItemInvoker;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -79,6 +80,9 @@ public final class ClientSubLevelTargetHelper {
     }
 
     private static void logTargetTransition(@Nullable final Target target, @Nullable final HitResult vanillaHit) {
+        if (!SableDiagnosticFlags.TRACE_M13) {
+            return;
+        }
         final String key;
         if (target == null) {
             key = "NONE:" + (vanillaHit == null ? "null" : vanillaHit.getType());

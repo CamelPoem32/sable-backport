@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.api.sublevel;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.ryanhcode.sable.network.packets.tcp.ServerboundUseItemOnSubLevelPacket;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
@@ -100,6 +101,9 @@ public final class SubLevelInteractionHelper {
                                              final String delegatedPath,
                                              @Nullable final BlockState stateBefore,
                                              @Nullable final BlockState stateAfter) {
+        if (!SableDiagnosticFlags.TRACE_M11) {
+            return;
+        }
         final ItemStack stack = player.getItemInHand(packet.hand());
         final Direction localFace = packet.localFace();
         Sable.LOGGER.info("SABLE_M11_INTERACT_SERVER sublevel={} localBlockPos={} plotBlockPos={} visibleWorldHit={} playerPos={} reachDistance={} localFace={} item={} hand={} delegatedPath={} result={} stateBefore={} stateAfter={} stateChanged={}",

@@ -7,6 +7,7 @@ import com.mojang.blaze3d.vertex.VertexMultiConsumer;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.render.dispatcher.SubLevelRenderDispatcher;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderBuffers;
@@ -82,6 +83,9 @@ public class VanillaSubLevelBlockEntityRenderer implements SubLevelRenderDispatc
     }
 
     private void logDispatch(final BlockEntity blockEntity, final BlockEntityRenderer<?> renderer) {
+        if (!SableDiagnosticFlags.TRACE_STATIC_RENDERING) {
+            return;
+        }
         final ClientSubLevel subLevel = Sable.HELPER.getContainingClient(blockEntity);
         if (subLevel == null) {
             return;

@@ -6,6 +6,7 @@ import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsBehaviour;
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsPacket;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.ryanhcode.sable.mixin.m11.create.BlockEntityConfigurationPacketAccessor;
 import dev.ryanhcode.sable.mixin.m11.create.ValueSettingsPacketAccessor;
 import dev.ryanhcode.sable.network.packets.tcp.ServerboundCreateValueSettingsSubLevelPacket;
@@ -134,6 +135,9 @@ public final class SubLevelCreateValueSettingsHelper {
                                        @Nullable final Object valueAfter,
                                        final String result,
                                        final double reachDistance) {
+        if (!SableDiagnosticFlags.TRACE_M11) {
+            return;
+        }
         Sable.LOGGER.info("SABLE_M11_VALUE_SERVER sublevel={} localBlockPos={} plotBlockPos={} serverBEClass={} behaviorClass={} valueBefore={} requestedValue={} valueAfter={} delegatedToCreate={} result={} playerPos={} reachDistance={}",
                 subLevel.getUniqueId(),
                 packet.localBlockPos(),

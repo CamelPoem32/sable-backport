@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.mixin.m20.create;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
@@ -24,7 +25,7 @@ public class SafeBlockEntityRendererMixin {
         final Vec3 projected = Sable.HELPER.projectOutOfSubLevel(Minecraft.getInstance().level, itemPos);
         if (projected != itemPos) {
             final String key = itemPos.toString();
-            if (LOGGED_ITEM_CULL.add(key)) {
+            if (SableDiagnosticFlags.TRACE_M20 && LOGGED_ITEM_CULL.add(key)) {
                 Sable.LOGGER.info("SABLE_M20_ITEM_CULL rawItemPosition={} visibleItemPosition={} "
                                 + "cullingInput=visible hiddenPlotPoseTranslation=false "
                                 + "rendererPath=Create_SafeBlockEntityRenderer_shouldCullItem",

@@ -12,6 +12,7 @@ import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
 import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaSingleSubLevelRenderData;
 import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaSubLevelRenderTransforms;
 import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.ShaderInstance;
@@ -199,6 +200,9 @@ public class VanillaSubLevelRenderDispatcher implements SubLevelRenderDispatcher
     private void logBlockEntityTransform(final ClientSubLevel sublevel, final BlockEntity blockEntity,
                                          final double cameraX, final double cameraY, final double cameraZ,
                                          final Vector3d poseBefore, final Matrix4f poseBeforeBer) {
+        if (!SableDiagnosticFlags.TRACE_M11) {
+            return;
+        }
         final BlockPos plotPos = blockEntity.getBlockPos();
         final String key = sublevel.getUniqueId() + ":" + plotPos.asLong() + ":" + blockEntity.getClass().getName();
         if (!LOGGED_BE_TRANSFORM.add(key)) {

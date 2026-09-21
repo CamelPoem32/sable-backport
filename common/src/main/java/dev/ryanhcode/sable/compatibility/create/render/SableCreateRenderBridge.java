@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.compatibility.create.render;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.LevelAccessor;
@@ -25,7 +26,7 @@ public final class SableCreateRenderBridge {
                                                             final String renderPath) {
         final boolean sableSubLevel = Sable.HELPER.getContainingClient(blockEntity) != null;
         final boolean returnedVisualizationSupported = sableSubLevel ? false : originalVisualizationSupported;
-        if (blockEntity != null) {
+        if (SableDiagnosticFlags.TRACE_M20 && blockEntity != null) {
             final String key = renderer + ":" + blockEntity.getBlockPos().asLong() + ":" + sableSubLevel
                     + ":" + originalVisualizationSupported + ":" + returnedVisualizationSupported;
             if (LOGGED_BER_FALLBACK.add(key)) {
@@ -49,7 +50,7 @@ public final class SableCreateRenderBridge {
     public static double distanceToSqrWithSubLevels(final String owner, final Vec3 first, final Vec3 second) {
         final double distance = Sable.HELPER.distanceSquaredWithSubLevels(Minecraft.getInstance().level, first, second);
         final String key = owner + ":" + first + ":" + second;
-        if (LOGGED_DISTANCE_BRIDGE.add(key)) {
+        if (SableDiagnosticFlags.TRACE_M20 && LOGGED_DISTANCE_BRIDGE.add(key)) {
             Sable.LOGGER.info("SABLE_M20_FILTER_RENDER owner={} rawA={} rawB={} "
                             + "distancePath=Sable_distanceSquaredWithSubLevels distanceSqr={} "
                             + "hiddenPlotPoseTranslation=false",

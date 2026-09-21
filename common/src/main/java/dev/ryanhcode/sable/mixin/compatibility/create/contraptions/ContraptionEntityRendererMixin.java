@@ -16,6 +16,7 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.core.BlockPos;
@@ -43,6 +44,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Bridges Create's vanilla contraption renderer into Sable's moving parent coordinate frame. */
 @Mixin(value = ContraptionEntityRenderer.class, remap = false)
 public class ContraptionEntityRendererMixin {
+    @Unique
+    private static final boolean SABLE$TRACE_M28 = Boolean.getBoolean("sable.m28.visualOwnershipTrace");
     @Unique
     private static final Set<Integer> SABLE$LOGGED_RENDER_DECISION =
             Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -80,7 +83,7 @@ public class ContraptionEntityRendererMixin {
         if (containing != null
                 && entity.getContraption() != null
                 && entity.isAliveOrStale()) {
-            if (SABLE$LOGGED_RENDER_DECISION.add(entity.getId())) {
+            if (SableDiagnosticFlags.TRACE_M13 && SABLE$LOGGED_RENDER_DECISION.add(entity.getId())) {
                 Sable.LOGGER.info("SABLE_M13_RENDER entityId={} containingSubLevel={} rawEntityPos={} "
                                 + "sableWorldTransformKnown={} createRotationState={} renderPath={} "
                                 + "renderedBlockCount={} result={}",
@@ -159,6 +162,9 @@ public class ContraptionEntityRendererMixin {
     @Unique
     private static void sable$logContraptionGeometryOwnership(final AbstractContraptionEntity entity,
                                                                final ClientSubLevel subLevel) {
+        if (!SABLE$TRACE_M28) {
+            return;
+        }
         final Contraption contraption = entity.getContraption();
         if (contraption == null || contraption.anchor == null
                 || !SABLE$LOGGED_CONTRAPTION_OWNERSHIP.add(entity.getId())) {
@@ -185,6 +191,9 @@ public class ContraptionEntityRendererMixin {
     private static void sable$traceControlledRotation(final AbstractContraptionEntity entity,
                                                        final ClientSubLevel subLevel, final float partialTick,
                                                        final PoseStack poseStack) {
+        if (!SABLE$TRACE_M28) {
+            return;
+        }
         if (!(entity instanceof final ControlledContraptionEntity controlled)
                 || controlled.getContraption() == null) {
             return;
@@ -238,7 +247,7 @@ public class ContraptionEntityRendererMixin {
                                         final ClientSubLevel subLevel,
                                         final Vec3 rawPosition,
                                         final String renderPath) {
-        if (!SABLE$LOGGED_RENDER.add(entity.getId())) {
+        if (!SableDiagnosticFlags.TRACE_M13 || !SABLE$LOGGED_RENDER.add(entity.getId())) {
             return;
         }
         final Contraption contraption = entity.getContraption();
@@ -265,7 +274,8 @@ public class ContraptionEntityRendererMixin {
                                              final Pose3dc renderPose,
                                              final float partialTick,
                                              final String renderPath) {
-        if (!SABLE$LOGGED_RENDER_STAGE.add(entity.getId() + ":" + stage)) {
+        if (!SableDiagnosticFlags.TRACE_M13
+                || !SABLE$LOGGED_RENDER_STAGE.add(entity.getId() + ":" + stage)) {
             return;
         }
         final BoundingBox3d visibleAabb = new BoundingBox3d(rawAabb);

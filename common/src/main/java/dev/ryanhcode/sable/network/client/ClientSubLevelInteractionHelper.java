@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.network.client;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.ryanhcode.sable.mixin.punching.ItemInvoker;
 import dev.ryanhcode.sable.network.client.ClientSubLevelTargetHelper.Target;
 import dev.ryanhcode.sable.network.packets.tcp.ServerboundUseItemOnSubLevelPacket;
@@ -164,6 +165,9 @@ public final class ClientSubLevelInteractionHelper {
                                          @Nullable final Target target,
                                          final String packetPath,
                                          final InteractionResult result) {
+        if (!SableDiagnosticFlags.TRACE_M11) {
+            return;
+        }
         final Minecraft minecraft = Minecraft.getInstance();
         Sable.LOGGER.info("SABLE_M11_INTERACT_CLIENT vanillaHitType={} sableHit={} sublevel={} worldHit={} localBlockPos={} localHit={} localFace={} packetPath={} item={} hand={} result={}",
                 vanillaHit == null ? (minecraft.hitResult == null ? "null" : minecraft.hitResult.getType()) : vanillaHit.getType(),
@@ -183,6 +187,9 @@ public final class ClientSubLevelInteractionHelper {
                                         final InteractionHand hand,
                                         final BlockPos localBlockPos,
                                         final InteractionResult result) {
+        if (!SableDiagnosticFlags.TRACE_M11) {
+            return;
+        }
         Sable.LOGGER.info("SABLE_M11_WRENCH_CLIENT sableHit=true item={} hand={} localBlockPos={} normalClientPathReached=true swingTriggered={} result={}",
                 player.getItemInHand(hand).getItem(),
                 hand,
@@ -194,7 +201,7 @@ public final class ClientSubLevelInteractionHelper {
     private static void logMotorClient(final LocalPlayer player,
                                        final BlockPos localBlockPos,
                                        final ClientValueSettingsDiagnostics diagnostics) {
-        if (!diagnostics.createBehaviorFound()) {
+        if (!SableDiagnosticFlags.TRACE_M11 || !diagnostics.createBehaviorFound()) {
             return;
         }
 

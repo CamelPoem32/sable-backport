@@ -1,6 +1,7 @@
 package dev.simulated_team.simulated.content.blocks.m24;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.ryanhcode.sable.api.block.BlockEntitySubLevelActor;
 import dev.ryanhcode.sable.api.physics.constraint.FixedConstraintConfiguration;
 import dev.ryanhcode.sable.api.physics.constraint.PhysicsConstraintHandle;
@@ -236,8 +237,8 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
             this.applyRopeFirstSegmentLength(this.targetValue, "WINCH_DEDICATED_TICK");
         }
         final boolean changed = Double.compare(before, this.targetValue) != 0;
-        if (tick == 0L || tick == 1L || tick == 2L || tick == 5L || tick == 20L
-                || changed && Double.compare(this.winchLastLoggedTarget, this.targetValue) != 0) {
+        if (SableDiagnosticFlags.TRACE_M24 && (tick == 0L || tick == 1L || tick == 2L || tick == 5L || tick == 20L
+                || changed && Double.compare(this.winchLastLoggedTarget, this.targetValue) != 0)) {
             this.winchLastLoggedTarget = this.targetValue;
             final ServerSubLevel owner = this.resolveOwnerSubLevel();
             Sable.LOGGER.info("SABLE_M24_WINCH_TICK sableId={} localPos={} logicalRopeId={} tickerInvoked=true kineticSpeed={} convertedLinearSpeed={} clampedLinearSpeed={} geometricVisibleLength={} totalLogicalLength={} firstSegmentExtension={} fixedSegmentCount={} backendCurrentLength={} backendTargetLength={} currentLength={} targetLengthBefore={} targetLengthAfter={} ropeResolved={} controller={} updateApplied={} skipReason={} configurationUpdateCount={}",
@@ -596,7 +597,7 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
                 }
             }
         }
-        final boolean shouldLog = !candidateSables.isEmpty()
+        final boolean shouldLog = SableDiagnosticFlags.TRACE_M24 && !candidateSables.isEmpty()
                 && this.level != null
                 && this.level.getGameTime() - this.lastPairDiscoveryLogGameTime >= 20L;
         if (shouldLog) {
@@ -834,9 +835,11 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
         this.ropeAppliedFirstSegmentLength = length;
         this.ropeBackendLengthWriteCount++;
         this.ropeLastLengthWriteOwner = owner;
-        Sable.LOGGER.info("SABLE_M24_ROPE_DEBUG phase=LENGTH_WRITE family={} logicalId={} configuredLengthBefore={} configuredLengthAfter={} writeOwner={} writeCount={}",
-                this.family.id(), this.simulated$getLogicalConstraintId(), before, length, owner,
-                this.ropeBackendLengthWriteCount);
+        if (SableDiagnosticFlags.TRACE_M24) {
+            Sable.LOGGER.info("SABLE_M24_ROPE_DEBUG phase=LENGTH_WRITE family={} logicalId={} configuredLengthBefore={} configuredLengthAfter={} writeOwner={} writeCount={}",
+                    this.family.id(), this.simulated$getLogicalConstraintId(), before, length, owner,
+                    this.ropeBackendLengthWriteCount);
+        }
     }
 
     private void updateWinchFromCreateKinetics() {
@@ -1191,6 +1194,9 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
                                            final boolean previouslyPowered,
                                            final boolean candidateGeometryValid,
                                            final boolean pairAttempted) {
+        if (!SableDiagnosticFlags.TRACE_M24) {
+            return;
+        }
         final ServerSubLevel owner = this.resolveOwnerSubLevel();
         final ServerSubLevel candidateOwner = candidate == null ? null : candidate.resolveOwnerSubLevel();
         final boolean partnerLogical = candidate != null && candidate.partnerPos != null;
@@ -1264,6 +1270,9 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
     }
 
     private void logSwivelActivation(final String phase, final ServerSubLevel owner, final ServerSubLevel partner) {
+        if (!SableDiagnosticFlags.TRACE_M24) {
+            return;
+        }
         final BlockState ownerState = this.getBlockState();
         final BlockState partnerState = this.partnerPos == null ? ownerState : this.level.getBlockState(this.partnerPos);
         final Direction ownerFacing = ownerState.hasProperty(DirectionalBlock.FACING)
@@ -1286,7 +1295,7 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
     }
 
     private void traceSwivelLifecycle(final ServerSubLevel owner) {
-        if (this.swivelCreatedGameTime == Long.MIN_VALUE || this.level == null) {
+        if (!SableDiagnosticFlags.TRACE_M24 || this.swivelCreatedGameTime == Long.MIN_VALUE || this.level == null) {
             return;
         }
         final long elapsed = this.level.getGameTime() - this.swivelCreatedGameTime;
@@ -1334,6 +1343,9 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
                                     final Vector3d axisA, final Vector3d axisB,
                                     final double visibleEndpointDistance, final double rawEndpointDistance,
                                     final double localAnchorMagnitudeA, final double localAnchorMagnitudeB) {
+        if (!SableDiagnosticFlags.TRACE_M24) {
+            return;
+        }
         Sable.LOGGER.info("SABLE_M24_CONSTRAINT_FRAME family={} phase={} bodyA={} bodyB={}"
                         + " bodyAPoseVisible={} bodyBPoseVisible={}"
                         + " endpointARaw={} endpointBRaw={}"
@@ -1362,6 +1374,9 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
                                 final Vector3d anchorA, final Vector3d anchorB,
                                 final Vec3 visibleA, final Vec3 visibleB,
                                 final Vector3d axisA, final Vector3d axisB) {
+        if (!SableDiagnosticFlags.TRACE_M24) {
+            return;
+        }
         final Vector3d axisAVisible = owner.logicalPose().orientation().transform(axisA, new Vector3d());
         final Vector3d axisBVisible = partner.logicalPose().orientation().transform(axisB, new Vector3d());
         final double linearError = visibleA.distanceTo(visibleB);
@@ -1389,6 +1404,9 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
     private void logRopeDebug(final String phase, final ServerSubLevel owner, final ServerSubLevel partner,
                               final RigidBodyHandle ownerHandle, final RigidBodyHandle partnerHandle,
                               final Vec3 visibleA, final Vec3 visibleB, final List<Vector3d> points) {
+        if (!SableDiagnosticFlags.TRACE_M24) {
+            return;
+        }
         final double currentLength = ropeLength(points);
         final double firstSegment = points.size() < 2 ? 0.0D : points.get(0).distance(points.get(1));
         final int fixedSegmentCount = Math.max(0, points.size() - 2);
@@ -1423,6 +1441,9 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
                                          final Vector3d anchorA, final Vector3d anchorB,
                                          final Vec3 visibleA, final Vec3 visibleB,
                                          final List<Vector3d> points) {
+        if (!SableDiagnosticFlags.TRACE_M24) {
+            return;
+        }
         final double constructorLength = points.size() < 2 ? Double.NaN : points.get(0).distance(points.get(1));
         final double solverAttachmentDistance = visibleA.distanceTo(new Vec3(points.get(0).x, points.get(0).y, points.get(0).z))
                 + visibleB.distanceTo(new Vec3(points.get(points.size() - 1).x, points.get(points.size() - 1).y,
@@ -1460,6 +1481,9 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
 
     private void logDockingDebug(final ServerSubLevel owner, final ServerSubLevel partner,
                                  final RigidBodyHandle ownerHandle, final RigidBodyHandle partnerHandle) {
+        if (!SableDiagnosticFlags.TRACE_M24) {
+            return;
+        }
         final boolean ownerActive = this.ownsActiveBackend();
         final boolean partnerActive = this.partnerPos != null && this.level != null
                 && this.level.getBlockEntity(this.partnerPos) instanceof final M24PhysicalBlockEntity component
@@ -1490,10 +1514,10 @@ public class M24PhysicalBlockEntity extends KineticBlockEntity implements BlockE
             return;
         }
         this.postCreateValidationTicks++;
-        final boolean shouldLog = this.postCreateValidationTicks == 1
+        final boolean shouldLog = SableDiagnosticFlags.TRACE_M24 && (this.postCreateValidationTicks == 1
                 || this.postCreateValidationTicks == 2
                 || this.postCreateValidationTicks == 5
-                || this.postCreateValidationTicks == 20;
+                || this.postCreateValidationTicks == 20);
         final Vector3d beforeA = this.postCreateBodyAPositionBefore == null
                 ? new Vector3d(owner.logicalPose().position())
                 : this.postCreateBodyAPositionBefore;

@@ -3,6 +3,7 @@ package dev.ryanhcode.sable.mixin.m11.create;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
@@ -35,7 +36,7 @@ public class KineticBlockEntityRendererMixin {
         final boolean returnedVisualizationSupported = sableSubLevel ? false : originalVisualizationSupported;
         final String key = blockEntity.getClass().getName() + ":" + blockEntity.getBlockPos().asLong() + ":"
                 + sableSubLevel + ":" + originalVisualizationSupported + ":" + returnedVisualizationSupported;
-        if (LOGGED_CREATE_BER.add(key)) {
+        if (SableDiagnosticFlags.TRACE_M11 && LOGGED_CREATE_BER.add(key)) {
             Direction.Axis rotationAxis = null;
             float renderAngle = Float.NaN;
             try {

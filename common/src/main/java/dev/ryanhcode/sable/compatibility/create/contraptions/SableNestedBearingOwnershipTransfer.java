@@ -249,8 +249,11 @@ public final class SableNestedBearingOwnershipTransfer {
                     ? RotationMode.ROTATE_PLACE.ordinal()
                     : accessor.sable$getMovementMode().getValue();
             final float angle = entity == null ? bearing.getInterpolatedAngle(0.0F) : entity.getAngle(0.0F);
+            final int snapshotIndex = this.snapshots.size();
+            final int symmetricSailCount = symmetricSailCount(contraption);
             final NestedSnapshot snapshot = new NestedSnapshot(
-                    bearing.getBlockPos().immutable(), facing, contraption.anchor.immutable(),
+                    snapshotIndex, symmetricSailCount, bearing.getBlockPos().immutable(),
+                    facing, contraption.anchor.immutable(),
                     contraption.writeNBT(false).copy(), copyEntries(contraption), angle, movementMode,
                     accessor.sable$getSequencedAngleLimit(), ownership, entity, contraption);
             this.snapshots.put(snapshot.sourceBearingPos, snapshot);
@@ -258,6 +261,13 @@ public final class SableNestedBearingOwnershipTransfer {
                     "capturedSourcePositions=" + capturedSources + " hullOverlap=[]");
             this.logTransition("SNAPSHOT_CREATED", snapshot.sourceBearingPos, entity,
                     snapshot.entries.size(), null, null, "sourceOwnership=" + ownership);
+            if ("OUTER_DISASSEMBLY".equals(this.operation)) {
+                SableM28NormalWorldCceSync.traceM29ReverseEvent(
+                        "REVERSE_SNAPSHOT_CAPTURED", this.transactionId, snapshot.snapshotIndex,
+                        entity == null ? null : entity.getUUID(), snapshot.sourceBearingPos, null,
+                        snapshot.entries.size(), snapshot.symmetricSailCount, snapshot.angle,
+                        "sourceContainingSable=true sourceOwnership=" + ownership);
+            }
         }
 
         private void restoreBearing(final Level sourceLevel, final ServerLevel targetLevel,
@@ -281,6 +291,14 @@ public final class SableNestedBearingOwnershipTransfer {
             NestedBearingRegistrationDecision.Failure registrationFailure =
                     NestedBearingRegistrationDecision.Failure.ADD_REJECTED;
             try {
+                if ("OUTER_DISASSEMBLY".equals(this.operation)) {
+                    SableM28NormalWorldCceSync.traceM29ReverseEvent(
+                            "SERVER_RESTORE_BEGIN", this.transactionId, snapshot.snapshotIndex,
+                            snapshot.sourceEntity == null ? null : snapshot.sourceEntity.getUUID(),
+                            snapshot.sourceBearingPos, targetPos, snapshot.entries.size(),
+                            snapshot.symmetricSailCount, snapshot.angle,
+                            "destinationAnchor=" + targetAnchor);
+                }
                 this.logAssemblyTransaction("NESTED_RESTORE_BEGIN", null);
                 this.logTransition("RESTORE_BEGIN", sourcePos, snapshot.sourceEntity,
                         snapshot.entries.size(), null, null, "destinationAnchor=" + targetAnchor);
@@ -297,7 +315,9 @@ public final class SableNestedBearingOwnershipTransfer {
 
                 if ("OUTER_DISASSEMBLY".equals(this.operation)) {
                     SableM28NormalWorldCceSync.markBeforeAdd(
-                            restoredEntity, targetPos, snapshot.entries.size());
+                            restoredEntity, targetPos, snapshot.entries.size(), this.transactionId,
+                            snapshot.snapshotIndex, snapshot.symmetricSailCount, snapshot.angle,
+                            snapshot.sourceEntity == null ? null : snapshot.sourceEntity.getUUID());
                 }
 
                 final MechanicalBearingBlockEntityAccessor accessor =
@@ -348,6 +368,12 @@ public final class SableNestedBearingOwnershipTransfer {
                         "capturedBlockSetExact=true entityRegistration=true");
                 this.logTransition("RESTORE_REGISTERED", sourcePos, restoredEntity,
                         snapshot.entries.size(), null, null, "destinationBearingPos=" + targetPos);
+                SableM28NormalWorldCceSync.traceM29Entity(
+                        "SERVER_RESTORE_VERIFIED", restoredEntity,
+                        "destinationContainingSable=" + (entitySubLevel != null)
+                                + " bearingMovedContraptionMatches="
+                                + (targetBearing.getMovedContraption() == restoredEntity)
+                                + " actualAngle=" + restoredEntity.getAngle(1.0F));
                 this.logAssemblyTransaction("NESTED_RESTORE_COMPLETE", null);
             } catch (final RuntimeException exception) {
                 if (restoredEntity != null) {
@@ -373,6 +399,14 @@ public final class SableNestedBearingOwnershipTransfer {
                     snapshot.sourceContraption.removeBlocksFromWorld(this.sourceLevel, BlockPos.ZERO);
                 } else if (snapshot.sourceEntity != null) {
                     detachSourceBearing(snapshot.sourceBearingPos);
+                    if ("OUTER_DISASSEMBLY".equals(this.operation)) {
+                        SableM28NormalWorldCceSync.traceM29ReverseEvent(
+                                "REVERSE_SOURCE_REMOVED", this.transactionId, snapshot.snapshotIndex,
+                                snapshot.sourceEntity.getUUID(), snapshot.sourceBearingPos,
+                                snapshot.destination == null ? null : snapshot.destination.targetBearingPos,
+                                snapshot.entries.size(), snapshot.symmetricSailCount, snapshot.angle,
+                                "allDestinationSnapshotsVerified=true");
+                    }
                     snapshot.sourceEntity.discard();
                 }
                 this.verifyOwnership(snapshot, "SOURCE_COMMITTED");
@@ -451,7 +485,9 @@ public final class SableNestedBearingOwnershipTransfer {
                     if (snapshot.destination != null) {
                         PENDING.add(new PendingVerification(snapshot.destination.level,
                                 snapshot.destination.targetBearingPos, snapshot.destination.entity.getUUID(),
-                                snapshot.entries.size(), snapshot.angle,
+                                snapshot.entries.size(), snapshot.symmetricSailCount, snapshot.angle,
+                                this.transactionId, snapshot.snapshotIndex,
+                                "OUTER_DISASSEMBLY".equals(this.operation),
                                 snapshot.destination.level.getGameTime() + 1L));
                     }
                 }
@@ -675,22 +711,43 @@ public final class SableNestedBearingOwnershipTransfer {
         return Map.copyOf(result);
     }
 
+    private static int symmetricSailCount(final BearingContraption contraption) {
+        int count = 0;
+        for (final StructureTemplate.StructureBlockInfo info : contraption.getBlocks().values()) {
+            if ("simulated:white_symmetric_sail".equals(
+                    BuiltInRegistries.BLOCK.getKey(info.state().getBlock()).toString())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     private static final class PendingVerification {
         private final ServerLevel level;
         private final BlockPos bearingPos;
         private final UUID entityUuid;
         private final int expectedCapturedBlocks;
+        private final int expectedSymmetricSails;
         private final float expectedAngle;
+        private final long transferId;
+        private final int snapshotIndex;
+        private final boolean reverseRestore;
         private final long dueGameTime;
 
         private PendingVerification(final ServerLevel level, final BlockPos bearingPos, final UUID entityUuid,
-                                    final int expectedCapturedBlocks, final float expectedAngle,
+                                    final int expectedCapturedBlocks, final int expectedSymmetricSails,
+                                    final float expectedAngle, final long transferId, final int snapshotIndex,
+                                    final boolean reverseRestore,
                                     final long dueGameTime) {
             this.level = level;
             this.bearingPos = bearingPos;
             this.entityUuid = entityUuid;
             this.expectedCapturedBlocks = expectedCapturedBlocks;
+            this.expectedSymmetricSails = expectedSymmetricSails;
             this.expectedAngle = expectedAngle;
+            this.transferId = transferId;
+            this.snapshotIndex = snapshotIndex;
+            this.reverseRestore = reverseRestore;
             this.dueGameTime = dueGameTime;
         }
 
@@ -707,14 +764,14 @@ public final class SableNestedBearingOwnershipTransfer {
                     && Math.abs(entity.getAngle(1.0F) - this.expectedAngle) <= 0.001F
                     && blockEntity instanceof final MechanicalBearingBlockEntity bearing
                     && bearing.getMovedContraption() == entity;
-            Sable.LOGGER.info("SABLE_M34_NESTED_OWNERSHIP phase=NEXT_TICK_SURVIVAL bearingPos={} "
-                            + "entityUuid={} survived={} expectedCapturedBlockCount={} actualCapturedBlockCount={} "
-                            + "expectedAngle={} actualAngle={}",
-                    this.bearingPos, this.entityUuid, survived, this.expectedCapturedBlocks,
-                    entity == null || entity.getContraption() == null
-                            ? 0 : entity.getContraption().getBlocks().size(),
-                    this.expectedAngle, entity == null ? "none" : entity.getAngle(1.0F));
             if (Boolean.getBoolean(TRACE_PROPERTY)) {
+                Sable.LOGGER.info("SABLE_M34_NESTED_OWNERSHIP phase=NEXT_TICK_SURVIVAL bearingPos={} "
+                                + "entityUuid={} survived={} expectedCapturedBlockCount={} actualCapturedBlockCount={} "
+                                + "expectedAngle={} actualAngle={}",
+                        this.bearingPos, this.entityUuid, survived, this.expectedCapturedBlocks,
+                        entity == null || entity.getContraption() == null
+                                ? 0 : entity.getContraption().getBlocks().size(),
+                        this.expectedAngle, entity == null ? "none" : entity.getAngle(1.0F));
                 Sable.LOGGER.info("SABLE_M34_TRANSFER_SESSION phase=RESTORE_SURVIVED_NEXT_TICK "
                                 + "operation=DEFERRED sourceBearingPos={} sourceNestedEntityId={} "
                                 + "capturedBlockCount={} nullableFieldName=none nullableFieldValue=not_applicable "
@@ -725,6 +782,20 @@ public final class SableNestedBearingOwnershipTransfer {
             if (!survived) {
                 Sable.LOGGER.error("M28.14 nested bearing restoration did not survive its next tick at {}",
                         this.bearingPos);
+            }
+            if (this.reverseRestore && entity != null) {
+                SableM28NormalWorldCceSync.traceM29Entity(
+                        "SERVER_NEXT_TICK_ALIVE", entity,
+                        "survived=" + survived
+                                + " expectedSymmetricSailCount=" + this.expectedSymmetricSails
+                                + " transferId=" + this.transferId
+                                + " snapshotIndex=" + this.snapshotIndex);
+            } else if (this.reverseRestore) {
+                SableM28NormalWorldCceSync.traceM29ReverseEvent(
+                        "SERVER_NEXT_TICK_ALIVE", this.transferId, this.snapshotIndex, null,
+                        this.bearingPos, this.bearingPos, this.expectedCapturedBlocks,
+                        this.expectedSymmetricSails, this.expectedAngle,
+                        "survived=false entityLookupMissing=true");
             }
             return true;
         }
@@ -739,6 +810,8 @@ public final class SableNestedBearingOwnershipTransfer {
     }
 
     private static final class NestedSnapshot {
+        private final int snapshotIndex;
+        private final int symmetricSailCount;
         private final BlockPos sourceBearingPos;
         private final Direction sourceFacing;
         private final BlockPos sourceAnchor;
@@ -752,13 +825,16 @@ public final class SableNestedBearingOwnershipTransfer {
         private final BearingContraption sourceContraption;
         private @Nullable RestoredOwnership destination;
 
-        private NestedSnapshot(final BlockPos sourceBearingPos, final Direction sourceFacing,
+        private NestedSnapshot(final int snapshotIndex, final int symmetricSailCount,
+                               final BlockPos sourceBearingPos, final Direction sourceFacing,
                                final BlockPos sourceAnchor, final CompoundTag contraptionTag,
                                final Map<BlockPos, CapturedEntry> entries, final float angle,
                                final int movementMode, final double sequencedAngleLimit,
                                final SourceOwnership sourceOwnership,
                                final @Nullable ControlledContraptionEntity sourceEntity,
                                final BearingContraption sourceContraption) {
+            this.snapshotIndex = snapshotIndex;
+            this.symmetricSailCount = symmetricSailCount;
             this.sourceBearingPos = sourceBearingPos;
             this.sourceFacing = sourceFacing;
             this.sourceAnchor = sourceAnchor;

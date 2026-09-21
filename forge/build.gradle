@@ -28296,24 +28296,29 @@ tasks.register('verifyM28VisualRenderOwnerInstrumentationBoundary') {
 
 tasks.register('verifyM28InclusiveEntityOwnershipAuditBoundary') {
     group = 'forge backport'
-    description = 'Checks transformed SubLevel entity queries report duplicate callback identities without changing results.'
+    description = 'Checks transformed SubLevel entity queries preserve inclusive ownership without duplicate callbacks.'
     File getter = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SubLevelInclusiveLevelEntityGetter.java')
+    File queryTrace = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SableM29EntityQueryTrace.java')
     File levelMixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_aabb_lookup/LevelsMixin.java')
-    inputs.files(getter, levelMixin)
+    inputs.files(getter, queryTrace, levelMixin)
     doLast {
         String source = getter.getText('UTF-8')
-        ['SABLE_M28_INCLUSIVE_ENTITY_QUERY', 'DIRECT_PARENT_SPACE',
-         'CONTAINING_SUBLEVEL_TO_VISIBLE', 'VISIBLE_TO_INTERSECTING_SUBLEVEL',
-         'duplicateEmission', 'this.delegate.get(aABB', 'target.accept(value)'].each { token ->
-            if (!source.contains(token)) throw new GradleException("M28.7 inclusive getter audit lost ${token}")
+        String diagnostics = queryTrace.getText('UTF-8')
+        ['PARENT_VISIBLE_DIRECT', 'SUBLEVEL_RAW_DIRECT',
+         'SUBLEVEL_RAW_TO_PARENT_VISIBLE', 'PARENT_VISIBLE_TO_SUBLEVEL_RAW',
+         'IdentityHashMap', 'uniqueConsumer', 'uniqueAbortable', 'target.accept(value)'].each { token ->
+            if (!source.contains(token)) throw new GradleException("M29 inclusive getter contract lost ${token}")
+        }
+        if (!diagnostics.contains('SABLE_M29_ENTITY_QUERY')) {
+            throw new GradleException('M29 bounded inclusive-query diagnostics lost their marker')
         }
         if (!levelMixin.getText('UTF-8').contains('new SubLevelInclusiveLevelEntityGetter')) {
             throw new GradleException('Level#getEntities no longer installs the SubLevel-inclusive wrapper')
         }
-        if (source.contains('if (occurrence > 1)') || source.contains('distinct(')) {
-            throw new GradleException('M28.7 diagnostics must not deduplicate production entity callbacks')
+        if (!source.contains('this.emitted.put(value, Boolean.TRUE)')) {
+            throw new GradleException('M29 inclusive getter no longer suppresses parent/sublevel identity aliases')
         }
-        logger.lifecycle('verifyM28InclusiveEntityOwnershipAuditBoundary PASS: all transformed delegate routes retain behavior and expose identity aliases')
+        logger.lifecycle('verifyM28InclusiveEntityOwnershipAuditBoundary PASS: all coordinate-correct delegate routes retain behavior and emit each identity once')
     }
 }
 
@@ -29326,5 +29331,737 @@ tasks.register('verifyM28_14_3NormalWorldClientRestore') {
     dependsOn tasks.named('verifyM28NormalWorldCceClientSyncBoundary')
     doLast {
         logger.lifecycle('verifyM28_14_3NormalWorldClientRestore PASS: restored CCE spawn provenance and post-payload visual admission are implemented; runtime required')
+    }
+}
+
+tasks.register('verifyM29EntityQueryCoordinateBoundary') {
+    group = 'forge backport'
+    description = 'Verifies parent-visible/raw-plot entity-query separation, eight-corner bounds, and Jade query normalization.'
+    dependsOn tasks.named('verifyM28RotatedContraptionVisibleBoundsBoundary')
+    File getter = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/util/SubLevelInclusiveLevelEntityGetter.java')
+    File bounds = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/util/SubLevelEntityQueryBounds.java')
+    File trace = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/util/SableM29EntityQueryTrace.java')
+    File jade = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/jade/RayTracingMixin.java')
+    File boundingBox = rootProject.file(
+            'sable_companion_1_20/src/main/java/dev/ryanhcode/sable/companion/math/BoundingBox3dc.java')
+    File documentation = rootProject.file('M29_ENTITY_QUERY_AND_DIAGNOSTIC_CLEANUP.md')
+    inputs.files(getter, bounds, trace, jade, boundingBox, documentation, targetJadeJar)
+    doLast {
+        String getterSource = getter.getText('UTF-8')
+        String boundsSource = bounds.getText('UTF-8')
+        String jadeSource = jade.getText('UTF-8')
+        String boxSource = boundingBox.getText('UTF-8')
+        ['PARENT_VISIBLE_DIRECT', 'SUBLEVEL_RAW_DIRECT', 'SUBLEVEL_RAW_TO_PARENT_VISIBLE',
+         'PARENT_VISIBLE_TO_SUBLEVEL_RAW', 'new IdentityHashMap<>()',
+         'SubLevelEntityQueryBounds.pose(this.level, target)',
+         'SableM29EntityQueryTrace.recordDuplicateEntity',
+         'SableM29EntityQueryTrace.recordRoute'].each { token ->
+            if (!getterSource.contains(token)) {
+                throw new GradleException("M29 inclusive entity query lost ${token}")
+            }
+        }
+        if (getterSource.contains('new Throwable("Stack Trace")')
+                || getterSource.contains('aABB = bb.transform')
+                || getterSource.contains('event=COMPLETE')) {
+            throw new GradleException('M29 getter retained repeated stack spam or ambiguous in-place query-space mutation')
+        }
+        ['parentVisibleRay', 'toParentVisible(level, first)', 'toParentVisible(level, second)',
+         'LevelPoseProviderExtension'].each { token ->
+            if (!boundsSource.contains(token)) {
+                throw new GradleException("M29 ray-bound normalization lost ${token}")
+            }
+        }
+        ['sable$queryEntitiesInParentSpace', 'SubLevelEntityQueryBounds.parentVisibleRay(level, start, end)',
+         'Lnet/minecraft/world/level/Level;getEntities'].each { token ->
+            if (!jadeSource.contains(token)) {
+                throw new GradleException("M29 Jade query boundary lost ${token}")
+            }
+        }
+        if (!boxSource.contains('for (int i = 0; i <= 0b111; i++)')
+                || !boxSource.contains('dest.expandTo(mpose.transformPosition(corner), dest)')) {
+            throw new GradleException('M29 rotated entity-query bounds no longer use all eight corners')
+        }
+
+        JarFile jadeJar = new JarFile(targetJadeJar)
+        try {
+            def entry = jadeJar.getJarEntry('snownee/jade/overlay/RayTracing.class')
+            if (entry == null) throw new GradleException('M29 target Jade jar is missing RayTracing')
+            def invocations = jadeJar.getInputStream(entry).withCloseable { stream -> readClassMethodInvocations(stream) }
+            String method = 'getEntityHitResult(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/AABB;Ljava/util/function/Predicate;)Lnet/minecraft/world/phys/EntityHitResult;'
+            String getEntities = 'net/minecraft/world/level/Level.m_6249_(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/AABB;Ljava/util/function/Predicate;)Ljava/util/List;'
+            if (invocations.methods[method].count { it == getEntities } != 1) {
+                throw new GradleException('M29 Jade 11.13.3 entity-query callsite changed')
+            }
+        } finally {
+            jadeJar.close()
+        }
+        logger.lifecycle('verifyM29EntityQueryCoordinateBoundary PASS: visible/raw routes are separate, deduplicated, and eight-corner safe')
+    }
+}
+
+tasks.register('verifyM29EntityQueryTransformMath') {
+    group = 'forge backport'
+    description = 'Executes rotated, edge, round-trip, and multiple-body M29 query-bound math.'
+    dependsOn tasks.named('compileJava')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+    File test = file('src/m29QueryTest/java/dev/ryanhcode/sable/util/M29EntityQueryBoundsTest.java')
+    inputs.file(test)
+    outputs.dir(layout.buildDirectory.dir('m29EntityQueryTest'))
+    doLast {
+        File output = layout.buildDirectory.dir('m29EntityQueryTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M29 entity-query test requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath, test.absolutePath)
+        if (result != 0) throw new GradleException('M29 entity-query math test compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.util.M29EntityQueryBoundsTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M29 entity-query math regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM29EntityQueryTransformMath PASS: rotated, edge, round-trip, and multiple-body bounds stay local')
+    }
+}
+
+tasks.register('verifyM29DiagnosticLifecycleAndLoggingBoundary') {
+    group = 'forge backport'
+    description = 'Verifies stale M36 expiry and production-safe gating of retained milestone diagnostics.'
+    File sync = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28NormalWorldCceSync.java')
+    File simulated = file('src/main/java/dev/simulated_team/simulated/Simulated.java')
+    File flags = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SableDiagnosticFlags.java')
+    File renderer = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java')
+    File target = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/network/client/ClientSubLevelTargetHelper.java')
+    File steering = file(
+            'src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelBlockEntity.java')
+    File assembly = file('src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java')
+    File staticRenderer = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/sublevel/render/vanilla/VanillaSingleSubLevelRenderData.java')
+    File renderBridge = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java')
+    inputs.files(sync, simulated, flags, renderer, target, steering, assembly, staticRenderer, renderBridge)
+    doLast {
+        String syncSource = sync.getText('UTF-8')
+        String simulatedSource = simulated.getText('UTF-8')
+        String flagsSource = flags.getText('UTF-8')
+        String rendererSource = renderer.getText('UTF-8')
+        String targetSource = target.getText('UTF-8')
+        String steeringSource = steering.getText('UTF-8')
+        String assemblySource = assembly.getText('UTF-8')
+        String staticSource = staticRenderer.getText('UTF-8')
+        String bridgeSource = renderBridge.getText('UTF-8')
+        ['entityLeft', 'CLIENT_TARGETS.remove(controlled.getUUID(), controlled.getId())',
+         'CLIENT_TRACKING_EXPIRED', 'expectedLifecycleCompletion=true'].each { token ->
+            if (!syncSource.contains(token)) throw new GradleException("M29 M36 expiry lost ${token}")
+        }
+        ['EntityLeaveLevelEvent', 'SableM28NormalWorldCceSync.entityLeft'].each { token ->
+            if (!simulatedSource.contains(token)) throw new GradleException("M29 client lifecycle hook lost ${token}")
+        }
+        ['sable.m10.traceRendering', 'sable.m11.traceBlockEdits', 'sable.m13.traceRuntime',
+         'sable.m20.traceCreateRendering', 'sable.m22.traceAssembly', 'sable.m28.traceSteering'].each { token ->
+            if (!flagsSource.contains(token)) throw new GradleException("M29 diagnostic policy lost ${token}")
+        }
+        if (!rendererSource.contains('if (!SABLE$TRACE_M28)')
+                || !rendererSource.contains('SableDiagnosticFlags.TRACE_M13')) {
+            throw new GradleException('M29 retained contraption render diagnostics are not gated')
+        }
+        if (!targetSource.contains('if (!SableDiagnosticFlags.TRACE_M13)')) {
+            throw new GradleException('M29 target-transition diagnostics are not gated')
+        }
+        if (!steeringSource.contains('if (SableDiagnosticFlags.TRACE_STEERING)')) {
+            throw new GradleException('M29 steering tick diagnostics are not gated')
+        }
+        if (!assemblySource.contains('if (!SableDiagnosticFlags.TRACE_OUTER_TRANSFER)')
+                || !assemblySource.contains('if (SableDiagnosticFlags.TRACE_OUTER_TRANSFER)')) {
+            throw new GradleException('M29 outer-transfer snapshots and glue traces are not gated')
+        }
+        if (!staticSource.contains('SableDiagnosticFlags.TRACE_STATIC_RENDERING')
+                || !bridgeSource.contains('if (!SableDiagnosticFlags.TRACE_M13)')) {
+            throw new GradleException('M29 retained static/Create render diagnostics are not gated')
+        }
+        logger.lifecycle('verifyM29DiagnosticLifecycleAndLoggingBoundary PASS: historical UUIDs expire and hot probes are opt-in')
+    }
+}
+
+tasks.register('verifyM29EntityQueryAndDiagnosticCleanup') {
+    group = 'forge backport'
+    description = 'Runs M29 entity-query, diagnostic-cleanup, and retained M13-M28 regression boundaries.'
+    dependsOn tasks.named('verifyM28_14_3NormalWorldClientRestore')
+    dependsOn tasks.named('verifyM29EntityQueryCoordinateBoundary')
+    dependsOn tasks.named('verifyM29EntityQueryTransformMath')
+    dependsOn tasks.named('verifyM29DiagnosticLifecycleAndLoggingBoundary')
+    doLast {
+        logger.lifecycle('verifyM29EntityQueryAndDiagnosticCleanup PASS: M28 retained; M29 runtime validation required')
+    }
+}
+
+tasks.register('verifyM29_1BoundedDiagnostics') {
+    group = 'forge backport'
+    description = 'Executes M29.1 million-event caps and sail lifecycle state transitions.'
+    dependsOn tasks.named('compileJava')
+    File counterTest = file(
+            'src/m29QueryTest/java/dev/ryanhcode/sable/util/M29BoundedDiagnosticCountersTest.java')
+    File lifecycleTest = file(
+            'src/m29QueryTest/java/dev/ryanhcode/sable/forge/M29SailVisualLifecycleStateTest.java')
+    inputs.files(counterTest, lifecycleTest)
+    outputs.dir(layout.buildDirectory.dir('m29_1DiagnosticTest'))
+    doLast {
+        File output = layout.buildDirectory.dir('m29_1DiagnosticTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M29.1 diagnostic test requires a JDK')
+        String classpath = sourceSets.main.runtimeClasspath.asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath,
+                counterTest.absolutePath, lifecycleTest.absolutePath)
+        if (result != 0) throw new GradleException('M29.1 bounded diagnostic test compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.util.M29BoundedDiagnosticCountersTest')
+                    .getMethod('run').invoke(null)
+            loader.loadClass('dev.ryanhcode.sable.forge.M29SailVisualLifecycleStateTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M29.1 bounded diagnostic regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM29_1BoundedDiagnostics PASS: one million query events retain only bounded examples; sail gaps, recovery, payload, angle wrap, stop, and retirement classify deterministically')
+    }
+}
+
+tasks.register('verifyM29_1DiagnosticGatingAndLifecycleBoundary') {
+    group = 'forge backport'
+    description = 'Verifies M29.1 hot probes are opt-in and sail lifecycle hooks remain event based.'
+    File flags = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SableDiagnosticFlags.java')
+    File getter = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/util/SubLevelInclusiveLevelEntityGetter.java')
+    File queryTrace = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/util/SableM29EntityQueryTrace.java')
+    File bufferProbe = file('src/main/java/dev/ryanhcode/sable/forge/SableM28ContraptionBufferProbe.java')
+    File bufferMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ContraptionBufferProbeMixin.java')
+    File m24 = file('src/main/java/dev/simulated_team/simulated/content/blocks/m24/M24PhysicalBlockEntity.java')
+    File torsion = file('src/main/java/dev/simulated_team/simulated/content/blocks/m24/M24TorsionSpringBlockEntity.java')
+    File lifecycle = file('src/main/java/dev/ryanhcode/sable/forge/SableM29SailVisualLifecycle.java')
+    File lifecycleState = file('src/main/java/dev/ryanhcode/sable/forge/SailVisualLifecycleState.java')
+    File visualMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ContraptionVisualProbeMixin.java')
+    File documentation = rootProject.file('M29_1_DIAGNOSTICS_AND_SAIL_VISUAL_LIFECYCLE.md')
+    inputs.files(flags, getter, queryTrace, bufferProbe, bufferMixin, m24, torsion,
+            lifecycle, lifecycleState, visualMixin, documentation)
+    doLast {
+        String flagsSource = flags.getText('UTF-8')
+        String getterSource = getter.getText('UTF-8')
+        String querySource = queryTrace.getText('UTF-8')
+        String probeSource = bufferProbe.getText('UTF-8')
+        String probeMixinSource = bufferMixin.getText('UTF-8')
+        String m24Source = m24.getText('UTF-8')
+        String torsionSource = torsion.getText('UTF-8')
+        String lifecycleSource = lifecycle.getText('UTF-8')
+        String lifecycleStateSource = lifecycleState.getText('UTF-8')
+        String visualMixinSource = visualMixin.getText('UTF-8')
+        ['sable.m11.traceRuntime', 'sable.m24.traceRuntime', 'sable.m28.traceBufferProbe'].each { token ->
+            if (!flagsSource.contains(token)) throw new GradleException("M29.1 diagnostic gate missing ${token}")
+        }
+        if (!probeSource.contains('SableDiagnosticFlags.TRACE_M28_BUFFER')
+                || !probeMixinSource.contains('if (!SableM28ContraptionBufferProbe.enabled())')) {
+            throw new GradleException('M29.1 M28 vertex/buffer inspection remains active by default')
+        }
+        if (!m24Source.contains('SableDiagnosticFlags.TRACE_M24 &&')
+                || !torsionSource.contains('if (!SableDiagnosticFlags.TRACE_M24')) {
+            throw new GradleException('M29.1 M24 tick diagnostics remain active by default')
+        }
+        ['MAX_EXAMPLES_PER_CATEGORY = 3', 'SABLE_M29_QUERY_SUMMARY',
+         'summaryAndReset', 'recordRoute', 'recordJadeNormalization'].each { token ->
+            if (!querySource.contains(token)) throw new GradleException("M29.1 bounded query trace lost ${token}")
+        }
+        if (getterSource.contains('StackWalker.getInstance()') || getterSource.contains('event=COMPLETE')) {
+            throw new GradleException('M29.1 hot query path still stack-walks or logs every completion')
+        }
+        ['sable.m29.traceSailVisualLifecycle', 'SUSPECTED_VISUAL_GAP',
+         'GEOMETRY_SUBMISSION_RESUMED', 'MAX_RING_RECORDS = 32',
+         'RECOVERY_AFTER_REASSEMBLY', 'REASSEMBLY_RECOVERY_WINDOW_FRAMES = 300L',
+         'CONTROLLED_MECHANICAL_BEARING_WITH_SYMMETRIC_SAIL'].each { token ->
+            if (!lifecycleSource.contains(token) && !lifecycleStateSource.contains(token)) {
+                throw new GradleException("M29.1 sail lifecycle trace lost ${token}")
+            }
+        }
+        ['visualCreated', 'visualFrame', 'visualRemoved'].each { token ->
+            if (!visualMixinSource.contains("SableM29SailVisualLifecycle.${token}")) {
+                throw new GradleException("M29.1 Flywheel lifecycle hook missing ${token}")
+            }
+        }
+        logger.lifecycle('verifyM29_1DiagnosticGatingAndLifecycleBoundary PASS: default hot probes are gated and sail tracing is bounded/event-only')
+    }
+}
+
+tasks.register('verifyM29_1DiagnosticsAndSailLifecycle') {
+    group = 'forge backport'
+    description = 'Runs M29.1 bounded diagnostics plus retained M29/M28 regression boundaries.'
+    dependsOn tasks.named('verifyM29EntityQueryAndDiagnosticCleanup')
+    dependsOn tasks.named('verifyM29_1BoundedDiagnostics')
+    dependsOn tasks.named('verifyM29_1DiagnosticGatingAndLifecycleBoundary')
+    doLast {
+        logger.lifecycle('verifyM29_1DiagnosticsAndSailLifecycle PASS: diagnostic cleanup implemented; intermittent sail runtime classification remains required')
+    }
+}
+
+tasks.register('verifyM29_2ReverseRestoreCorrelationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies per-snapshot reverse-restore correlation, atomic multi-CCE commit, and quiet lifecycle ownership.'
+    dependsOn tasks.named('verifyM29_1DiagnosticsAndSailLifecycle')
+    File ownership = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer.java')
+    File sync = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28NormalWorldCceSync.java')
+    File lifecycle = file('src/main/java/dev/ryanhcode/sable/forge/SableM29SailVisualLifecycle.java')
+    File lifecycleState = file('src/main/java/dev/ryanhcode/sable/forge/SailVisualLifecycleState.java')
+    File documentation = rootProject.file('M29_1_DIAGNOSTICS_AND_SAIL_VISUAL_LIFECYCLE.md')
+    inputs.files(ownership, sync, lifecycle, lifecycleState, documentation)
+    doLast {
+        String ownershipSource = ownership.getText('UTF-8')
+        String syncSource = sync.getText('UTF-8')
+        String lifecycleSource = lifecycle.getText('UTF-8')
+        String lifecycleStateSource = lifecycleState.getText('UTF-8')
+        ['REVERSE_SNAPSHOT_CAPTURED', 'SERVER_RESTORE_BEGIN', 'SERVER_RESTORE_VERIFIED',
+         'SERVER_NEXT_TICK_ALIVE', 'REVERSE_SOURCE_REMOVED', 'snapshot.snapshotIndex',
+         'snapshot.symmetricSailCount'].each { token ->
+            if (!ownershipSource.contains(token)) {
+                throw new GradleException("M29.2 reverse ownership trace lost ${token}")
+            }
+        }
+        ['SERVER_ENTITY_PRE_ADD', 'SERVER_ENTITY_POST_ADD', 'SERVER_TRACKING_BEGIN',
+         'SERVER_SPAWN_SENT', 'CLIENT_SPAWN_RECEIVED', 'CLIENT_ENTITY_ADDED',
+         'CLIENT_PAYLOAD_DECODED', 'SableM29ReverseTransferId',
+         'SableM29ReverseSnapshotIndex', 'Map<UUID, Integer> CLIENT_TARGETS'].each { token ->
+            if (!syncSource.contains(token)) {
+                throw new GradleException("M29.2 spawn correlation lost ${token}")
+            }
+        }
+        if (syncSource.contains('AtomicReference') || syncSource.contains('static UUID pending')) {
+            throw new GradleException('M29.2 reverse restore regressed to single-slot client state')
+        }
+        int validateAll = ownershipSource.indexOf(
+                'anyMatch(snapshot -> snapshot.destination == null)')
+        int sourceDiscard = ownershipSource.indexOf('snapshot.sourceEntity.discard()')
+        if (validateAll < 0 || sourceDiscard < 0 || validateAll > sourceDiscard) {
+            throw new GradleException('M29.2 source cleanup no longer waits for every destination restore')
+        }
+        ['CLIENT_TARGET_DISCOVERED', 'CLIENT_VISUAL_CREATED', 'CLIENT_FIRST_GEOMETRY',
+         'selectOwner(target', 'canDiscover(entity.isAlive(), entity.isRemoved())'].each { token ->
+            if (!lifecycleSource.contains(token)) {
+                throw new GradleException("M29.2 lifecycle correlation lost ${token}")
+            }
+        }
+        int visualFrameStart = lifecycleSource.indexOf('public static void visualFrame')
+        int visualRemovedStart = lifecycleSource.indexOf('public static void visualRemoved')
+        if (visualFrameStart < 0 || visualRemovedStart < visualFrameStart
+                || lifecycleSource.substring(visualFrameStart, visualRemovedStart).contains('selectOwner(')) {
+            throw new GradleException('M29.2 Flywheel frame heartbeat must not reselect visual ownership')
+        }
+        ['public boolean owner', 'if (this.owner == value)',
+         'public static boolean canDiscover'].each { token ->
+            if (!lifecycleStateSource.contains(token)) {
+                throw new GradleException("M29.2 transition-only lifecycle state lost ${token}")
+            }
+        }
+        logger.lifecycle('verifyM29_2ReverseRestoreCorrelationBoundary PASS: reverse snapshots retain independent markers, source cleanup waits for all destinations, and dead/unchanged visual observations remain quiet')
+    }
+}
+
+tasks.register('verifyM29_2IntermittentDisassemblySailTrace') {
+    group = 'forge backport'
+    description = 'Runs M29.2 B1/B2 instrumentation checks plus retained M13-M29.1 boundaries.'
+    dependsOn tasks.named('verifyM29_2ReverseRestoreCorrelationBoundary')
+    doLast {
+        logger.lifecycle('verifyM29_2IntermittentDisassemblySailTrace PASS: B1/B2 correlation is implemented; runtime classification remains required')
+    }
+}
+
+tasks.register('verifyM29_3PostDecodeVisualAdmission') {
+    group = 'forge backport'
+    description = 'Executes M29.3 bounded post-decode admission and retained M29.2 boundaries.'
+    dependsOn tasks.named('verifyM29_2IntermittentDisassemblySailTrace')
+    dependsOn tasks.named('compileJava')
+    File admission = file(
+            'src/main/java/dev/ryanhcode/sable/forge/RestoredContraptionVisualAdmissionState.java')
+    File admissionTest = file(
+            'src/m29QueryTest/java/dev/ryanhcode/sable/forge/M29RestoredVisualAdmissionStateTest.java')
+    File clientSync = file('src/main/java/dev/ryanhcode/sable/forge/SableM28RestoredContraptionClientSync.java')
+    File normalSync = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28NormalWorldCceSync.java')
+    File lifecycle = file('src/main/java/dev/ryanhcode/sable/forge/SableM29SailVisualLifecycle.java')
+    File visualMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ContraptionVisualProbeMixin.java')
+    File simulated = file('src/main/java/dev/simulated_team/simulated/Simulated.java')
+    File forgeClient = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClient.java')
+    File documentation = rootProject.file('M29_1_DIAGNOSTICS_AND_SAIL_VISUAL_LIFECYCLE.md')
+    inputs.files(admission, admissionTest, clientSync, normalSync, lifecycle, visualMixin,
+            simulated, forgeClient, documentation)
+    outputs.dir(layout.buildDirectory.dir('m29_3VisualAdmissionTest'))
+    doLast {
+        String clientSource = clientSync.getText('UTF-8')
+        String normalSource = normalSync.getText('UTF-8')
+        String lifecycleSource = lifecycle.getText('UTF-8')
+        String visualMixinSource = visualMixin.getText('UTF-8')
+        String simulatedSource = simulated.getText('UTF-8')
+        String forgeClientSource = forgeClient.getText('UTF-8')
+        ['CLIENT_REFRESH_EVALUATED', 'CLIENT_REFRESH_ACCEPTED', 'CLIENT_REFRESH_SKIPPED',
+         'CLIENT_VISUAL_REMOVE_REQUESTED', 'CLIENT_VISUAL_ADD_REQUESTED',
+         'CLIENT_VISUAL_QUEUE_COMPLETE', 'CLIENT_VISUAL_PRESENT_AFTER_REFRESH',
+         'CLIENT_POST_DECODE_VISUAL_TIMEOUT', 'Map<UUID, PendingAdmission>',
+         'REQUEST_SAFE_BOUNDARY_RETRY', 'implementation.getStorage().getAllVisuals()'].each { token ->
+            if (!clientSource.contains(token)) {
+                throw new GradleException("M29.3 client admission lost ${token}")
+            }
+        }
+        ['expectedSymmetricSails', 'public static int symmetricSailCount'].each { token ->
+            if (!normalSource.contains(token)) {
+                throw new GradleException("M29.3 payload validation lost ${token}")
+            }
+        }
+        if (!lifecycleSource.contains('SableM28NormalWorldCceSync.bearingPos(entity)')) {
+            throw new GradleException('M29.3 semantic lifecycle fallback lost restored bearing correlation')
+        }
+        ['SableM28RestoredContraptionClientSync.visualCreated',
+         'SableM28RestoredContraptionClientSync.visualFrame',
+         'SableM28RestoredContraptionClientSync.visualRemoved'].each { token ->
+            if (!visualMixinSource.contains(token)) {
+                throw new GradleException("M29.3 direct Flywheel lifecycle probe lost ${token}")
+            }
+        }
+        ['SableM28RestoredContraptionClientSync.entityLeft',
+         'SableM28RestoredContraptionClientSync.levelUnloaded'].each { token ->
+            if (!simulatedSource.contains(token)) {
+                throw new GradleException("M29.3 bounded pending-state cleanup lost ${token}")
+            }
+        }
+        if (!forgeClientSource.contains('SableM28RestoredContraptionClientSync.registerClientEvents()')) {
+            throw new GradleException('M29.3 admission driver must be installed by physical-client bootstrap')
+        }
+        if (simulatedSource.contains('addListener(Simulated::clientTick)')) {
+            throw new GradleException('M29.3 admission driver must not remain in common bootstrap')
+        }
+        if (clientSource.contains('Thread.sleep') || clientSource.contains('AtomicReference')) {
+            throw new GradleException('M29.3 admission must remain lifecycle-driven and per entity')
+        }
+
+        File output = layout.buildDirectory.dir('m29_3VisualAdmissionTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M29.3 admission test requires a JDK')
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-d', output.absolutePath, admission.absolutePath, admissionTest.absolutePath)
+        if (result != 0) throw new GradleException('M29.3 admission state test compilation failed')
+        URLClassLoader loader = new URLClassLoader([output.toURI().toURL()] as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.forge.M29RestoredVisualAdmissionStateTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M29.3 admission state regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM29_3PostDecodeVisualAdmission PASS: two restored CCEs admit independently, retry once, and complete on actual Flywheel geometry')
+    }
+}
+
+tasks.register('verifyM29_4VisualAdmissionRace') {
+    group = 'forge backport'
+    description = 'Verifies physical-client admission driving, bounded terminal states, and exact Flywheel queue probes.'
+    dependsOn tasks.named('verifyM29_3PostDecodeVisualAdmission')
+    dependsOn tasks.named('compileJava')
+    File clientSync = file('src/main/java/dev/ryanhcode/sable/forge/SableM28RestoredContraptionClientSync.java')
+    File admission = file('src/main/java/dev/ryanhcode/sable/forge/RestoredContraptionVisualAdmissionState.java')
+    File forgeClient = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeClient.java')
+    File simulated = file('src/main/java/dev/simulated_team/simulated/Simulated.java')
+    File managerMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/VisualManagerImplAdmissionProbeMixin.java')
+    File storageMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/EntityStorageFlywheelSuppressionMixin.java')
+    File visualizerMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/SimpleEntityVisualizerAdmissionProbeMixin.java')
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    File documentation = rootProject.file('M29_1_DIAGNOSTICS_AND_SAIL_VISUAL_LIFECYCLE.md')
+    inputs.files(clientSync, admission, forgeClient, simulated, managerMixin, storageMixin,
+            visualizerMixin, mixinConfig, documentation)
+    doLast {
+        String clientSource = clientSync.getText('UTF-8')
+        String admissionSource = admission.getText('UTF-8')
+        String clientBootstrap = forgeClient.getText('UTF-8')
+        String commonBootstrap = simulated.getText('UTF-8')
+        String managerSource = managerMixin.getText('UTF-8')
+        String storageSource = storageMixin.getText('UTF-8')
+        String visualizerSource = visualizerMixin.getText('UTF-8')
+        String configSource = mixinConfig.getText('UTF-8')
+        String docs = documentation.getText('UTF-8')
+
+        ['CLIENT_ADMISSION_REGISTERED', 'CLIENT_ADMISSION_FIRST_TICK',
+         'CLIENT_ADMISSION_PREREQUISITES', 'CLIENT_ADMISSION_RETRY',
+         'CLIENT_ADMISSION_COMPLETED', 'CLIENT_ADMISSION_REMOVED',
+         'CLIENT_ADMISSION_TIMEOUT', 'meaning=REQUEST_SUBMITTED_NOT_ADMISSION_SUCCESS',
+         'FLYWHEEL_ADD_DEQUEUED', 'FLYWHEEL_STORAGE_INSERTED',
+         'FLYWHEEL_CONTRAPTION_VISUAL_CONSTRUCTED'].each { token ->
+            if (!clientSource.contains(token)) {
+                throw new GradleException("M29.4 client admission lost ${token}")
+            }
+        }
+        ['SUCCESS', 'ENTITY_REMOVED', 'LEVEL_UNLOAD', 'PAYLOAD_INVALID',
+         'TIMEOUT', 'REQUEST_SAFE_BOUNDARY_RETRY', 'WAIT_FOR_PREREQUISITES'].each { token ->
+            if (!admissionSource.contains(token)) {
+                throw new GradleException("M29.4 terminal state machine lost ${token}")
+            }
+        }
+        if (!clientBootstrap.contains('SableM28RestoredContraptionClientSync.registerClientEvents()')
+                || !clientSource.contains('MinecraftForge.EVENT_BUS.addListener(SableM28RestoredContraptionClientSync::clientTick)')) {
+            throw new GradleException('M29.4 real physical-client tick wiring is missing')
+        }
+        if (commonBootstrap.contains('addListener(Simulated::clientTick)')) {
+            throw new GradleException('M29.4 admission must not rely on common bootstrap client ticking')
+        }
+        ['queueAdd(Ljava/lang/Object;)V', 'willAccept(Ljava/lang/Object;)Z',
+         'processQueue(Ldev/engine_room/flywheel/api/visualization/VisualizationContext;F)V',
+         'add(Ldev/engine_room/flywheel/api/visualization/VisualizationContext;'].each { token ->
+            if (!managerSource.contains(token)) {
+                throw new GradleException("M29.4 VisualManager probe lost exact target ${token}")
+            }
+        }
+        if (!storageSource.contains('VisualizationHelper.getVisualizer(entity)')
+                || !visualizerSource.contains('SableM28RestoredContraptionClientSync.flywheelCreateVisual')) {
+            throw new GradleException('M29.4 createRaw/createVisual probes are incomplete')
+        }
+        ['m28.VisualManagerImplAdmissionProbeMixin',
+         'm28.SimpleEntityVisualizerAdmissionProbeMixin'].each { token ->
+            if (!configSource.contains(token)) {
+                throw new GradleException("M29.4 mixin config lost ${token}")
+            }
+        }
+        if (clientSource.contains('bearingBlockEntityPresent() && prerequisites.flywheelWillAccept()')
+                || clientSource.contains('Thread.sleep')) {
+            throw new GradleException('M29.4 must use Flywheel admission readiness, not BE delay or sleeps')
+        }
+        ['M29.4', 'bearing block entity', 'request submitted'].each { token ->
+            if (!docs.toLowerCase(Locale.ROOT).contains(token.toLowerCase(Locale.ROOT))) {
+                throw new GradleException("M29.4 documentation lost ${token}")
+            }
+        }
+        logger.lifecycle('verifyM29_4VisualAdmissionRace PASS: admissions are client-driven, bounded, terminal, and probed through actual Flywheel storage')
+    }
+}
+
+tasks.register('verifyM29_5PrematureClientRemovalBoundary') {
+    group = 'forge backport'
+    description = 'Verifies bounded packet/local removal provenance without changing restored CCE lifetime.'
+    dependsOn tasks.named('verifyM29_4VisualAdmissionRace')
+    dependsOn tasks.named('compileJava')
+    File decision = file(
+            'src/main/java/dev/ryanhcode/sable/forge/RestoredContraptionRemovalClassification.java')
+    File decisionTest = file(
+            'src/m29QueryTest/java/dev/ryanhcode/sable/forge/M29RestoredCceRemovalClassificationTest.java')
+    File trace = file('src/main/java/dev/ryanhcode/sable/forge/SableM29RestoredCceRemovalTrace.java')
+    File packetMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ClientPacketListenerRemovalProbeMixin.java')
+    File levelMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ClientLevelRemovalProbeMixin.java')
+    File callbacksMixin = file(
+            'src/main/java/dev/ryanhcode/sable/mixin/m28/ClientLevelEntityCallbacksRemovalProbeMixin.java')
+    File entityMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/EntityRemovalProbeMixin.java')
+    File teardownMixin = file(
+            'src/main/java/dev/ryanhcode/sable/mixin/m28/SableClientSubLevelTeardownProbeMixin.java')
+    File serverMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ServerEntityRemovalProbeMixin.java')
+    File normalSync = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28NormalWorldCceSync.java')
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    File documentation = rootProject.file('M29_1_DIAGNOSTICS_AND_SAIL_VISUAL_LIFECYCLE.md')
+    inputs.files(decision, decisionTest, trace, packetMixin, levelMixin, callbacksMixin,
+            entityMixin, teardownMixin, serverMixin, normalSync, mixinConfig, documentation)
+    outputs.dir(layout.buildDirectory.dir('m29_5RemovalClassificationTest'))
+    doLast {
+        String traceSource = trace.getText('UTF-8')
+        String packetSource = packetMixin.getText('UTF-8')
+        String levelSource = levelMixin.getText('UTF-8')
+        String callbacksSource = callbacksMixin.getText('UTF-8')
+        String entitySource = entityMixin.getText('UTF-8')
+        String teardownSource = teardownMixin.getText('UTF-8')
+        String serverSource = serverMixin.getText('UTF-8')
+        String normalSource = normalSync.getText('UTF-8')
+        String configSource = mixinConfig.getText('UTF-8')
+
+        ['CLIENT_REMOVE_PACKET_RECEIVED', 'CLIENT_LEVEL_REMOVE_ENTER',
+         'CLIENT_LEVEL_REMOVE_RETURN', 'CLIENT_ENTITY_SET_REMOVED', 'CLIENT_TRACKING_END',
+         'CLIENT_ENTITY_ID_COLLISION', 'CLIENT_ENTITY_UUID_COLLISION', 'CLIENT_ENTITY_REPLACED'].each { token ->
+            if (!traceSource.contains(token)) {
+                throw new GradleException("M29.5 client removal provenance lost ${token}")
+            }
+        }
+        if (!packetSource.contains('handleRemoveEntities')
+                || !packetSource.contains('beginRemovePacket')
+                || !levelSource.contains('removeEntity')
+                || !levelSource.contains('addEntity')
+                || !callbacksSource.contains('onTrackingEnd')
+                || !entitySource.contains('setRemoved')) {
+            throw new GradleException('M29.5 vanilla client removal chain is not fully instrumented')
+        }
+        if (!teardownSource.contains('handleStopTracking')
+                || !teardownSource.contains('beginSableTeardown')) {
+            throw new GradleException('M29.5 Sable client teardown context is missing')
+        }
+        if (!serverSource.contains('removePairing')
+                || !normalSource.contains('SERVER_STOP_TRACKING')
+                || !normalSource.contains('SERVER_REMOVE_PACKET_SENT')
+                || !normalSource.contains('SERVER_ENTITY_REMOVED')) {
+            throw new GradleException('M29.5 server tracker/removal correlation is incomplete')
+        }
+        ['m28.ClientPacketListenerRemovalProbeMixin', 'm28.ClientLevelRemovalProbeMixin',
+         'm28.ClientLevelEntityCallbacksRemovalProbeMixin', 'm28.EntityRemovalProbeMixin',
+         'm28.SableClientSubLevelTeardownProbeMixin', 'm28.ServerEntityRemovalProbeMixin'].each { token ->
+            if (!configSource.contains(token)) {
+                throw new GradleException("M29.5 mixin config lost ${token}")
+            }
+        }
+        if (traceSource.contains('cancel()') || traceSource.contains('setReturnValue')) {
+            throw new GradleException('M29.5 diagnostics must not suppress or replace entity removals')
+        }
+
+        File output = layout.buildDirectory.dir('m29_5RemovalClassificationTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M29.5 classification test requires a JDK')
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-d', output.absolutePath, decision.absolutePath, decisionTest.absolutePath)
+        if (result != 0) throw new GradleException('M29.5 removal classification test compilation failed')
+        URLClassLoader loader = new URLClassLoader([output.toURI().toURL()] as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.forge.M29RestoredCceRemovalClassificationTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M29.5 removal classification regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM29_5PrematureClientRemovalBoundary PASS: packet, collision, teardown, and tracking removals are independently classified without changing entity lifetime')
+    }
+}
+
+tasks.register('verifyM29_6RestoredControllerSynchronizationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies exact Create controller-null discard deferral for bounded reverse restores only.'
+    dependsOn tasks.named('verifyM29_5PrematureClientRemovalBoundary')
+    dependsOn tasks.named('prepareCreateDevelopmentRuntime')
+    dependsOn tasks.named('compileJava')
+    File state = file('src/main/java/dev/ryanhcode/sable/forge/RestoredContraptionControllerSyncState.java')
+    File stateTest = file('src/m29QueryTest/java/dev/ryanhcode/sable/forge/M29RestoredControllerSyncStateTest.java')
+    File guard = file('src/main/java/dev/ryanhcode/sable/forge/SableM29RestoredControllerSyncGuard.java')
+    File mixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/RestoredContraptionControllerSyncMixin.java')
+    File clientSync = file('src/main/java/dev/ryanhcode/sable/forge/SableM28RestoredContraptionClientSync.java')
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    File documentation = rootProject.file('M29_1_DIAGNOSTICS_AND_SAIL_VISUAL_LIFECYCLE.md')
+    inputs.file(createDevelopmentRuntime)
+    inputs.files(state, stateTest, guard, mixin, clientSync, mixinConfig, documentation)
+    outputs.dir(layout.buildDirectory.dir('m29_6ControllerSyncStateTest'))
+    doLast {
+        def createJar = new JarFile(createDevelopmentRuntime.get().asFile)
+        try {
+            def entry = createJar.getJarEntry(
+                    'com/simibubi/create/content/contraptions/ControlledContraptionEntity.class')
+            if (entry == null) throw new GradleException('M29.6 Create ControlledContraptionEntity is absent')
+            def calls = [getController: 0, discard: 0, isLoaded: 0]
+            new org.objectweb.asm.ClassReader(createJar.getInputStream(entry).readAllBytes()).accept(
+                    new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                        @Override
+                        org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                                   String signature, String[] exceptions) {
+                            if (name != 'tickContraption' || descriptor != '()V') return null
+                            return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                                @Override
+                                void visitMethodInsn(int opcode, String owner, String calledName,
+                                                     String calledDescriptor, boolean isInterface) {
+                                    if (calledName == 'getController'
+                                            && calledDescriptor == '()Lcom/simibubi/create/content/contraptions/IControlContraption;') {
+                                        calls.getController++
+                                    }
+                                    if (calledName == 'discard' && calledDescriptor == '()V') calls.discard++
+                                    if (calledName == 'isLoaded'
+                                            && calledDescriptor == '(Lnet/minecraft/core/BlockPos;)Z') calls.isLoaded++
+                                }
+                            }
+                        }
+                    }, 0)
+            if (calls != [getController: 1, discard: 1, isLoaded: 1]) {
+                throw new GradleException("M29.6 exact Create discard frontier changed: ${calls}")
+            }
+        } finally {
+            createJar.close()
+        }
+
+        String guardSource = guard.getText('UTF-8')
+        String mixinSource = mixin.getText('UTF-8')
+        String clientSource = clientSync.getText('UTF-8')
+        String configSource = mixinConfig.getText('UTF-8')
+        String docs = documentation.getText('UTF-8')
+        ['CLIENT_CONTROLLER_WAIT_BEGIN', 'CLIENT_CONTROLLER_STILL_MISSING',
+         'CLIENT_CONTROLLER_AVAILABLE', 'CLIENT_CONTROLLER_WAIT_TIMEOUT',
+         'CLIENT_CONTROLLER_DISCARD_SUPPRESSED', 'CLIENT_CONTROLLER_NORMAL_TICK_RESUMED'].each { token ->
+            if (!guardSource.contains(token)) {
+                throw new GradleException("M29.6 controller synchronization trace lost ${token}")
+            }
+        }
+        ['SableM28NormalWorldCceSync.isTarget(entity)', 'payloadValid(entity)',
+         'controllerPos != null && controllerPos.equals(bearingPos)',
+         'MAX_MISSING_CONTROLLER_TICKS'].each { token ->
+            if (!guardSource.contains(token)) {
+                throw new GradleException("M29.6 scoped grace invariant lost ${token}")
+            }
+        }
+        if (!mixinSource.contains('method = "tickContraption()V"')
+                || !mixinSource.contains('ControlledContraptionEntity;getController()')
+                || !mixinSource.contains('shift = At.Shift.BEFORE')
+                || !mixinSource.contains('ci.cancel()')) {
+            throw new GradleException('M29.6 mixin is not anchored immediately before Create getController')
+        }
+        if (!configSource.contains('m28.RestoredContraptionControllerSyncMixin')) {
+            throw new GradleException('M29.6 controller synchronization mixin is not packaged')
+        }
+        if (!clientSource.contains('SableM29RestoredControllerSyncGuard.entityLeft(entity)')
+                || !clientSource.contains('SableM29RestoredControllerSyncGuard.levelUnloaded(level)')) {
+            throw new GradleException('M29.6 bounded state cleanup is incomplete')
+        }
+        if (guardSource.contains('entity.discard()') || guardSource.contains('entity.remove(')
+                || guardSource.contains('Thread.sleep')) {
+            throw new GradleException('M29.6 must not remove, respawn, or sleep client entities')
+        }
+        ['M29.6', 'four client entity ticks', 'Ordinary Create contraptions'].each { token ->
+            if (!docs.contains(token)) {
+                throw new GradleException("M29.6 documentation lost ${token}")
+            }
+        }
+
+        File output = layout.buildDirectory.dir('m29_6ControllerSyncStateTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M29.6 controller state test requires a JDK')
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-d', output.absolutePath, state.absolutePath, stateTest.absolutePath)
+        if (result != 0) throw new GradleException('M29.6 controller state test compilation failed')
+        URLClassLoader loader = new URLClassLoader([output.toURI().toURL()] as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.forge.M29RestoredControllerSyncStateTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M29.6 controller synchronization regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM29_6RestoredControllerSynchronizationBoundary PASS: exact Create discard branch is deferred for four reverse-restore ticks only')
     }
 }

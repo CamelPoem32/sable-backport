@@ -9,6 +9,7 @@ import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
 import dev.ryanhcode.sable.sublevel.plot.ServerLevelPlot;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
@@ -89,8 +90,10 @@ public final class SubLevelBlockEditHelper {
             }
         }
 
-        Sable.LOGGER.info("SABLE_M11_BE phase=runtime_edit_sync id={} pos={} class={} updatePacketSent={}",
-                subLevel.getUniqueId(), plotBlockPos, blockEntity.getClass().getName(), sent);
+        if (SableDiagnosticFlags.TRACE_BLOCK_EDITS) {
+            Sable.LOGGER.info("SABLE_M11_BE phase=runtime_edit_sync id={} pos={} class={} updatePacketSent={}",
+                    subLevel.getUniqueId(), plotBlockPos, blockEntity.getClass().getName(), sent);
+        }
     }
 
     /**

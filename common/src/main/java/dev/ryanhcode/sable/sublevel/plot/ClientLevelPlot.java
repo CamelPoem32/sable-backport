@@ -8,6 +8,7 @@ import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
 import dev.ryanhcode.sable.sublevel.render.vanilla.VanillaSingleSubLevelRenderData;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.core.BlockPos;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.ChunkPos;
@@ -100,8 +101,10 @@ public class ClientLevelPlot extends LevelPlot {
                         oldGeneration, newSingle == null ? -1L : newSingle.getSnapshotGeneration(),
                         newSingle == null ? null : newSingle.getSnapshotState(pos));
             }
-            Sable.LOGGER.info("SABLE_M10 phase=client_render_invalidated id={} pos={} state={}",
-                    subLevel.getUniqueId(), pos, state);
+            if (SableDiagnosticFlags.TRACE_STATIC_RENDERING) {
+                Sable.LOGGER.info("SABLE_M10 phase=client_render_invalidated id={} pos={} state={}",
+                        subLevel.getUniqueId(), pos, state);
+            }
         }
     }
 }

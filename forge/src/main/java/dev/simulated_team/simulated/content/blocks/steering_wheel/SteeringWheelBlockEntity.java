@@ -15,6 +15,7 @@ import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollVa
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.mixin.compatibility.create.contraptions.MechanicalBearingBlockEntityAccessor;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.simulated_team.simulated.index.SimulatedBlockEntityTypes;
 import dev.simulated_team.simulated.index.SimulatedBlocks;
 import java.util.List;
@@ -115,8 +116,10 @@ public final class SteeringWheelBlockEntity extends GeneratingKineticBlockEntity
             }
             case NO_CONTROL_INPUT -> this.targetAngle = requested;
         }
-        this.logStateChanges(decision, previousDesiredRpm, previousActualSpeed, previousNetwork);
-        this.trackControlContraption();
+        if (SableDiagnosticFlags.TRACE_STEERING) {
+            this.logStateChanges(decision, previousDesiredRpm, previousActualSpeed, previousNetwork);
+            this.trackControlContraption();
+        }
     }
 
     public void acceptControl(final ServerPlayer player, final @Nullable UUID sableId, final BlockPos localPos,

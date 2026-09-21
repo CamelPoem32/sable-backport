@@ -13,6 +13,8 @@ import dev.engine_room.flywheel.lib.model.baked.ForgeBlockModelBuilder;
 import dev.ryanhcode.sable.forge.SableM28FlywheelVisualTrace;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NormalWorldCceSync;
 import dev.ryanhcode.sable.forge.SableM28ControlledSailFlywheelTrace;
+import dev.ryanhcode.sable.forge.SableM28RestoredContraptionClientSync;
+import dev.ryanhcode.sable.forge.SableM29SailVisualLifecycle;
 import dev.engine_room.flywheel.api.visualization.VisualEmbedding;
 import net.minecraft.core.Vec3i;
 import org.spongepowered.asm.mixin.Final;
@@ -41,8 +43,10 @@ public abstract class ContraptionVisualProbeMixin<E extends AbstractContraptionE
                                                final float partialTick, final CallbackInfo ci) {
         SableM28FlywheelVisualTrace.logCreate(entity, this, context, partialTick, this.structure);
         SableM28NormalWorldCceSync.visualCreated(entity, this);
+        SableM28RestoredContraptionClientSync.visualCreated(entity, this);
         SableM28ControlledSailFlywheelTrace.lifecycle(entity, this, "CREATE");
         SableM28ControlledSailFlywheelTrace.structureInstance(entity, this, this.structure);
+        SableM29SailVisualLifecycle.visualCreated(entity, this);
     }
 
     @WrapOperation(method = "setupStructure(Lcom/simibubi/create/content/contraptions/render/ClientContraption;)V",
@@ -60,6 +64,8 @@ public abstract class ContraptionVisualProbeMixin<E extends AbstractContraptionE
 
     @Inject(method = "setEmbeddingMatrices(F)V", at = @At("RETURN"))
     private void sable$traceM28FlywheelTransform(final float partialTick, final CallbackInfo ci) {
+        SableM28RestoredContraptionClientSync.visualFrame(this.sable$entity(), this);
+        SableM29SailVisualLifecycle.visualFrame(this.sable$entity(), this, partialTick);
         if (this.sable$entity() instanceof final ControlledContraptionEntity controlled) {
             final Vec3i renderOrigin = ((AbstractVisualAccessor) this).sable$invokeRenderOrigin();
             SableM28FlywheelVisualTrace.logTransform(controlled, this, partialTick, renderOrigin,
@@ -77,7 +83,9 @@ public abstract class ContraptionVisualProbeMixin<E extends AbstractContraptionE
     @Inject(method = "_delete()V", at = @At("HEAD"))
     private void sable$traceM28FlywheelDelete(final CallbackInfo ci) {
         SableM28FlywheelVisualTrace.logDelete(this.sable$entity(), this, this.structure);
+        SableM28RestoredContraptionClientSync.visualRemoved(this.sable$entity(), this);
         SableM28ControlledSailFlywheelTrace.lifecycle(this.sable$entity(), this, "DELETE");
+        SableM29SailVisualLifecycle.visualRemoved(this.sable$entity(), this);
     }
 
     @SuppressWarnings("unchecked")

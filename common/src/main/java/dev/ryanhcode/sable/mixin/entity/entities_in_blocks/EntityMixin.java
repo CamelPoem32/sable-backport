@@ -4,6 +4,7 @@ import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.util.SubLevelBlockStateLookup;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.CrashReport;
 import net.minecraft.CrashReportCategory;
 import net.minecraft.ReportedException;
@@ -95,7 +96,8 @@ public abstract class EntityMixin {
                                                final BlockPos rawPos,
                                                final BlockState blockState,
                                                final Entity entity) {
-        if (!SABLE$CRUSHING_WHEEL_CONTROLLER.equals(BuiltInRegistries.BLOCK.getKey(blockState.getBlock()))) {
+        if (!SableDiagnosticFlags.TRACE_M20
+                || !SABLE$CRUSHING_WHEEL_CONTROLLER.equals(BuiltInRegistries.BLOCK.getKey(blockState.getBlock()))) {
             return;
         }
 

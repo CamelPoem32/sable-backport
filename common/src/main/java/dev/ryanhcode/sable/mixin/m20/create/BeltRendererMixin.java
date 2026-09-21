@@ -5,6 +5,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.content.kinetics.belt.BeltBlockEntity;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -37,7 +38,7 @@ public class BeltRendererMixin {
         final boolean returnedVisualizationSupported = sableSubLevel ? false : originalVisualizationSupported;
         final String key = blockEntity.getBlockPos().asLong() + ":" + sableSubLevel + ":"
                 + originalVisualizationSupported + ":" + returnedVisualizationSupported;
-        if (LOGGED_BELT_BER.add(key)) {
+        if (SableDiagnosticFlags.TRACE_M20 && LOGGED_BELT_BER.add(key)) {
             Sable.LOGGER.info("SABLE_M20_SPECIALIZED_BER renderer={} blockEntityClass={} blockId={} pos={} sableSubLevel={} originalVisualizationSupported={} returnedVisualizationSupported={} kineticSpeed={} hiddenPlotPoseTranslation=false renderPath=Create_BeltRenderer",
                     "BeltRenderer", blockEntity.getClass().getName(),
                     BuiltInRegistries.BLOCK.getKey(blockEntity.getBlockState().getBlock()),
@@ -54,7 +55,7 @@ public class BeltRendererMixin {
         final double distance = Math.sqrt(Sable.HELPER.distanceSquaredWithSubLevels(
                 Minecraft.getInstance().level, eyePos, itemPos));
         final String key = itemPos.toString();
-        if (LOGGED_BELT_ITEM_DISTANCE.add(key)) {
+        if (SableDiagnosticFlags.TRACE_M20 && LOGGED_BELT_ITEM_DISTANCE.add(key)) {
             Sable.LOGGER.info("SABLE_M20_BELT_ITEM_RENDER clientItemExists=true renderMethodReached=true "
                             + "rawItemPosition={} distancePath=Sable_distanceSquaredWithSubLevels "
                             + "distance={} hiddenPlotPoseTranslation=false rendererPath=Create_BeltRenderer_renderItem",

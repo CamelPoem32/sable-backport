@@ -5,6 +5,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.content.kinetics.mechanicalArm.ArmBlockEntity;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.LevelAccessor;
@@ -36,7 +37,7 @@ public class ArmRendererMixin {
         final boolean returnedVisualizationSupported = sableSubLevel ? false : originalVisualizationSupported;
         final String key = blockEntity.getBlockPos().asLong() + ":" + sableSubLevel + ":"
                 + originalVisualizationSupported + ":" + returnedVisualizationSupported;
-        if (LOGGED_ARM_BER.add(key)) {
+        if (SableDiagnosticFlags.TRACE_M20 && LOGGED_ARM_BER.add(key)) {
             Sable.LOGGER.info("SABLE_M20_ARM_RENDER renderer={} blockEntityClass={} blockId={} pos={} "
                             + "sableSubLevel={} originalVisualizationSupported={} returnedVisualizationSupported={} "
                             + "kineticSpeed={} hiddenPlotPoseTranslation=false renderPath=Create_ArmRenderer_articulatedPartials",

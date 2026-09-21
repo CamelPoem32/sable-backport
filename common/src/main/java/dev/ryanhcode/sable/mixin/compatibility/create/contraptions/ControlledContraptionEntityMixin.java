@@ -4,6 +4,7 @@ import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableCreateContraptionControllerLookup;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -46,7 +47,8 @@ public abstract class ControlledContraptionEntityMixin extends Entity {
     private BlockEntity sable$getControllerBlockEntity(final Level level, final BlockPos controllerPos) {
         final BlockEntity blockEntity =
                 SableCreateContraptionControllerLookup.getControllerBlockEntity(level, controllerPos);
-        if (!this.sable$loggedControllerBridge && Sable.HELPER.getContaining(level, controllerPos) != null) {
+        if (SableDiagnosticFlags.TRACE_M13 && !this.sable$loggedControllerBridge
+                && Sable.HELPER.getContaining(level, controllerPos) != null) {
             this.sable$loggedControllerBridge = true;
             final SubLevel containing = Sable.HELPER.getContaining(this);
             Sable.LOGGER.info("SABLE_M13_CONTROLLER_LOOKUP entityId={} controllerPos={} controllerBE={} "

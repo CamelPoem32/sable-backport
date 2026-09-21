@@ -11,6 +11,7 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -60,6 +61,8 @@ public final class SableForgeCreateContraptionRenderBridge {
         entityPhaseRendered = false;
         SableM28BatchTrace.beginFrame();
         SableM28VisualOwnershipTrace.beginFrame(SableM28BatchTrace.currentFrame());
+        SableM29SailVisualLifecycle.beginFrame(SableM28BatchTrace.currentFrame(),
+                Minecraft.getInstance().gameRenderer.getMainCamera().getPosition());
     }
 
     public static String activeMode() {
@@ -110,6 +113,8 @@ public final class SableForgeCreateContraptionRenderBridge {
                     && contraptionEntity.shouldRenderAtSqrDistance(visiblePosition.distanceToSqr(cameraPosition));
             final Frustum frustum = event.getFrustum();
             final boolean frustumPass = frustum == null || frustum.isVisible(visibleAabb);
+
+            SableM29SailVisualLifecycle.cullState(contraptionEntity, frustumPass, visibleAabb);
 
             logControlledBounds(contraptionEntity, clientSubLevel, renderPose, partialTick,
                     rawAabb, oldVisibleAabb, visibleAabb, transformedBounds, cameraPosition,
@@ -328,7 +333,10 @@ public final class SableForgeCreateContraptionRenderBridge {
                                             final AABB oldVisibleAabb, final AABB visibleAabb,
                                             final EightCornerTransformedBounds.Result transformedBounds,
                                             final Vec3 cameraPosition, final Frustum frustum,
-                                            final boolean distancePass, final boolean frustumPass) {
+                                             final boolean distancePass, final boolean frustumPass) {
+        if (!SableDiagnosticFlags.TRACE_M13) {
+            return;
+        }
         if (!(entity instanceof final ControlledContraptionEntity controlled)) {
             return;
         }
@@ -370,8 +378,11 @@ public final class SableForgeCreateContraptionRenderBridge {
                                        final double oldRawDispatcherY,
                                        final double oldRawDispatcherZ,
                                        final double dispatcherX,
-                                       final double dispatcherY,
-                                       final double dispatcherZ) {
+                                        final double dispatcherY,
+                                        final double dispatcherZ) {
+        if (!SableDiagnosticFlags.TRACE_M13) {
+            return;
+        }
         if (!LOGGED_RENDER_STAGE.add(entity.getId() + ":" + stage)) {
             return;
         }
@@ -412,8 +423,11 @@ public final class SableForgeCreateContraptionRenderBridge {
                                                      final Vec3 visiblePosition,
                                                      final Vec3 cameraPosition,
                                                      final double dispatcherX,
-                                                     final double dispatcherY,
-                                                     final double dispatcherZ) {
+                                                      final double dispatcherY,
+                                                      final double dispatcherZ) {
+        if (!SableDiagnosticFlags.TRACE_M13) {
+            return;
+        }
         if (!entity.getClass().getName().contains("GantryContraptionEntity")) {
             return;
         }

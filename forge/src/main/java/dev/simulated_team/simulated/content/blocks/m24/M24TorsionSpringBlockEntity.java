@@ -4,6 +4,7 @@ import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
@@ -161,7 +162,7 @@ public final class M24TorsionSpringBlockEntity extends M24PhysicalBlockEntity im
     }
 
     private void logTick() {
-        if (this.level == null || this.level.isClientSide) {
+        if (!SableDiagnosticFlags.TRACE_M24 || this.level == null || this.level.isClientSide) {
             return;
         }
         final long tick = this.diagnosticTick++;

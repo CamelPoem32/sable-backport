@@ -11,25 +11,17 @@ import net.minecraft.world.level.entity.LevelEntityGetter;
 import net.minecraft.world.phys.AABB;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.joml.Matrix4d;
 
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
-/**
- * A {@link LevelEntityGetter} that delegates all calls to a child, taking into account sub-levels and their plots
- *
- * @param <T>
- */
+/** Queries parent-visible and raw Sable entity storage without mixing their coordinate spaces. */
 public class SubLevelInclusiveLevelEntityGetter<T extends EntityAccess> implements LevelEntityGetter<T> {
     public static final int MAX_GET_SIDE_LENGTH = 100_000;
-    private static final boolean TRACE_M28_ENTITY_OWNERSHIP =
-            Boolean.getBoolean("sable.m28.visualOwnershipTrace");
-    private static final AtomicLong QUERY_IDS = new AtomicLong();
+    private static final AtomicBoolean LARGE_QUERY_WARNING_EMITTED = new AtomicBoolean();
 
     private final Level level;
     private final LevelEntityGetter<T> delegate;
@@ -39,18 +31,14 @@ public class SubLevelInclusiveLevelEntityGetter<T extends EntityAccess> implemen
         this.delegate = delegate;
     }
 
-    private static void logError(final AABB aabb) {
-        Sable.LOGGER.error("Aborting entity get for abnormally large AABB: {}", aabb, new Throwable("Stack Trace"));
+    @Override
+    public @Nullable T get(final int id) {
+        return this.delegate.get(id);
     }
 
     @Override
-    public @Nullable T get(final int i) {
-        return this.delegate.get(i);
-    }
-
-    @Override
-    public @Nullable T get(final UUID uUID) {
-        return this.delegate.get(uUID);
+    public @Nullable T get(final UUID uuid) {
+        return this.delegate.get(uuid);
     }
 
     @Override
@@ -59,170 +47,189 @@ public class SubLevelInclusiveLevelEntityGetter<T extends EntityAccess> implemen
     }
 
     @Override
-    public <U extends T> void get(final EntityTypeTest<T, U> entityTypeTest, final AbortableIterationConsumer<U> abortableIterationConsumer) {
-        this.delegate.get(entityTypeTest, abortableIterationConsumer);
+    public <U extends T> void get(final EntityTypeTest<T, U> type,
+                                  final AbortableIterationConsumer<U> consumer) {
+        this.delegate.get(type, consumer);
     }
 
     @Override
-    public void get(AABB aABB, final Consumer<T> consumer) {
-        final QueryTrace trace = new QueryTrace(aABB, "UNTYPED_SPATIAL");
-        if (aABB.getSize() > MAX_GET_SIDE_LENGTH) {
-            logError(aABB);
-            trace.aborted();
+    public void get(final AABB inputBounds, final Consumer<T> consumer) {
+        final QueryDispatch<T> dispatch = new QueryDispatch<>(inputBounds, "UNTYPED_SPATIAL");
+        if (!dispatch.valid()) {
             return;
         }
-
-        final SubLevel subLevel = Sable.HELPER.getContaining(this.level, aABB.getCenter());
-
-        this.delegate.get(aABB, trace.wrap("DIRECT_PARENT_SPACE", aABB, consumer));
-
-        final BoundingBox3d bb = new BoundingBox3d(aABB);
-        final Matrix4d bakedMatrix = new Matrix4d();
-        if (subLevel != null) {
-            aABB = bb.transform(subLevel.logicalPose(), bb).toMojang();
-
-            this.delegate.get(aABB, trace.wrap("CONTAINING_SUBLEVEL_TO_VISIBLE", aABB, consumer));
-        }
-
-        final Iterable<SubLevel> intersecting = Sable.HELPER.getAllIntersecting(this.level, new BoundingBox3d(bb));
-
-        for (final SubLevel otherSubLevel : intersecting) {
-            if (otherSubLevel == subLevel) {
-                continue;
-            }
-
-            final AABB localBounds = bb.set(aABB).transformInverse(otherSubLevel.logicalPose(), bakedMatrix, bb).toMojang();
-
-            this.delegate.get(localBounds, trace.wrap("VISIBLE_TO_INTERSECTING_SUBLEVEL", localBounds, consumer));
-        }
-        trace.finish();
-    }
-
-    @Override
-    public <U extends T> void get(final @NotNull EntityTypeTest<T, U> entityTypeTest, AABB aABB, final AbortableIterationConsumer<U> abortableIterationConsumer) {
-        final QueryTrace trace = new QueryTrace(aABB, "TYPED_SPATIAL");
-        if (aABB.getSize() > MAX_GET_SIDE_LENGTH) {
-            logError(aABB);
-            trace.aborted();
-            return;
-        }
-
-        final SubLevel subLevel = Sable.HELPER.getContaining(this.level, aABB.getCenter());
-        this.delegate.get(entityTypeTest, aABB,
-                trace.wrapAbortable("DIRECT_PARENT_SPACE", aABB, abortableIterationConsumer));
-
-        final BoundingBox3d bb = new BoundingBox3d(aABB);
-        if (subLevel != null) {
-            aABB = bb.transform(subLevel.logicalPose(), bb).toMojang();
-
-            this.delegate.get(entityTypeTest, aABB,
-                    trace.wrapAbortable("CONTAINING_SUBLEVEL_TO_VISIBLE", aABB, abortableIterationConsumer));
-        }
-
-        final Iterable<SubLevel> intersecting = Sable.HELPER.getAllIntersecting(this.level, new BoundingBox3d(bb));
-
-        for (final SubLevel otherSubLevel : intersecting) {
-            if (otherSubLevel == subLevel) {
-                continue;
-            }
-
-            final AABB localBounds = bb.set(aABB).transformInverse(otherSubLevel.logicalPose(), bb).toMojang();
-
-            this.delegate.get(entityTypeTest, localBounds,
-                    trace.wrapAbortable("VISIBLE_TO_INTERSECTING_SUBLEVEL", localBounds, abortableIterationConsumer));
-        }
-        trace.finish();
-    }
-
-    public void getIgnoringSubLevels(final AABB aABB, final Consumer<T> consumer) {
-        this.delegate.get(aABB, consumer);
-    }
-
-    public <U extends T> void getIgnoringSubLevels(final EntityTypeTest<T, U> entityTypeTest, final AABB aABB, final AbortableIterationConsumer<U> abortableIterationConsumer) {
-        this.delegate.get(entityTypeTest, aABB, abortableIterationConsumer);
-    }
-
-    /** Records query aliases without deduplicating or otherwise changing the production result. */
-    private final class QueryTrace {
-        private final long id = QUERY_IDS.incrementAndGet();
-        private final AABB originalBounds;
-        private final String kind;
-        private final Map<EntityAccess, Integer> identities = new IdentityHashMap<>();
-        private int contraptionEmissions;
-
-        private QueryTrace(final AABB originalBounds, final String kind) {
-            this.originalBounds = originalBounds;
-            this.kind = kind;
-        }
-
-        private Consumer<T> wrap(final String route, final AABB bounds, final Consumer<T> target) {
-            if (!TRACE_M28_ENTITY_OWNERSHIP) {
-                return target;
-            }
-            return value -> {
-                this.record(route, bounds, value);
-                target.accept(value);
-            };
-        }
-
-        private <U extends T> AbortableIterationConsumer<U> wrapAbortable(
-                final String route, final AABB bounds, final AbortableIterationConsumer<U> target) {
-            if (!TRACE_M28_ENTITY_OWNERSHIP) {
-                return target;
-            }
-            return value -> {
-                this.record(route, bounds, value);
-                return target.accept(value);
-            };
-        }
-
-        private void record(final String route, final AABB bounds, final EntityAccess value) {
-            if (!isContraption(value)) {
+        final Consumer<T> unique = dispatch.uniqueConsumer(consumer);
+        this.querySpaces(inputBounds, (route, subLevel, bounds) -> {
+            if (!dispatch.validBackend(route, bounds)) {
                 return;
             }
-            final int occurrence = this.identities.merge(value, 1, Integer::sum);
-            this.contraptionEmissions++;
-            final String position = value instanceof final net.minecraft.world.entity.Entity entity
-                    ? entity.position().toString() : "UNAVAILABLE";
-            Sable.LOGGER.info("SABLE_M28_INCLUSIVE_ENTITY_QUERY queryId={} queryKind={} route={} "
-                            + "originalBounds={} delegatedBounds={} entityId={} entityUuid={} entityIdentity={} "
-                            + "entityClass={} rawPosition={} sameQueryIdentityOccurrence={} duplicateEmission={} "
-                            + "delegateIdentity={} callerStackFingerprint={}",
-                    this.id, this.kind, this.originalBounds, bounds, value.getId(), value.getUUID(),
-                    System.identityHashCode(value), value.getClass().getName(), position, occurrence,
-                    occurrence > 1, System.identityHashCode(SubLevelInclusiveLevelEntityGetter.this.delegate),
-                    stackFingerprint());
+            final int before = dispatch.resultCount();
+            this.delegate.get(bounds, unique);
+            dispatch.route(route, subLevel, bounds, dispatch.resultCount() - before);
+        });
+    }
+
+    @Override
+    public <U extends T> void get(final @NotNull EntityTypeTest<T, U> type,
+                                  final AABB inputBounds,
+                                  final AbortableIterationConsumer<U> consumer) {
+        final QueryDispatch<U> dispatch = new QueryDispatch<>(inputBounds, "TYPED_SPATIAL");
+        if (!dispatch.valid()) {
+            return;
+        }
+        final AbortableIterationConsumer<U> unique = dispatch.uniqueAbortable(consumer);
+        this.querySpaces(inputBounds, (route, subLevel, bounds) -> {
+            if (dispatch.aborted() || !dispatch.validBackend(route, bounds)) {
+                return;
+            }
+            final int before = dispatch.resultCount();
+            this.delegate.get(type, bounds, unique);
+            dispatch.route(route, subLevel, bounds, dispatch.resultCount() - before);
+        });
+    }
+
+    public void getIgnoringSubLevels(final AABB bounds, final Consumer<T> consumer) {
+        this.delegate.get(bounds, consumer);
+    }
+
+    public <U extends T> void getIgnoringSubLevels(final EntityTypeTest<T, U> type,
+                                                    final AABB bounds,
+                                                    final AbortableIterationConsumer<U> consumer) {
+        this.delegate.get(type, bounds, consumer);
+    }
+
+    private void querySpaces(final AABB inputBounds, final SpaceQuery query) {
+        final SubLevel sourceSubLevel = Sable.HELPER.getContaining(this.level, inputBounds.getCenter());
+        final AABB parentVisibleBounds = sourceSubLevel == null
+                ? inputBounds
+                : new BoundingBox3d(inputBounds)
+                        .transform(SubLevelEntityQueryBounds.pose(this.level, sourceSubLevel), new BoundingBox3d())
+                        .toMojang();
+
+        if (sourceSubLevel == null) {
+            query.accept("PARENT_VISIBLE_DIRECT", null, parentVisibleBounds);
+        } else {
+            query.accept("SUBLEVEL_RAW_DIRECT", sourceSubLevel, inputBounds);
+            query.accept("SUBLEVEL_RAW_TO_PARENT_VISIBLE", null, parentVisibleBounds);
         }
 
-        private void finish() {
-            if (TRACE_M28_ENTITY_OWNERSHIP && this.contraptionEmissions > 0) {
-                Sable.LOGGER.info("SABLE_M28_INCLUSIVE_ENTITY_QUERY queryId={} event=COMPLETE "
-                                + "queryKind={} originalBounds={} contraptionEmissions={} "
-                                + "distinctContraptionIdentities={} duplicateEmissionPresent={}",
-                        this.id, this.kind, this.originalBounds, this.contraptionEmissions,
-                        this.identities.size(), this.identities.values().stream().anyMatch(count -> count > 1));
+        final BoundingBox3d parentVisible = new BoundingBox3d(parentVisibleBounds);
+        final BoundingBox3d rawScratch = new BoundingBox3d();
+        for (final SubLevel target : Sable.HELPER.getAllIntersecting(this.level, parentVisible)) {
+            if (target == sourceSubLevel) {
+                continue;
             }
-        }
-
-        private void aborted() {
-            if (TRACE_M28_ENTITY_OWNERSHIP) {
-                Sable.LOGGER.info("SABLE_M28_INCLUSIVE_ENTITY_QUERY queryId={} event=ABORTED_LARGE_AABB "
-                                + "queryKind={} originalBounds={} maxSideLength={} callerStackFingerprint={}",
-                        this.id, this.kind, this.originalBounds, MAX_GET_SIDE_LENGTH, stackFingerprint());
-            }
+            parentVisible.transformInverse(
+                    SubLevelEntityQueryBounds.pose(this.level, target), rawScratch);
+            query.accept("PARENT_VISIBLE_TO_SUBLEVEL_RAW", target, rawScratch.toMojang());
         }
     }
 
-    private static boolean isContraption(final EntityAccess value) {
-        final String name = value.getClass().getName();
-        return name.contains("ContraptionEntity");
+    @FunctionalInterface
+    private interface SpaceQuery {
+        void accept(String route, @Nullable SubLevel subLevel, AABB bounds);
     }
 
-    private static String stackFingerprint() {
-        return StackWalker.getInstance().walk(stream -> stream
-                .filter(frame -> !frame.getClassName().equals(SubLevelInclusiveLevelEntityGetter.class.getName()))
-                .limit(12)
-                .map(frame -> frame.getClassName() + "#" + frame.getMethodName() + ":" + frame.getLineNumber())
-                .collect(Collectors.joining(" <- ")));
+    private final class QueryDispatch<U extends EntityAccess> {
+        private final AABB inputBounds;
+        private final Map<U, Boolean> emitted = new IdentityHashMap<>();
+        private final SubLevel inputOwner;
+        private final boolean valid;
+        private boolean aborted;
+
+        private QueryDispatch(final AABB inputBounds, final String kind) {
+            this.inputBounds = inputBounds;
+            SableM29EntityQueryTrace.beginQuery();
+            final boolean finite = finite(inputBounds);
+            this.inputOwner = finite ? Sable.HELPER.getContaining(
+                    SubLevelInclusiveLevelEntityGetter.this.level, inputBounds.getCenter()) : null;
+            this.valid = finite && inputBounds.getXsize() <= MAX_GET_SIDE_LENGTH
+                    && inputBounds.getYsize() <= MAX_GET_SIDE_LENGTH
+                    && inputBounds.getZsize() <= MAX_GET_SIDE_LENGTH;
+            if (!this.valid) {
+                this.logRejectedInput(finite, kind);
+            }
+        }
+
+        private boolean valid() {
+            return this.valid;
+        }
+
+        private int resultCount() {
+            return this.emitted.size();
+        }
+
+        private boolean aborted() {
+            return this.aborted;
+        }
+
+        private Consumer<U> uniqueConsumer(final Consumer<U> target) {
+            return value -> {
+                if (this.emitted.put(value, Boolean.TRUE) == null) {
+                    target.accept(value);
+                } else {
+                    SableM29EntityQueryTrace.recordDuplicateEntity();
+                }
+            };
+        }
+
+        private AbortableIterationConsumer<U> uniqueAbortable(final AbortableIterationConsumer<U> target) {
+            return value -> {
+                if (this.emitted.put(value, Boolean.TRUE) != null) {
+                    SableM29EntityQueryTrace.recordDuplicateEntity();
+                    return AbortableIterationConsumer.Continuation.CONTINUE;
+                }
+                final AbortableIterationConsumer.Continuation result = target.accept(value);
+                this.aborted |= result.shouldAbort();
+                return result;
+            };
+        }
+
+        private void route(final String route, @Nullable final SubLevel target,
+                           final AABB delegatedBounds, final int newResults) {
+            SableM29EntityQueryTrace.recordRoute(route, this.inputBounds, delegatedBounds,
+                    target == null ? "none" : target.getUniqueId().toString(), newResults);
+        }
+
+        private boolean validBackend(final String route, final AABB bounds) {
+            if (!finite(bounds)) {
+                SableM29EntityQueryTrace.anomaly(SableM29EntityQueryTrace.Anomaly.NON_FINITE_BOUNDS,
+                        "REJECT_BACKEND", bounds, "route=" + route);
+                SableM29EntityQueryTrace.anomaly(SableM29EntityQueryTrace.Anomaly.QUERY_REJECTED,
+                        "REJECT_BACKEND", bounds, "route=" + route);
+                return false;
+            }
+            if (bounds.getXsize() > MAX_GET_SIDE_LENGTH || bounds.getYsize() > MAX_GET_SIDE_LENGTH
+                    || bounds.getZsize() > MAX_GET_SIDE_LENGTH) {
+                SableM29EntityQueryTrace.anomaly(SableM29EntityQueryTrace.Anomaly.OVERSIZED_CONVERTED,
+                        "REJECT_BACKEND", bounds, "route=" + route);
+                SableM29EntityQueryTrace.anomaly(SableM29EntityQueryTrace.Anomaly.QUERY_REJECTED,
+                        "REJECT_BACKEND", bounds, "route=" + route);
+                return false;
+            }
+            return true;
+        }
+
+        private void logRejectedInput(final boolean finite, final String kind) {
+            final boolean emitWarning = LARGE_QUERY_WARNING_EMITTED.compareAndSet(false, true);
+            if (emitWarning) {
+                Sable.LOGGER.warn("Rejected non-finite or abnormally large entity query; bounds={}",
+                        this.inputBounds);
+            }
+            final SableM29EntityQueryTrace.Anomaly anomaly = finite
+                    ? SableM29EntityQueryTrace.Anomaly.OVERSIZED_INPUT
+                    : SableM29EntityQueryTrace.Anomaly.NON_FINITE_BOUNDS;
+            SableM29EntityQueryTrace.anomaly(anomaly, "REJECT_INPUT", this.inputBounds,
+                    "kind=" + kind + ",inputSpace="
+                            + (this.inputOwner == null ? "PARENT_VISIBLE" : "SUBLEVEL_RAW_PLOT"));
+            SableM29EntityQueryTrace.anomaly(SableM29EntityQueryTrace.Anomaly.QUERY_REJECTED,
+                    "REJECT_INPUT", this.inputBounds, "kind=" + kind);
+        }
+    }
+
+    private static boolean finite(final AABB bounds) {
+        return Double.isFinite(bounds.minX) && Double.isFinite(bounds.minY) && Double.isFinite(bounds.minZ)
+                && Double.isFinite(bounds.maxX) && Double.isFinite(bounds.maxY)
+                && Double.isFinite(bounds.maxZ);
     }
 }

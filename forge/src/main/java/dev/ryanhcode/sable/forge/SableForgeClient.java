@@ -27,6 +27,7 @@ final class SableForgeClient {
         SableForgeTargetRuntimeSmoke.install();
         SableForgeStandaloneRuntimeSmoke.install();
         SableForgeClientRenderEvents.register();
+        SableM28RestoredContraptionClientSync.registerClientEvents();
         SableForgeM24PartialModels.register(modBus);
         SableForgeM24ConnectionVisuals.register(modBus);
         SteeringWheelClient.register(modBus);
