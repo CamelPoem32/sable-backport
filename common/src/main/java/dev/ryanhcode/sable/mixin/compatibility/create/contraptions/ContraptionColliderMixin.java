@@ -8,7 +8,6 @@ import com.simibubi.create.content.contraptions.ContraptionCollider;
 import com.simibubi.create.foundation.collision.Matrix3d;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableCreateContraptionContext;
-import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NormalWorldCceSync;
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.Pose3d;
 import dev.ryanhcode.sable.sublevel.SubLevel;
@@ -66,7 +65,6 @@ public class ContraptionColliderMixin {
                     remap = true))
     private static AABB sable$contraptionBounds(final AbstractContraptionEntity instance,
                                                 @Share("subLevel") final LocalRef<SubLevel> contraptionSubLevel) {
-        SableM28NormalWorldCceSync.firstCollisionQuery(instance);
         final SubLevel subLevel = SableCreateContraptionContext.getContainingSubLevel(instance);
         contraptionSubLevel.set(subLevel);
         if (subLevel == null) {

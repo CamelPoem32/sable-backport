@@ -84,6 +84,7 @@ public final class Simulated {
     private static void levelUnloaded(final LevelEvent.Unload event) {
         if (event.getLevel() instanceof final net.minecraft.world.level.Level level) {
             SableM28RestoredContraptionClientSync.levelUnloaded(level);
+            SableM29SailVisualLifecycle.levelUnloaded(level);
         }
         SableM29EntityQueryTrace.summaryAndReset("LEVEL_UNLOAD",
                 event.getLevel().getClass().getName() + '@'

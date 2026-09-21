@@ -13,7 +13,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -21,7 +20,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Bounded provenance for normal-world CCEs reconstructed by outer Sable disassembly. */
 public final class SableM28NormalWorldCceSync {
-    public static final String TRACE_PROPERTY = "sable.m28.traceNormalWorldCceSync";
     public static final String M29_TRACE_PROPERTY = "sable.m29.traceSailVisualLifecycle";
     private static final String RESTORED_TAG = "SableM28RestoredAfterOuterDisassembly";
     private static final String EXPECTED_BLOCKS_TAG = "SableM28ExpectedCapturedBlocks";
@@ -31,15 +29,9 @@ public final class SableM28NormalWorldCceSync {
     private static final String M29_EXPECTED_SAILS_TAG = "SableM29ExpectedSymmetricSails";
     private static final String M29_EXPECTED_ANGLE_TAG = "SableM29ExpectedAngle";
     private static final String M29_SOURCE_UUID_TAG = "SableM29SourceEntityUuid";
-    private static final Set<String> LOGGED = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, Set<String>> M29_ENTITY_EVENTS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Integer> CLIENT_TARGETS = new ConcurrentHashMap<>();
 
     private SableM28NormalWorldCceSync() {
-    }
-
-    public static boolean enabled() {
-        return Boolean.getBoolean(TRACE_PROPERTY);
     }
 
     public static void markBeforeAdd(final ControlledContraptionEntity entity,
@@ -69,11 +61,6 @@ public final class SableM28NormalWorldCceSync {
                 data.putUUID(M29_SOURCE_UUID_TAG, sourceEntityUuid);
             }
         }
-        logOnce("SERVER_PRE_ADD", entity, "actualPosition=" + entity.position()
-                + " actualBlockPos=" + entity.blockPosition()
-                + " actualAabb=" + entity.getBoundingBox()
-                + " trackingChunk=" + entity.chunkPosition()
-                + " bearingPos=" + bearingPos);
         traceM29Entity("SERVER_ENTITY_PRE_ADD", entity,
                 "actualPosition=" + entity.position()
                         + " expectedCapturedBlockCount=" + expectedCapturedBlocks
@@ -81,11 +68,6 @@ public final class SableM28NormalWorldCceSync {
     }
 
     public static void serverPostAdd(final ControlledContraptionEntity entity, final boolean accepted) {
-        logOnce("SERVER_POST_ADD", entity, "addFreshEntityReturn=" + accepted
-                + " authoritativeIdLookup=" + (entity.level() instanceof ServerLevel server
-                && server.getEntity(entity.getId()) == entity)
-                + " authoritativeUuidLookup=" + (entity.level() instanceof ServerLevel server
-                && server.getEntity(entity.getUUID()) == entity));
         traceM29Entity("SERVER_ENTITY_POST_ADD", entity,
                 "addFreshEntityReturn=" + accepted
                         + " authoritativeIdLookup=" + (entity.level() instanceof ServerLevel server
@@ -96,36 +78,14 @@ public final class SableM28NormalWorldCceSync {
 
     public static void startTracking(final ServerPlayer player, final Entity target) {
         if (target instanceof final ControlledContraptionEntity controlled && isTarget(controlled)) {
-            logOnce("SERVER_START_SEEN_BY_PLAYER", controlled,
-                    "player=" + player.getGameProfile().getName()
-                            + " playerPos=" + player.position()
-                            + " trackingChunk=" + controlled.chunkPosition());
             traceM29Entity("SERVER_TRACKING_BEGIN", controlled,
                     "player=" + player.getGameProfile().getName()
                             + " trackingChunk=" + controlled.chunkPosition());
         }
     }
 
-    /** Records the vanilla tracker boundary that emits a remove packet for a restored CCE. */
-    public static void stopTracking(final ServerPlayer player, final Entity target, final String callerFingerprint) {
-        if (!(target instanceof final ControlledContraptionEntity controlled) || !isTarget(controlled)) {
-            return;
-        }
-        traceM29Entity("SERVER_STOP_TRACKING", controlled,
-                "player=" + player.getGameProfile().getName()
-                        + " playerPos=" + player.position()
-                        + " trackingChunk=" + controlled.chunkPosition()
-                        + " callerFingerprint=" + callerFingerprint);
-        traceM29Entity("SERVER_REMOVE_PACKET_SENT", controlled,
-                "packet=ClientboundRemoveEntitiesPacket player=" + player.getGameProfile().getName()
-                        + " entityIdList=[" + controlled.getId() + ']');
-    }
-
     public static void entityJoined(final Entity entity, final Level level) {
         if (entity instanceof final ControlledContraptionEntity controlled && isTarget(controlled)) {
-            logOnce(level.isClientSide ? "CLIENT_ENTITY_ADDED" : "SERVER_TRACKING_BEGIN", controlled,
-                    "levelClass=" + level.getClass().getName()
-                            + " levelIdentity=" + System.identityHashCode(level));
             if (level.isClientSide) {
                 traceM29Entity("CLIENT_ENTITY_ADDED", controlled,
                         "levelIdentity=" + System.identityHashCode(level));
@@ -138,13 +98,7 @@ public final class SableM28NormalWorldCceSync {
         if (!(entity instanceof final ControlledContraptionEntity controlled) || !isTarget(controlled)) {
             return;
         }
-        if (level.isClientSide) {
-            final boolean retired = CLIENT_TARGETS.remove(controlled.getUUID(), controlled.getId());
-            if (retired) {
-                logOnce("CLIENT_TRACKING_EXPIRED", controlled,
-                        "reason=ENTITY_LEFT_LEVEL expectedLifecycleCompletion=true");
-            }
-        } else {
+        if (!level.isClientSide) {
             traceM29Entity("SERVER_ENTITY_REMOVED", controlled,
                     "removalReason=" + controlled.getRemovalReason()
                             + " entityAlive=" + controlled.isAlive());
@@ -154,7 +108,6 @@ public final class SableM28NormalWorldCceSync {
 
     public static void beforeWriteSpawnData(final AbstractContraptionEntity entity) {
         if (isTarget(entity)) {
-            logOnce("SERVER_SPAWN_PACKET_CREATED", entity, "spawnPayloadCapturedBlockCount=" + capturedCount(entity));
             traceM29Entity("SERVER_SPAWN_SENT", entity,
                     "spawnPayloadCapturedBlockCount=" + capturedCount(entity));
         }
@@ -184,51 +137,13 @@ public final class SableM28NormalWorldCceSync {
         data.putInt(EXPECTED_BLOCKS_TAG, tag.getInt(EXPECTED_BLOCKS_TAG));
         data.putLong(BEARING_POS_TAG, tag.getLong(BEARING_POS_TAG));
         copyM29Marker(tag, data);
-        CLIENT_TARGETS.put(entity.getUUID(), entity.getId());
         traceM29Entity("CLIENT_SPAWN_RECEIVED", entity,
                 "clientLookupById=" + (entity.level().getEntity(entity.getId()) == entity));
-        logOnce("CLIENT_SPAWN_PACKET_RECEIVED", entity,
-                "clientLookupById=" + (entity.level().getEntity(entity.getId()) == entity));
-        logOnce("CLIENT_ENTITY_CREATED", entity, "entityClass=" + entity.getClass().getName());
-        logOnce("CLIENT_CONTRAPTION_PRESENT", entity,
-                "clientContraptionNull=" + (entity.getContraption() == null)
-                        + " expectedCapturedBlockCount=" + expectedCapturedBlocks(entity)
-                        + " clientCapturedBlockCount=" + capturedCount(entity)
-                        + " capturedBlockStates=" + capturedStates(entity));
         traceM29Entity("CLIENT_PAYLOAD_DECODED", entity,
                 "clientContraptionNull=" + (entity.getContraption() == null)
                         + " expectedCapturedBlockCount=" + expectedCapturedBlocks(entity)
                         + " clientCapturedBlockCount=" + capturedCount(entity)
                         + " clientSymmetricSailCount=" + symmetricSailCount(entity));
-    }
-
-    public static void firstTick(final AbstractContraptionEntity entity) {
-        if (isTarget(entity)) {
-            logOnce(entity.level().isClientSide ? "CLIENT_FIRST_TICK" : "SERVER_FIRST_TICK", entity,
-                    "entityAlive=" + entity.isAlive() + " entityRemoved=" + entity.isRemoved());
-        }
-    }
-
-    public static void firstRender(final AbstractContraptionEntity entity) {
-        if (isTarget(entity)) {
-            logOnce("CLIENT_FIRST_RENDER", entity, "renderEligible="
-                    + (entity.isAliveOrStale() && entity.getContraption() != null));
-        }
-    }
-
-    public static void firstCollisionQuery(final AbstractContraptionEntity entity) {
-        if (isTarget(entity)) {
-            logOnce(entity.level().isClientSide ? "CLIENT_FIRST_COLLISION_QUERY" : "SERVER_FIRST_COLLISION_QUERY",
-                    entity, "entityAabb=" + entity.getBoundingBox());
-        }
-    }
-
-    public static void visualCreated(final AbstractContraptionEntity entity, final Object visual) {
-        if (isTarget(entity)) {
-            logOnce("CLIENT_VISUAL_CREATED", entity,
-                    "visualClass=" + visual.getClass().getName()
-                            + " visualIdentity=" + System.identityHashCode(visual));
-        }
     }
 
     public static void traceM29Entity(final String event, final AbstractContraptionEntity entity,
@@ -280,25 +195,6 @@ public final class SableM28NormalWorldCceSync {
                 event, transferId, snapshotIndex, sourceEntityUuid, sourceBearingPos,
                 destinationBearingPos, expectedCapturedBlocks, expectedSymmetricSails,
                 expectedAngle, details);
-    }
-
-    public static void afterSourceSubLevelRemoval(final Level level) {
-        if (!level.isClientSide || CLIENT_TARGETS.isEmpty()) {
-            return;
-        }
-        for (final Map.Entry<UUID, Integer> target : CLIENT_TARGETS.entrySet()) {
-            final UUID uuid = target.getKey();
-            final Entity entity = level.getEntity(target.getValue());
-            if (entity instanceof final AbstractContraptionEntity contraption
-                    && uuid.equals(contraption.getUUID())) {
-                logOnce("CLIENT_AFTER_SOURCE_SUBLEVEL_REMOVAL", contraption,
-                        "clientLookupByUuid=true entityAlive=" + contraption.isAlive()
-                                + " entityRemoved=" + contraption.isRemoved());
-            } else if (enabled() && LOGGED.add("CLIENT_AFTER_SOURCE_SUBLEVEL_REMOVAL_MISSING:" + uuid)) {
-                Sable.LOGGER.error("SABLE_M36_NORMAL_WORLD_CCE_SYNC stage=CLIENT_AFTER_SOURCE_SUBLEVEL_REMOVAL "
-                        + "side=CLIENT entityUuid={} clientLookupByUuid=false", uuid);
-            }
-        }
     }
 
     public static boolean isTarget(final Entity entity) {
@@ -371,31 +267,4 @@ public final class SableM28NormalWorldCceSync {
         return count;
     }
 
-    private static List<String> capturedStates(final AbstractContraptionEntity entity) {
-        if (entity.getContraption() == null) {
-            return List.of();
-        }
-        return entity.getContraption().getBlocks().values().stream()
-                .map(StructureTemplate.StructureBlockInfo::state)
-                .map(Object::toString)
-                .limit(8)
-                .toList();
-    }
-
-    private static void logOnce(final String stage, final AbstractContraptionEntity entity, final String details) {
-        if (!enabled() || !LOGGED.add(stage + ':' + entity.getUUID())) {
-            return;
-        }
-        final BlockPos controller = entity instanceof final ControlledContraptionEntity controlled
-                ? SableCreateContraptionContext.getControllerPos(controlled) : null;
-        Sable.LOGGER.info("SABLE_M36_NORMAL_WORLD_CCE_SYNC stage={} side={} entityId={} entityUuid={} "
-                        + "entityClass={} levelClass={} levelIdentity={} entityPos={} entityBlockPos={} entityAabb={} "
-                        + "controllerPos={} contraptionAnchor={} capturedBlockCount={} bearingPos={} {}",
-                stage, entity.level().isClientSide ? "CLIENT" : "SERVER", entity.getId(), entity.getUUID(),
-                entity.getClass().getName(), entity.level().getClass().getName(),
-                System.identityHashCode(entity.level()), entity.position(), entity.blockPosition(),
-                entity.getBoundingBox(), controller,
-                entity.getContraption() == null ? "none" : entity.getContraption().anchor,
-                capturedCount(entity), bearingPos(entity), details);
-    }
 }

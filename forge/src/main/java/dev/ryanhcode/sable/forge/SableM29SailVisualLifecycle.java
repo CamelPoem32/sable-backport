@@ -95,6 +95,14 @@ public final class SableM29SailVisualLifecycle {
         }
     }
 
+    public static void levelUnloaded(final Level level) {
+        if (!enabled() || !level.isClientSide) {
+            return;
+        }
+        TARGETS.values().removeIf(target -> target.entity.level() == level);
+        PENDING_RECOVERIES.clear();
+    }
+
     public static void visualCreated(final AbstractContraptionEntity raw, final Object visual) {
         final Target target = target(raw);
         if (target == null) {

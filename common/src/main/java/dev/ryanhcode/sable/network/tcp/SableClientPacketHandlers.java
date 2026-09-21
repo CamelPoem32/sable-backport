@@ -21,7 +21,6 @@ import dev.ryanhcode.sable.network.packets.tcp.ClientboundPhysicsPropertyPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundRecentlySplitSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundSableUDPActivationPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundStartTrackingSubLevelPacket;
-import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NormalWorldCceSync;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundStopMovingSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.tcp.ClientboundStopTrackingSubLevelPacket;
 import dev.ryanhcode.sable.network.packets.udp.SableUDPAuthenticationPacket;
@@ -181,7 +180,6 @@ public final class SableClientPacketHandlers {
             return;
         }
         container.removeSubLevel(chunkX, chunkZ, SubLevelRemovalReason.REMOVED);
-        SableM28NormalWorldCceSync.afterSourceSubLevelRemoval(context.level());
     }
 
     public static void handleChangeBounds(final ClientboundChangeBoundsSubLevelPacket packet,

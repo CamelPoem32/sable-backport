@@ -5,7 +5,6 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.contraptions.Contraption;
 import dev.ryanhcode.sable.Sable;
-import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28BearingAssemblyTrace;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NormalWorldCceSync;
 import dev.ryanhcode.sable.api.block.BlockSubLevelLiftProvider;
 import dev.ryanhcode.sable.api.physics.mass.MassTracker;
@@ -126,7 +125,6 @@ public abstract class AbstractContraptionEntityMixin extends Entity implements K
 
     @Inject(method = "contraptionInitialize", at = @At("HEAD"))
     private void sable$initializeKinematicContraption(final CallbackInfo ci) {
-        SableM28NormalWorldCceSync.firstTick((AbstractContraptionEntity) (Object) this);
         if (this.sable$initialized || !(this.level() instanceof final ServerLevel serverLevel)) {
             return;
         }
@@ -150,7 +148,6 @@ public abstract class AbstractContraptionEntityMixin extends Entity implements K
     @Inject(method = {"remove", "m_142687_"}, at = @At("HEAD"), remap = false)
     private void sable$removeKinematicContraption(final Entity.RemovalReason removalReason,
                                                   final CallbackInfo ci) {
-        SableM28BearingAssemblyTrace.entityRemoved((AbstractContraptionEntity) (Object) this, removalReason);
         if (this.sable$removedFromRuntime || !(this.level() instanceof final ServerLevel serverLevel)) {
             return;
         }

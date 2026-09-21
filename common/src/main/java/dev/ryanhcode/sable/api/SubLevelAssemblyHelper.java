@@ -10,7 +10,6 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.companion.math.Pose3d;
-import dev.ryanhcode.sable.compatibility.create.contraptions.SableM28NestedBearingPayloadTrace;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableNestedBearingOwnershipTransfer;
 import dev.ryanhcode.sable.index.SableTags;
 import dev.ryanhcode.sable.platform.SableAssemblyPlatform;
@@ -377,9 +376,6 @@ public class SubLevelAssemblyHelper {
             try {
                 final BlockState subLevelState = transform.apply(state);
 
-                SableM28NestedBearingPayloadTrace.beforeBlockTransfer(
-                        level, resultingLevel, block, newPos, state);
-
                 if (state.getBlock() instanceof final BlockSubLevelAssemblyListener listener) {
                     listener.beforeMove(level, resultingLevel, state, block, newPos);
                 }
@@ -422,8 +418,6 @@ public class SubLevelAssemblyHelper {
                     newBlockEntity.load(tag);
                 }
 
-                SableM28NestedBearingPayloadTrace.afterBlockTransfer(
-                        level, resultingLevel, block, newPos, state);
                 SableNestedBearingOwnershipTransfer.afterBlockTransfer(
                         level, resultingLevel, block, newPos);
 

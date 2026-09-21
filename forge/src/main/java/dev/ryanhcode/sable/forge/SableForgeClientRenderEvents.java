@@ -12,7 +12,6 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.server.level.BlockDestructionProgress;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
-import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.ModList;
 
@@ -31,23 +30,9 @@ final class SableForgeClientRenderEvents {
 
     static void register() {
         MinecraftForge.EVENT_BUS.<RenderLevelStageEvent>addListener(SableForgeClientRenderEvents::onRenderLevelStage);
-        MinecraftForge.EVENT_BUS.<RenderGuiEvent.Post>addListener(SableForgeClientRenderEvents::onRenderGui);
-    }
-
-    private static void onRenderGui(final RenderGuiEvent.Post event) {
-        SableM28FramebufferProbe.renderCpuTargetOverlay(event.getGuiGraphics(),
-                event.getWindow().getGuiScaledWidth(), event.getWindow().getGuiScaledHeight());
-        SableM28ControlledSailFlywheelTrace.overlay(event.getGuiGraphics());
     }
 
     private static void onRenderLevelStage(final RenderLevelStageEvent event) {
-        if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_LEVEL) {
-            SableM28ControlledSailFlywheelTrace.project(event);
-            SableM28BatchTrace.endWorldRenderProbe();
-            SableM28PresentationTrace.worldRenderEnd();
-            SableM28VisualOwnershipTrace.endFrame();
-            return;
-        }
         final boolean renderBasicBlocks = event.getStage() == RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS;
         final boolean renderBlockEntities = event.getStage() == RenderLevelStageEvent.Stage.AFTER_ENTITIES;
         if (!renderBasicBlocks && !renderBlockEntities) {
@@ -67,6 +52,7 @@ final class SableForgeClientRenderEvents {
 
         final Vec3 cameraPosition = event.getCamera().getPosition();
         if (renderBasicBlocks) {
+            SableForgeCreateContraptionRenderBridge.beginDiagnosticFrame(cameraPosition);
             for (final RenderType layer : BASIC_SINGLE_BLOCK_LAYERS) {
                 SubLevelRenderDispatcher.get().renderBasicSingleBlockLayer(
                         container.getAllSubLevels(),

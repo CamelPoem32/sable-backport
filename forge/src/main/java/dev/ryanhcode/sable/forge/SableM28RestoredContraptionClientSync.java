@@ -4,7 +4,6 @@ import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
 import com.simibubi.create.content.contraptions.bearing.MechanicalBearingBlockEntity;
 import dev.engine_room.flywheel.api.visual.Visual;
-import dev.engine_room.flywheel.api.visualization.EntityVisualizer;
 import dev.engine_room.flywheel.api.visualization.VisualizationManager;
 import dev.engine_room.flywheel.impl.visualization.VisualManagerImpl;
 import dev.engine_room.flywheel.impl.visualization.storage.EntityStorage;
@@ -271,11 +270,6 @@ public final class SableM28RestoredContraptionClientSync {
         trace(entity, "CLIENT_VISUAL_QUEUE_COMPLETE",
                 "meaning=REQUEST_SUBMITTED_NOT_ADMISSION_SUCCESS boundary=" + boundary + ' '
                         + stateDetails(entity, pending));
-        if (SableM28NormalWorldCceSync.enabled()) {
-            Sable.LOGGER.info("SABLE_M36_NORMAL_WORLD_CCE_SYNC stage=CLIENT_VISUAL_REQUEUED entityId={} "
-                            + "entityUuid={} boundary={} expectedCapturedBlockCount={} actualCapturedBlockCount={}",
-                    entity.getId(), entity.getUUID(), boundary, pending.expectedBlocks, capturedBlocks(entity));
-        }
     }
 
     private static boolean visualPresent(final @Nullable VisualizationManager manager,
@@ -290,57 +284,6 @@ public final class SableM28RestoredContraptionClientSync {
             }
         }
         return false;
-    }
-
-    /** Flywheel queue probes use this to remain scoped to active reverse restores. */
-    public static boolean isPending(final Object value) {
-        return value instanceof final ControlledContraptionEntity entity
-                && PENDING.get(entity.getUUID()) != null;
-    }
-
-    public static void flywheelAddEvaluated(final Entity raw, final boolean accepted) {
-        if (!(raw instanceof final ControlledContraptionEntity entity) || !isPending(entity)) {
-            return;
-        }
-        final EntityVisualizer<? super ControlledContraptionEntity> visualizer =
-                VisualizationHelper.getVisualizer(entity);
-        trace(entity, accepted ? "FLYWHEEL_ADD_ACCEPTED" : "FLYWHEEL_CREATE_VISUAL_REJECTED",
-                "stage=VisualManagerImpl.queueAdd/willAccept accepted=" + accepted
-                        + " entityAlive=" + entity.isAlive()
-                        + " entityRemoved=" + entity.isRemoved()
-                        + " levelPresent=" + (entity.level() != null)
-                        + " visualizerFound=" + (visualizer != null));
-    }
-
-    public static void flywheelAddDequeued(final Entity raw) {
-        if (raw instanceof final ControlledContraptionEntity entity && isPending(entity)) {
-            trace(entity, "FLYWHEEL_ADD_DEQUEUED", "stage=VisualManagerImpl.processQueue/Storage.add");
-        }
-    }
-
-    public static void flywheelVisualizerFound(final Entity raw, final boolean found) {
-        if (raw instanceof final ControlledContraptionEntity entity && isPending(entity)) {
-            trace(entity, found ? "FLYWHEEL_VISUALIZER_FOUND" : "FLYWHEEL_CREATE_VISUAL_REJECTED",
-                    "stage=EntityStorage.createRaw visualizerFound=" + found);
-        }
-    }
-
-    public static void flywheelCreateVisual(final Entity raw, final String phase, final @Nullable Object visual) {
-        if (!(raw instanceof final ControlledContraptionEntity entity) || !isPending(entity)) {
-            return;
-        }
-        trace(entity, "ENTER".equals(phase)
-                        ? "FLYWHEEL_CREATE_VISUAL_ENTER"
-                        : visual == null ? "FLYWHEEL_CREATE_VISUAL_REJECTED" : "FLYWHEEL_CREATE_VISUAL_RETURNED",
-                "stage=SimpleEntityVisualizer.createVisual phase=" + phase
-                        + " visualClass=" + (visual == null ? "none" : visual.getClass().getName()));
-    }
-
-    public static void flywheelStorageInserted(final Entity raw, final boolean inserted) {
-        if (raw instanceof final ControlledContraptionEntity entity && isPending(entity)) {
-            trace(entity, inserted ? "FLYWHEEL_STORAGE_INSERTED" : "FLYWHEEL_CREATE_VISUAL_REJECTED",
-                    "stage=Storage.add inserted=" + inserted);
-        }
     }
 
     private static Prerequisites prerequisites(final @Nullable VisualizationManager manager,

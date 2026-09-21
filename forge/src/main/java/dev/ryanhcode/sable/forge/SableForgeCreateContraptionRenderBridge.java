@@ -36,9 +36,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * coordinates live in hidden plot storage and therefore never reach vanilla's visible entity pass.
  */
 public final class SableForgeCreateContraptionRenderBridge {
-    private static final boolean ENTITY_PHASE_AB = Boolean.getBoolean("sable.m28.entityPhaseAB");
-    private static final boolean SUPPRESS_DYNAMIC_CONTRAPTION =
-            Boolean.getBoolean("sable.m28.suppressDynamicContraption");
     private static final BufferBuilder SCOPED_ENTITY_BUILDER = new BufferBuilder(256);
     private static final MultiBufferSource.BufferSource SCOPED_ENTITY_BUFFER_SOURCE =
             MultiBufferSource.immediate(SCOPED_ENTITY_BUILDER);
@@ -48,37 +45,23 @@ public final class SableForgeCreateContraptionRenderBridge {
     private static final Map<Integer, Integer> LOGGED_CONTROL_BOUNDS = new ConcurrentHashMap<>();
     private static final Map<Integer, Integer> LOGGED_M15_INTERP_SAMPLES = new ConcurrentHashMap<>();
     private static final Map<Integer, Vec3> LAST_M15_VISIBLE_ANCHOR = new ConcurrentHashMap<>();
-    private static final Set<Integer> LOGGED_ENTITY_PHASE_AB =
-            Collections.newSetFromMap(new ConcurrentHashMap<>());
-    private static final Set<String> LOGGED_DYNAMIC_SUPPRESSION =
-            Collections.newSetFromMap(new ConcurrentHashMap<>());
-    private static boolean entityPhaseRendered;
+    private static long diagnosticFrame;
 
     private SableForgeCreateContraptionRenderBridge() {
     }
 
-    public static void beginRenderFrame() {
-        entityPhaseRendered = false;
-        SableM28BatchTrace.beginFrame();
-        SableM28VisualOwnershipTrace.beginFrame(SableM28BatchTrace.currentFrame());
-        SableM29SailVisualLifecycle.beginFrame(SableM28BatchTrace.currentFrame(),
-                Minecraft.getInstance().gameRenderer.getMainCamera().getPosition());
-    }
-
-    public static String activeMode() {
-        return ENTITY_PHASE_AB ? "ENTITY_PHASE_BRIDGE" : "FORGE_STAGE_BRIDGE";
+    public static void beginDiagnosticFrame(final Vec3 cameraPosition) {
+        if (SableM29SailVisualLifecycle.enabled()) {
+            SableM29SailVisualLifecycle.beginFrame(++diagnosticFrame, cameraPosition);
+        }
     }
 
     static void render(final RenderLevelStageEvent event, final ClientLevel level, final Vec3 cameraPosition) {
-        if (ENTITY_PHASE_AB) {
-            return;
-        }
         final Minecraft minecraft = Minecraft.getInstance();
         final EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
         final float partialTick = event.getPartialTick();
         int renderedEntities = 0;
 
-        SableM28BatchTrace.beginScopedBatch(SCOPED_ENTITY_BUFFER_SOURCE, event.getStage().toString());
         try {
             for (final Entity entity : level.entitiesForRendering()) {
                 if (!(entity instanceof final AbstractContraptionEntity contraptionEntity)) {
@@ -140,10 +123,6 @@ public final class SableForgeCreateContraptionRenderBridge {
                     x, y, z);
             final int packedLight = dispatcher.getPackedLightCoords(contraptionEntity, partialTick);
 
-            if (suppressDynamicContraption(contraptionEntity, clientSubLevel, event.getStage().toString())) {
-                continue;
-            }
-
             final PoseStack poseStack = event.getPoseStack();
             logRenderStage("DISPATCH_BEGIN", contraptionEntity, clientSubLevel, renderer, event,
                     rawPosition, visiblePosition, cameraPosition, rawAabb, visibleAabb,
@@ -151,17 +130,13 @@ public final class SableForgeCreateContraptionRenderBridge {
                     x, y, z);
             logGantryInterpolationSample(contraptionEntity, partialTick, rawPosition, visiblePosition,
                     cameraPosition, x, y, z);
-                SableM28BatchTrace.beginDispatch(
-                        SCOPED_ENTITY_BUFFER_SOURCE, contraptionEntity.getId(), event.getStage().toString());
                 poseStack.pushPose();
-                try (SableM28VisualOwnershipTrace.Scope ignored = SableM28VisualOwnershipTrace.enter(
-                        SableM28VisualOwnershipTrace.Owner.SABLE_FORGE_STAGE_BRIDGE)) {
+                try {
                     dispatcher.render(contraptionEntity, x, y, z, contraptionEntity.getYRot(), partialTick,
                             poseStack, SCOPED_ENTITY_BUFFER_SOURCE, packedLight);
                     renderedEntities++;
                 } finally {
                     poseStack.popPose();
-                    SableM28BatchTrace.endDispatch();
                 }
                 logRenderStage("DISPATCH_END", contraptionEntity, clientSubLevel, renderer, event,
                         rawPosition, visiblePosition, cameraPosition, rawAabb, visibleAabb,
@@ -169,103 +144,8 @@ public final class SableForgeCreateContraptionRenderBridge {
                         x, y, z);
             }
         } finally {
-            SableM28BatchTrace.beforeScopedFlush(SCOPED_ENTITY_BUFFER_SOURCE, renderedEntities);
             SCOPED_ENTITY_BUFFER_SOURCE.endBatch();
-            SableM28BatchTrace.afterScopedFlush(SCOPED_ENTITY_BUFFER_SOURCE, renderedEntities);
         }
-    }
-
-    /** Diagnostic A/B: dispatches contained Create entities from vanilla's active entity phase. */
-    public static void renderEntityPhase(final double cameraX, final double cameraY, final double cameraZ,
-                                         final float partialTick, final PoseStack poseStack,
-                                         final MultiBufferSource bufferSource) {
-        if (!ENTITY_PHASE_AB || entityPhaseRendered) {
-            return;
-        }
-        entityPhaseRendered = true;
-        final Minecraft minecraft = Minecraft.getInstance();
-        final ClientLevel level = minecraft.level;
-        if (level == null) {
-            return;
-        }
-        final Vec3 cameraPosition = new Vec3(cameraX, cameraY, cameraZ);
-        final EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
-        final Frustum frustum = minecraft.levelRenderer.getFrustum();
-        for (final Entity entity : level.entitiesForRendering()) {
-            if (!(entity instanceof final AbstractContraptionEntity contraptionEntity)) {
-                continue;
-            }
-            final SubLevel containing = SableCreateContraptionContext.getContainingSubLevel(contraptionEntity);
-            if (!(containing instanceof final ClientSubLevel clientSubLevel)
-                    || !SableCreateContraptionContext.isRawEntityInSubLevelPlot(contraptionEntity, clientSubLevel)) {
-                continue;
-            }
-            final EntityRenderer<? super AbstractContraptionEntity> renderer = dispatcher.getRenderer(contraptionEntity);
-            final Vec3 rawPosition = interpolatedPosition(contraptionEntity, partialTick);
-            final Pose3dc renderPose = clientSubLevel.renderPose(partialTick);
-            final Vec3 visiblePosition = renderPose.transformPosition(rawPosition);
-            final AABB rawAabb = renderCullingAabb(contraptionEntity, rawPosition);
-            final EightCornerTransformedBounds.Result transformedBounds =
-                    transformedContraptionBounds(contraptionEntity, rawPosition, renderPose, partialTick);
-            final AABB visibleAabb = transformedBounds == null
-                    ? visibleAabb(clientSubLevel, rawAabb, partialTick)
-                    : toAabb(transformedBounds.bounds()).inflate(0.5);
-            final boolean distancePass = renderer != null
-                    && contraptionEntity.shouldRenderAtSqrDistance(visiblePosition.distanceToSqr(cameraPosition));
-            final boolean frustumPass = frustum == null || frustum.isVisible(visibleAabb);
-            if (!distancePass || !frustumPass) {
-                continue;
-            }
-            if (suppressDynamicContraption(contraptionEntity, clientSubLevel, "ENTITY_PHASE_BRIDGE")) {
-                continue;
-            }
-            final double x = visiblePosition.x - cameraX;
-            final double y = visiblePosition.y - cameraY;
-            final double z = visiblePosition.z - cameraZ;
-            final int packedLight = dispatcher.getPackedLightCoords(contraptionEntity, partialTick);
-            final MultiBufferSource.BufferSource tracedSource = bufferSource instanceof MultiBufferSource.BufferSource found
-                    ? found : null;
-            if (tracedSource != null) {
-                SableM28BatchTrace.beginDispatch(tracedSource, contraptionEntity.getId(), "ENTITY_PHASE_BRIDGE");
-            }
-            poseStack.pushPose();
-            try (SableM28VisualOwnershipTrace.Scope ignored = SableM28VisualOwnershipTrace.enter(
-                    SableM28VisualOwnershipTrace.Owner.SABLE_ENTITY_PHASE_BRIDGE)) {
-                dispatcher.render(contraptionEntity, x, y, z, contraptionEntity.getYRot(), partialTick,
-                        poseStack, bufferSource, packedLight);
-            } finally {
-                poseStack.popPose();
-                if (tracedSource != null) {
-                    SableM28BatchTrace.endDispatch();
-                }
-            }
-            if (LOGGED_ENTITY_PHASE_AB.add(contraptionEntity.getId())) {
-                Sable.LOGGER.info("SABLE_M28_ENTITY_PHASE_AB mode=ENTITY_PHASE_BRIDGE frame={} entityId={} "
-                                + "insertionPoint=LevelRenderer.renderEntity_HEAD bufferSourceClass={} "
-                                + "bufferSourceIdentity={} consumerLifecycle=NORMAL_ENTITY_PHASE "
-                                + "finalizationObserved=RUNTIME_PENDING drawObserved=RUNTIME_PENDING "
-                                + "playerVisibleResult=MANUAL_RUNTIME_REQUIRED",
-                        SableM28BatchTrace.currentFrame(), contraptionEntity.getId(),
-                        bufferSource.getClass().getName(), System.identityHashCode(bufferSource));
-            }
-        }
-    }
-
-    private static boolean suppressDynamicContraption(final AbstractContraptionEntity entity,
-                                                       final ClientSubLevel subLevel,
-                                                       final String renderStage) {
-        if (!SUPPRESS_DYNAMIC_CONTRAPTION || !(entity instanceof ControlledContraptionEntity)) {
-            return false;
-        }
-        final String key = entity.getId() + ":" + renderStage;
-        if (LOGGED_DYNAMIC_SUPPRESSION.add(key)) {
-            Sable.LOGGER.info("SABLE_M28_VISIBLE_OWNER source=CREATE_CONTRAPTION subLevel={} "
-                            + "entityId={} sourcePosition=contraption_blocks renderStage={} "
-                            + "drawReached=false suppressionFlag=sable.m28.suppressDynamicContraption "
-                            + "ownershipDecision=DIAGNOSTIC_DYNAMIC_SUPPRESSION",
-                    subLevel.getUniqueId(), entity.getId(), renderStage);
-        }
-        return true;
     }
 
     private static Vec3 interpolatedPosition(final Entity entity, final float partialTick) {

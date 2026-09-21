@@ -8,7 +8,6 @@ import dev.ryanhcode.sable.compatibility.create.contraptions.SableCreateContrapt
 import dev.ryanhcode.sable.companion.math.BoundingBox3i;
 import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
-import dev.ryanhcode.sable.mixin.m28.StaticBufferBuilderProbeAccessor;
 import dev.ryanhcode.sable.platform.SableSubLevelRenderPlatform;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
@@ -57,15 +56,6 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
     private static final Set<String> LOGGED_CREATE_PISTON_MODEL = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private static final Set<String> LOGGED_CREATE_PISTON_DRAW = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private static final Set<String> LOGGED_SKIPPED_BLOCKS = Collections.newSetFromMap(new ConcurrentHashMap<>());
-    private static final Set<String> LOGGED_M28_STATIC_SAIL_SUPPRESSION =
-            Collections.newSetFromMap(new ConcurrentHashMap<>());
-    private static final Map<String, Integer> LAST_CONTRAPTION_OWNER = new ConcurrentHashMap<>();
-    private static final Map<String, Integer> LAST_FORCED_INVALIDATION = new ConcurrentHashMap<>();
-    private static final boolean TRACE_M28_STATIC_CACHE = Boolean.getBoolean("sable.m28.visualOwnershipTrace");
-    private static final boolean FORCE_CAPTURED_STATIC_INVALIDATE =
-            Boolean.getBoolean("sable.m28.forceCapturedStaticInvalidate");
-    private static final boolean SUPPRESS_STATIC_SYMMETRIC_SAILS =
-            Boolean.getBoolean("sable.m28.suppressStaticSymmetricSails");
 
     /**
      * The sub-level this renderer is for
@@ -81,7 +71,6 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
     private boolean loggedState = false;
     private boolean loggedDraw = false;
     private int visibleSectionCount = 0;
-    private long snapshotGeneration;
 
     /**
      * Creates a new renderer for the given sub-level
@@ -139,28 +128,12 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
         }
 
         int renderedBlocks = 0;
-        Map<BlockPos, Ownership> contraptionOwnerships =
+        final Map<BlockPos, Ownership> contraptionOwnerships =
                 SableCreateContraptionBlockOwnership.index(this.subLevel);
-        if (this.forceCapturedStaticInvalidation(contraptionOwnerships)) {
-            contraptionOwnerships = SableCreateContraptionBlockOwnership.index(this.subLevel);
-        }
-        if (TRACE_M28_STATIC_CACHE || FORCE_CAPTURED_STATIC_INVALIDATE) {
-            this.logActiveContraptionOwnership(contraptionOwnerships, layer);
-        }
         for (final RenderBlock block : this.renderBlocks) {
             final BlockState blockState = block.state();
             final Ownership ownership = contraptionOwnerships.get(block.pos());
             if (ownership != null) {
-                continue;
-            }
-            if (SUPPRESS_STATIC_SYMMETRIC_SAILS && isSymmetricSail(blockState)) {
-                final String key = this.subLevel.getUniqueId() + ":" + block.pos().asLong() + ":" + layer;
-                if (LOGGED_M28_STATIC_SAIL_SUPPRESSION.add(key)) {
-                    Sable.LOGGER.info("SABLE_M29_STATIC_SAIL_SUPPRESSION subLevel={} plotPos={} localPos={} "
-                                    + "blockState={} renderLayer={} scope=VANILLA_SINGLE_SUBLEVEL_STATIC_ONLY",
-                            this.subLevel.getUniqueId(), block.pos(),
-                            block.pos().subtract(this.subLevel.getPlot().getCenterBlock()), blockState, layer);
-                }
                 continue;
             }
             final boolean createPistonModelFallback = isCreatePistonModelFallback(blockState);
@@ -209,14 +182,9 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
 
             final PoseStack stack = new PoseStack();
             VanillaSubLevelRenderTransforms.applyBlockTransform(stack, modelView, renderPose, block.pos(), camX, camY, camZ);
-            final int vertexStart = staticVertexCount(consumer);
             SableSubLevelRenderPlatform.INSTANCE.tesselateBlock(
                     LEVEL_WRAPPER, bakedModel, blockState, block.pos(), stack, consumer, RANDOM, block.seed(),
                     OverlayTexture.NO_OVERLAY, layer);
-            final int vertexEnd = staticVertexCount(consumer);
-            if (TRACE_M28_STATIC_CACHE || FORCE_CAPTURED_STATIC_INVALIDATE) {
-                this.logRestoredStaticBlock(block, blockState, layer, vertexStart, vertexEnd, bakedModel);
-            }
             if (createPistonModelFallback && SableDiagnosticFlags.TRACE_STATIC_RENDERING) {
                 final String key = this.subLevel.getUniqueId() + ":" + block.pos().asLong() + ":" + layer;
                 if (LOGGED_CREATE_PISTON_DRAW.add(key)) {
@@ -239,116 +207,6 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
         }
 
         return renderedBlocks;
-    }
-
-    private void logActiveContraptionOwnership(final Map<BlockPos, Ownership> ownerships,
-                                                final RenderType layer) {
-        for (final Map.Entry<BlockPos, Ownership> entry : ownerships.entrySet()) {
-            final BlockPos sourcePlotPos = entry.getKey();
-            final Ownership ownership = entry.getValue();
-            final RenderBlock storedBlock = this.renderBlocks.stream()
-                    .filter(block -> block.pos().equals(sourcePlotPos))
-                    .findFirst()
-                    .orElse(null);
-            final String key = this.subLevel.getUniqueId() + ":" + sourcePlotPos.asLong();
-            final Integer previousOwner = LAST_CONTRAPTION_OWNER.put(key, ownership.entityId());
-            if (previousOwner != null && previousOwner == ownership.entityId()) {
-                continue;
-            }
-            final BlockState liveState = SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, sourcePlotPos);
-            final BlockState storedState = storedBlock == null ? null : storedBlock.state();
-            Sable.LOGGER.info("SABLE_M28_RENDER_OWNERSHIP path=STATIC subLevel={} staticLocalPos={} "
-                            + "staticPlotPos={} staticBlockId={} staticBlockState={} liveSubLevelState={} "
-                            + "storedSnapshotPresent={} storedSnapshotState={} activeContraptionEntityId={} "
-                            + "controllerPos={} contraptionAnchor={} capturedBlockLocalPos={} "
-                            + "capturedBlockState={} capturedSourcePlotPositions={} "
-                            + "positionMatchesCapturedBlock=true renderLayer={} geometryEmitted=false decision={}",
-                    this.subLevel.getUniqueId(), sourcePlotPos.subtract(this.subLevel.getPlot().getCenterBlock()),
-                    sourcePlotPos,
-                    storedState == null ? "air" : BuiltInRegistries.BLOCK.getKey(storedState.getBlock()),
-                    storedState, liveState, storedBlock != null, storedState, ownership.entityId(),
-                    ownership.controllerPos(), ownership.contraptionAnchor(), ownership.capturedLocalPos(),
-                    ownership.capturedState(), ownership.capturedSourcePlotPositions(), layer,
-                    storedBlock == null ? "CONTRAPTION_ONLY" : "SUPPRESSED_ACTIVE_CONTRAPTION_OWNER");
-            if (TRACE_M28_STATIC_CACHE || FORCE_CAPTURED_STATIC_INVALIDATE) {
-                Sable.LOGGER.info("SABLE_M28_STATIC_DRAW_CONTENT frame=unavailable subLevel={} "
-                                + "renderDataIdentity={} snapshotGeneration={} staticMeshIdentity=NONE_IMMEDIATE_MODE "
-                                + "capturedSourcePos={} currentBlockState={} cachedAtBuildBlockState={} "
-                                + "vertexRange=EMPTY vertexCount=0 modelIdentity=none "
-                                + "stillPresentInStaticMesh={} drawReached=false",
-                        this.subLevel.getUniqueId(), System.identityHashCode(this), this.snapshotGeneration,
-                        sourcePlotPos, liveState, storedState, storedBlock != null);
-                Sable.LOGGER.info("SABLE_M28_VISIBLE_OWNER source=SABLE_STATIC subLevel={} entityId={} "
-                                + "sourcePosition={} snapshotGeneration={} renderLayer={} vertexRange=EMPTY "
-                                + "drawReached=false ownershipDecision={}",
-                        this.subLevel.getUniqueId(), ownership.entityId(), sourcePlotPos,
-                        this.snapshotGeneration, layer,
-                        storedBlock == null ? "NOT_IN_SNAPSHOT" : "SUPPRESSED_ACTIVE_CONTRAPTION_OWNER");
-            }
-        }
-    }
-
-    private void logRestoredStaticBlock(final RenderBlock block, final BlockState blockState,
-                                        final RenderType layer, final int vertexStart,
-                                        final int vertexEnd, final BakedModel bakedModel) {
-        final String key = this.subLevel.getUniqueId() + ":" + block.pos().asLong();
-        final Integer previousOwner = LAST_CONTRAPTION_OWNER.remove(key);
-        if (previousOwner == null) {
-            return;
-        }
-        Sable.LOGGER.info("SABLE_M28_RENDER_OWNERSHIP path=STATIC subLevel={} staticLocalPos={} "
-                        + "staticPlotPos={} staticBlockId={} liveSubLevelState={} storedSnapshotState={} "
-                        + "previousContraptionEntityId={} activeContraptionEntityId=none "
-                        + "positionMatchesCapturedBlock=false renderLayer={} geometryEmitted=true decision={}",
-                this.subLevel.getUniqueId(), block.pos().subtract(this.subLevel.getPlot().getCenterBlock()),
-                block.pos(), BuiltInRegistries.BLOCK.getKey(blockState.getBlock()),
-                SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, block.pos()), blockState,
-                previousOwner, layer, "RESTORED_STATIC_OWNER");
-        if (TRACE_M28_STATIC_CACHE || FORCE_CAPTURED_STATIC_INVALIDATE) {
-            Sable.LOGGER.info("SABLE_M28_STATIC_DRAW_CONTENT frame=unavailable subLevel={} "
-                            + "renderDataIdentity={} snapshotGeneration={} staticMeshIdentity=NONE_IMMEDIATE_MODE "
-                            + "capturedSourcePos={} currentBlockState={} cachedAtBuildBlockState={} "
-                            + "vertexRange={}..{} vertexCount={} modelIdentity={} "
-                            + "stillPresentInStaticMesh=true drawReached=true",
-                    this.subLevel.getUniqueId(), System.identityHashCode(this), this.snapshotGeneration,
-                    block.pos(), SubLevelBlockStateLookup.getBlockStateOrAir(this.subLevel, block.pos()),
-                    blockState, vertexStart, vertexEnd, java.lang.Math.max(0, vertexEnd - vertexStart),
-                    System.identityHashCode(bakedModel));
-            Sable.LOGGER.info("SABLE_M28_VISIBLE_OWNER source=SABLE_STATIC subLevel={} entityId=none "
-                            + "sourcePosition={} snapshotGeneration={} renderLayer={} vertexRange={}..{} "
-                            + "drawReached=true ownershipDecision=RESTORED_STATIC_OWNER",
-                    this.subLevel.getUniqueId(), block.pos(), this.snapshotGeneration, layer,
-                    vertexStart, vertexEnd);
-        }
-    }
-
-    private boolean forceCapturedStaticInvalidation(final Map<BlockPos, Ownership> ownerships) {
-        if (!FORCE_CAPTURED_STATIC_INVALIDATE || ownerships.isEmpty()) {
-            return false;
-        }
-        boolean rebuild = false;
-        for (final Map.Entry<BlockPos, Ownership> entry : ownerships.entrySet()) {
-            final String key = this.subLevel.getUniqueId() + ":" + entry.getKey().asLong();
-            final Integer previous = LAST_FORCED_INVALIDATION.put(key, entry.getValue().entityId());
-            rebuild |= previous == null || previous != entry.getValue().entityId();
-        }
-        if (!rebuild) {
-            return false;
-        }
-        final long oldGeneration = this.snapshotGeneration;
-        this.rebuild();
-        Sable.LOGGER.info("SABLE_M28_STATIC_CACHE_LIFECYCLE event=FORCED_CAPTURE_INVALIDATION "
-                        + "subLevel={} renderDataIdentity={} oldSnapshotGeneration={} "
-                        + "newSnapshotGeneration={} invalidationRequested=true oldMeshIdentity=NONE_IMMEDIATE_MODE "
-                        + "oldMeshDisposed=NOT_APPLICABLE rebuildStarted=true",
-                this.subLevel.getUniqueId(), System.identityHashCode(this), oldGeneration,
-                this.snapshotGeneration);
-        return true;
-    }
-
-    private static int staticVertexCount(final VertexConsumer consumer) {
-        return consumer instanceof final StaticBufferBuilderProbeAccessor access
-                ? access.sable$getVertices() : -1;
     }
 
     private void logStaticModelDecision(final RenderBlock block, final BlockState blockState, final RenderType layer,
@@ -393,11 +251,6 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
                 && ("mechanical_piston".equals(path) || "sticky_mechanical_piston".equals(path));
     }
 
-    private static boolean isSymmetricSail(final BlockState blockState) {
-        final net.minecraft.resources.ResourceLocation id = BuiltInRegistries.BLOCK.getKey(blockState.getBlock());
-        return "simulated".equals(id.getNamespace()) && "white_symmetric_sail".equals(id.getPath());
-    }
-
     public @Nullable BlockEntity getRenderBlockEntity() {
         if (this.renderBlocks.isEmpty()) {
             this.rebuild();
@@ -420,8 +273,6 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
 
     @Override
     public void rebuild() {
-        final long oldGeneration = this.snapshotGeneration;
-        final int oldBlockCount = this.renderBlocks.size();
         this.renderBlocks.clear();
         this.renderBlockEntities.clear();
         this.loggedM10RenderLayers.clear();
@@ -488,18 +339,6 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
         }
 
         this.rebuildBlockEntities();
-        this.snapshotGeneration++;
-
-        if (TRACE_M28_STATIC_CACHE || FORCE_CAPTURED_STATIC_INVALIDATE) {
-            Sable.LOGGER.info("SABLE_M28_STATIC_CACHE_LIFECYCLE event=SNAPSHOT_REBUILT subLevel={} "
-                            + "renderDataIdentity={} oldSnapshotGeneration={} newSnapshotGeneration={} "
-                            + "oldStoredBlockCount={} newStoredBlockCount={} persistentGpuMesh=false "
-                            + "oldMeshIdentity=NONE_IMMEDIATE_MODE newMeshIdentity=NONE_IMMEDIATE_MODE "
-                            + "oldMeshDisposed=NOT_APPLICABLE rebuildStarted=true",
-                    this.subLevel.getUniqueId(), System.identityHashCode(this), oldGeneration,
-                    this.snapshotGeneration, oldBlockCount, this.renderBlocks.size());
-        }
-
         for (final BlockEntity blockEntity : this.renderBlockEntities) {
             SableSubLevelRenderPlatform.INSTANCE.tryAddFlywheelVisual(blockEntity);
         }
@@ -533,18 +372,6 @@ public class VanillaSingleSubLevelRenderData implements SubLevelRenderData {
     public void close() {
         this.renderBlocks.clear();
         this.renderBlockEntities.clear();
-    }
-
-    public long getSnapshotGeneration() {
-        return this.snapshotGeneration;
-    }
-
-    public @Nullable BlockState getSnapshotState(final BlockPos pos) {
-        return this.renderBlocks.stream()
-                .filter(block -> block.pos().equals(pos))
-                .map(RenderBlock::state)
-                .findFirst()
-                .orElse(null);
     }
 
     private record RenderBlock(BlockPos pos, BlockState state, long seed) {

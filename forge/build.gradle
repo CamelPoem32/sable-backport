@@ -9436,9 +9436,7 @@ tasks.register('verifyM13ContraptionRenderBoundary') {
                 'poseStack.mulPose(new Quaternionf(renderPose.orientation()))',
                 'VisualizationManager;supportsVisualization',
                 'sableContraption ? false : originalVisualizationSupported',
-                'original.call(level)',
-                'SABLE_M13_RENDER',
-                'renderedBlockCount='
+                'original.call(level)'
         ].each { canary ->
             if (!renderMixinText.contains(canary)) {
                 throw new GradleException("M13 contraption render bridge lost canary: ${canary}")
@@ -9453,17 +9451,9 @@ tasks.register('verifyM13ContraptionRenderBoundary') {
                 'frustum.isVisible(visibleAabb)',
                 'renderCullingAabb(contraptionEntity, rawPosition)',
                 'visibleAabb(clientSubLevel, rawAabb, partialTick)',
-                'oldRawDispatcherX = rawPosition.x - cameraPosition.x',
                 'x = visiblePosition.x - cameraPosition.x',
-                'newVisibleDispatcherXYZ',
-                'logRenderStage("VISIBLE_DISTANCE_PASS"',
-                'logRenderStage("VISIBLE_FRUSTUM_PASS"',
-                'logRenderStage("DISPATCH_BEGIN"',
-                'logRenderStage("DISPATCH_END"',
                 'dispatcher.render(contraptionEntity',
-                'dispatcher.getPackedLightCoords(contraptionEntity',
-                'SABLE_M13_RENDER stage={}',
-                'CLIENT_ENTITY_EXISTS'
+                'dispatcher.getPackedLightCoords(contraptionEntity'
         ].each { canary ->
             if (!(renderEventText + renderBridgeText).contains(canary)) {
                 throw new GradleException("M13 contraption render scheduling bridge lost canary: ${canary}")
@@ -9481,24 +9471,12 @@ tasks.register('verifyM13ContraptionRenderBoundary') {
         if (renderMixinText.contains('&& entity.isReadyForRender()')) {
             throw new GradleException('Sable contraption renderer must not gate hidden-plot entities on Create isReadyForRender()')
         }
-        [
-                'SABLE_M13_RENDER stage={}',
-                'RENDER_METHOD_ENTERED',
-                'CREATE_READY_STATE',
-                'GEOMETRY_EMISSION_REACHED',
-                'poseStack.mulPose(new Quaternionf(renderPose.orientation()))',
-                'poseTranslationAtRendererEntry',
-                'clientSubLevel.renderPose(partialTick)'
-        ].each { canary ->
-            if (!renderMixinText.contains(canary)) {
-                throw new GradleException("M13 Create renderer entry diagnostics/outer transform lost canary: ${canary}")
-            }
-        }
         if (renderMixinText.contains('poseStack.translate(visiblePosition.x - rawPosition.x')
                 || renderMixinText.contains('visiblePosition.x - rawPosition.x, visiblePosition.y - rawPosition.y')) {
             throw new GradleException('M13 contraption renderer must not cancel hidden plot coordinates inside the PoseStack')
         }
-        if (!renderMixinText.contains('suppressed_for_visible_bridge')
+        if (!renderMixinText.contains('entity.getContraption() != null')
+                || !renderMixinText.contains('entity.isAliveOrStale()')
                 || !renderMixinText.contains('cir.setReturnValue(false)')) {
             throw new GradleException('M13 Create shouldRender hook must suppress accidental hidden-space vanilla scheduling and leave visible scheduling to the Forge bridge')
         }
@@ -27279,11 +27257,6 @@ tasks.register('verifyM28_5aMechanicalBearingAccessor') {
     }
 }
 
-def m28GeneratorConflictMixin = rootProject.file(
-        'forge/src/main/java/dev/ryanhcode/sable/mixin/m28/GeneratingKineticConflictTraceMixin.java')
-def m28RotationConflictMixin = rootProject.file(
-        'forge/src/main/java/dev/ryanhcode/sable/mixin/m28/RotationConflictTraceMixin.java')
-
 tasks.register('verifyM28ControlCanonicalBlueprintBoundary') {
     group = 'forge backport'
     inputs.files(m28BuildDocument, m28CommandSource)
@@ -27431,78 +27404,21 @@ tasks.register('verifyM28ControlPreflightReadOnlyBoundary') {
 
 tasks.register('verifyM28KineticConflictDiagnosticBoundary') {
     group = 'forge backport'
-    dependsOn tasks.named('compileJava')
-    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
-    inputs.files(m28GeneratorConflictMixin, m28RotationConflictMixin, m28WheelDiagnosticsSource, m28ForgeMixinConfig)
-    inputs.file(standaloneProductionSableArtifact)
+    description = 'Verifies obsolete kinetic-conflict probes stay retired from the production baseline.'
+    inputs.files(m28WheelDiagnosticsSource, m28ForgeMixinConfig)
     doLast {
         def config = new JsonSlurper().parse(m28ForgeMixinConfig)
         ['m28.GeneratingKineticConflictTraceMixin', 'm28.RotationConflictTraceMixin'].each { name ->
-            if ((config.mixins ?: []).count { it == name } != 1) {
-                throw new GradleException("M28.5b diagnostic mixin not owned exactly once: ${name}")
+            if ((config.mixins ?: []).contains(name) || (config.client ?: []).contains(name)) {
+                throw new GradleException("Obsolete M28 kinetic diagnostic mixin is still configured: ${name}")
             }
         }
         String diagnostics = m28WheelDiagnosticsSource.getText('UTF-8')
-        String rotationTrace = m28RotationConflictMixin.getText('UTF-8')
-        if (!diagnostics.contains('SABLE_M28_KINETIC_CONFLICT')
-                || !diagnostics.contains('recordKineticDestruction')
-                || !diagnostics.contains('exactCreateOwnerMethod=')) {
-            throw new GradleException('M28.5b destruction evidence missing')
+        if (diagnostics.contains('SABLE_M28_KINETIC_CONFLICT')
+                || diagnostics.contains('recordKineticDestruction')) {
+            throw new GradleException('Obsolete M28 kinetic conflict capture remains in production source')
         }
-        if (!rotationTrace.contains('@Local(index = 4)') || !rotationTrace.contains('@Local(index = 7)')) {
-            throw new GradleException('M28.5b Create incoming-neighbour/speed slots are not captured')
-        }
-        JarFile createJar = new JarFile(createDevelopmentRuntime.get().asFile)
-        try {
-            [
-                'com/simibubi/create/content/kinetics/base/GeneratingKineticBlockEntity.class':
-                    ['applyNewSpeed', 1],
-                'com/simibubi/create/content/kinetics/RotationPropagator.class':
-                    ['propagateNewSource', 3]
-            ].each { path, expected ->
-                def entry = createJar.getJarEntry(path)
-                if (entry == null) throw new GradleException("Exact Create 6.0.8 class absent: ${path}")
-                def node = new org.objectweb.asm.tree.ClassNode()
-                new org.objectweb.asm.ClassReader(createJar.getInputStream(entry).bytes).accept(node, 0)
-                def method = node.methods.find { it.name == expected[0] }
-                int calls = method == null ? 0 : method.instructions.toArray().count { insn ->
-                    insn instanceof org.objectweb.asm.tree.MethodInsnNode
-                            && insn.owner == 'net/minecraft/world/level/Level'
-                            && insn.name == 'destroyBlock'
-                            && insn.desc == '(Lnet/minecraft/core/BlockPos;Z)Z'
-                }
-                if (calls != expected[1]) throw new GradleException("M28.5b Create destruction ABI ${path}: ${calls} != ${expected[1]}")
-                if (expected[0] == 'propagateNewSource') {
-                    def stores = method.instructions.toArray().findAll { insn ->
-                        insn instanceof org.objectweb.asm.tree.VarInsnNode
-                    }
-                    if (!stores.any { it.opcode == org.objectweb.asm.Opcodes.ASTORE && it.var == 4 }
-                            || !stores.any { it.opcode == org.objectweb.asm.Opcodes.FSTORE && it.var == 7 }) {
-                        throw new GradleException('M28.5b Create 6.0.8 neighbour or conveyed-speed local slot changed')
-                    }
-                }
-            }
-        } finally {
-            createJar.close()
-        }
-        JarFile artifact = new JarFile(standaloneProductionSableArtifact.get().asFile)
-        try {
-            ['dev/ryanhcode/sable/mixin/m28/GeneratingKineticConflictTraceMixin.class',
-             'dev/ryanhcode/sable/mixin/m28/RotationConflictTraceMixin.class'].each { path ->
-                if (artifact.getJarEntry(path) == null) throw new GradleException("M28.5b final jar missing ${path}")
-            }
-            def entry = artifact.getJarEntry('sable-common-forge.mixins.json')
-            if (entry == null) throw new GradleException('M28.5b final jar missing owning mixin config')
-            def packaged = new JsonSlurper().parse(artifact.getInputStream(entry))
-            ['m28.GeneratingKineticConflictTraceMixin', 'm28.RotationConflictTraceMixin'].each { name ->
-                if ((packaged.mixins ?: []).count { it == name } != 1) {
-                    throw new GradleException("M28.5b final jar does not apply ${name} server-side")
-                }
-            }
-        } finally {
-            artifact.close()
-        }
-        logger.lifecycle('verifyM28KineticConflictDiagnosticBoundary PASS')
+        logger.lifecycle('verifyM28KineticConflictDiagnosticBoundary PASS: obsolete probes retired')
     }
 }
 
@@ -30063,5 +29979,187 @@ tasks.register('verifyM29_6RestoredControllerSynchronizationBoundary') {
             loader.close()
         }
         logger.lifecycle('verifyM29_6RestoredControllerSynchronizationBoundary PASS: exact Create discard branch is deferred for four reverse-restore ticks only')
+    }
+}
+
+tasks.register('verifyM30ProductionConsolidationBoundary') {
+    group = 'forge backport'
+    description = 'Verifies the consolidated M28/M29 production hooks, bounded state, and clean default logging.'
+    dependsOn tasks.named('compileJava')
+
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    File nestedTransfer = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer.java')
+    File normalWorldSync = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableM28NormalWorldCceSync.java')
+    File queryGetter = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/util/SubLevelInclusiveLevelEntityGetter.java')
+    File renderBridge = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java')
+    File admission = file('src/main/java/dev/ryanhcode/sable/forge/SableM28RestoredContraptionClientSync.java')
+    File controllerGuard = file('src/main/java/dev/ryanhcode/sable/forge/SableM29RestoredControllerSyncGuard.java')
+    File controllerMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/RestoredContraptionControllerSyncMixin.java')
+    File visualMixin = file('src/main/java/dev/ryanhcode/sable/mixin/m28/ContraptionVisualProbeMixin.java')
+    File lifecycle = file('src/main/java/dev/ryanhcode/sable/forge/SableM29SailVisualLifecycle.java')
+    File steeringDiagnostics = file(
+            'src/main/java/dev/simulated_team/simulated/content/blocks/steering_wheel/SteeringWheelDiagnostics.java')
+    File docs = rootProject.file('M30_PRODUCTION_BASELINE.md')
+    File visualState = file('src/main/java/dev/ryanhcode/sable/forge/RestoredContraptionVisualAdmissionState.java')
+    File visualStateTest = file('src/m29QueryTest/java/dev/ryanhcode/sable/forge/M29RestoredVisualAdmissionStateTest.java')
+    File controllerState = file('src/main/java/dev/ryanhcode/sable/forge/RestoredContraptionControllerSyncState.java')
+    File controllerStateTest = file('src/m29QueryTest/java/dev/ryanhcode/sable/forge/M29RestoredControllerSyncStateTest.java')
+    File lifecycleState = file('src/main/java/dev/ryanhcode/sable/forge/SailVisualLifecycleState.java')
+    File lifecycleStateTest = file('src/m29QueryTest/java/dev/ryanhcode/sable/forge/M29SailVisualLifecycleStateTest.java')
+
+    inputs.files(mixinConfig, nestedTransfer, normalWorldSync, queryGetter, renderBridge, admission,
+            controllerGuard, controllerMixin, visualMixin, lifecycle, steeringDiagnostics, docs,
+            visualState, visualStateTest, controllerState, controllerStateTest,
+            lifecycleState, lifecycleStateTest)
+    outputs.dir(layout.buildDirectory.dir('m30ProductionStateTests'))
+
+    doLast {
+        String config = mixinConfig.getText('UTF-8')
+        [
+                'm28.AbstractEntityVisualAccessor',
+                'm28.ContraptionVisualProbeMixin',
+                'm28.RestoredContraptionClientSpawnMixin',
+                'm28.RestoredContraptionControllerSyncMixin',
+                'm28.BearingRendererHeadProbeMixin',
+                'm28.ContraptionBufferProbeMixin'
+        ].each { retained ->
+            if (!config.contains(retained)) {
+                throw new GradleException("M30 retained production/debug hook is absent: ${retained}")
+            }
+        }
+        [
+                'BufferBuilderVertexWriteProbeMixin',
+                'BufferUploaderDrawProbeMixin',
+                'EntityRenderDispatcherGlobalProbeMixin',
+                'VisualManagerImplAdmissionProbeMixin',
+                'ClientPacketListenerRemovalProbeMixin',
+                'MechanicalBearingAssemblyProbeMixin',
+                'LevelRendererEntityPhaseProbeMixin'
+        ].each { obsolete ->
+            if (config.contains(obsolete)) {
+                throw new GradleException("M30 obsolete probe remains packaged: ${obsolete}")
+            }
+        }
+
+        String transferSource = nestedTransfer.getText('UTF-8')
+        ['rollbackDestinations()', 'rollbackOuterAssembly(', 'capturedBlockSetExact=true',
+         'Nested captured block set/state changed', 'targetLevel.addFreshEntity(restoredEntity)',
+         'verifyPending'].each { token ->
+            if (!transferSource.contains(token)) {
+                throw new GradleException("M30 nested ownership contract lost ${token}")
+            }
+        }
+        String querySource = queryGetter.getText('UTF-8')
+        ['PARENT_VISIBLE_DIRECT', 'SUBLEVEL_RAW_DIRECT', 'SUBLEVEL_RAW_TO_PARENT_VISIBLE',
+         'PARENT_VISIBLE_TO_SUBLEVEL_RAW'].each { route ->
+            if (!querySource.contains(route)) {
+                throw new GradleException("M30 query route lost ${route}")
+            }
+        }
+
+        String syncSource = normalWorldSync.getText('UTF-8')
+        String admissionSource = admission.getText('UTF-8')
+        String guardSource = controllerGuard.getText('UTF-8')
+        if (!syncSource.contains('data.putBoolean(RESTORED_TAG, true)')
+                || !admissionSource.contains('PENDING.put(entity.getUUID(), pending)')
+                || !admissionSource.contains('queueRemove(entity)')
+                || !admissionSource.contains('queueAdd(entity)')
+                || !admissionSource.contains('geometryObserved()')
+                || !guardSource.contains('MAX_MISSING_CONTROLLER_TICKS')
+                || !guardSource.contains('controllerPos != null && controllerPos.equals(bearingPos)')
+                || !controllerMixin.getText('UTF-8').contains('shift = At.Shift.BEFORE')) {
+            throw new GradleException('M30 reverse-restore admission/controller contract is incomplete')
+        }
+        if (admissionSource.contains('Boolean.getBoolean') || guardSource.contains('Boolean.getBoolean')) {
+            throw new GradleException('M30 production admission or controller grace depends on a debug flag')
+        }
+        String visualSource = visualMixin.getText('UTF-8')
+        ['visualCreated(entity, this)', 'visualFrame(this.sable$entity(), this)',
+         'visualRemoved(this.sable$entity(), this)'].each { token ->
+            if (!visualSource.contains(token)) {
+                throw new GradleException("M30 Flywheel lifecycle contract lost ${token}")
+            }
+        }
+        if (!lifecycle.getText('UTF-8').contains('if (!enabled()')) {
+            throw new GradleException('M30 sail diagnostics are not gated before target collection')
+        }
+        if (!steeringDiagnostics.getText('UTF-8').contains('if (!SableDiagnosticFlags.TRACE_STEERING)')) {
+            throw new GradleException('M30 steering removal diagnostics are not default-gated')
+        }
+
+        FileTree productionSources = fileTree(rootProject.projectDir) {
+            include 'common/src/main/java/**/*.java'
+            include 'forge/src/main/java/**/*.java'
+        }
+        String allProductionSource = productionSources.files.collect { it.getText('UTF-8') }.join('\n')
+        ['SABLE_M28_ACTUAL_VERTEX', 'SABLE_M28_BUFFER_WRITE', 'SABLE_M28_BUFFER_TRANSFORM'].each { marker ->
+            if (allProductionSource.contains(marker)) {
+                throw new GradleException("M30 obsolete hot marker remains in production source: ${marker}")
+            }
+        }
+        if (!rootProject.file(
+                'forge/src/main/java/dev/simulated_team/simulated/content/blocks/m24/M24TorsionSpringBlockEntity.java')
+                .getText('UTF-8').contains('if (!SableDiagnosticFlags.TRACE_M24')) {
+            throw new GradleException('M30 torsion tick diagnostics are not default-gated')
+        }
+        if (!rootProject.file(
+                'forge/src/main/java/dev/simulated_team/simulated/content/blocks/m24/M24PhysicalBlockEntity.java')
+                .getText('UTF-8').contains('if (SableDiagnosticFlags.TRACE_M24')) {
+            throw new GradleException('M30 winch tick diagnostics are not default-gated')
+        }
+
+        ['Nested Create Contraption Ownership', 'Entity Query Coordinates', 'Controller Grace Rule',
+         'Flywheel Admission Rule', 'Diagnostic Policy', 'Retained State Lifetimes'].each { heading ->
+            if (!docs.getText('UTF-8').contains(heading)) {
+                throw new GradleException("M30 baseline documentation lost ${heading}")
+            }
+        }
+
+        File output = layout.buildDirectory.dir('m30ProductionStateTests').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M30 production state tests require a JDK')
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-d', output.absolutePath,
+                visualState.absolutePath, visualStateTest.absolutePath,
+                controllerState.absolutePath, controllerStateTest.absolutePath,
+                lifecycleState.absolutePath, lifecycleStateTest.absolutePath)
+        if (result != 0) throw new GradleException('M30 production state test compilation failed')
+        URLClassLoader loader = new URLClassLoader([output.toURI().toURL()] as URL[], (ClassLoader) null)
+        try {
+            ['M29RestoredVisualAdmissionStateTest', 'M29RestoredControllerSyncStateTest',
+             'M29SailVisualLifecycleStateTest'].each { testName ->
+                loader.loadClass("dev.ryanhcode.sable.forge.${testName}")
+                        .getMethod('run').invoke(null)
+            }
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M30 production state regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM30ProductionConsolidationBoundary PASS: production hooks are flag-independent, bounded, and free of obsolete hot probes')
+    }
+}
+
+tasks.register('verifySableProductionBaseline') {
+    group = 'forge backport'
+    description = 'Runs the retained Sable Forge 1.20.1 production regression contract.'
+    dependsOn tasks.named('verifyM13ContraptionControllerBoundary')
+    dependsOn tasks.named('verifyM13ContraptionRenderBoundary')
+    dependsOn tasks.named('verifyM13ContraptionCollisionBoundary')
+    dependsOn tasks.named('verifyM14FinalAcceptanceBoundary')
+    dependsOn tasks.named('verifyM22SimulatedAssembly')
+    dependsOn tasks.named('verifyM24ClosureStatusBoundary')
+    dependsOn tasks.named('verifyM27_2Aerodynamics')
+    dependsOn tasks.named('verifyM28_5bControlPreflight')
+    dependsOn tasks.named('verifyM29EntityQueryCoordinateBoundary')
+    dependsOn tasks.named('verifyM29EntityQueryTransformMath')
+    dependsOn tasks.named('verifyM29_1BoundedDiagnostics')
+    dependsOn tasks.named('verifyM30ProductionConsolidationBoundary')
+    doLast {
+        logger.lifecycle('verifySableProductionBaseline PASS: M13/M14/M22/M24/M27/M28/M29 production contract retained')
     }
 }
