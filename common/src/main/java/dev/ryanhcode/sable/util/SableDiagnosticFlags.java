@@ -12,6 +12,7 @@ public final class SableDiagnosticFlags {
     public static final boolean TRACE_OUTER_TRANSFER = Boolean.getBoolean("sable.m22.traceAssembly");
     public static final boolean TRACE_STEERING = Boolean.getBoolean("sable.m28.traceSteering");
     public static final boolean TRACE_M24 = Boolean.getBoolean("sable.m24.traceRuntime");
+    public static final boolean TRACE_CREATE_ACTORS = Boolean.getBoolean("sable.m31.traceCreateActors");
 
     private SableDiagnosticFlags() {
     }

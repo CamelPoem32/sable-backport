@@ -2705,3 +2705,26 @@ owner, and registration is checked again on the next server tick. The Sable-cont
 Create's CPU `BEARING_TOP` renderer because Flywheel's position-only-at-construction instance remains in hidden plot
 space. Normal-world Flywheel behavior is unchanged. `implementationRevision=M28.14`; assembled-aircraft runtime is
 pending and M28 overall remains open.
+
+## M31 Create actor world mutation
+
+M31 replaces the partial M16 Mechanical Drill target fallback with a
+parent-world-only actor boundary. A Sable-contained `DrillMovementBehaviour`
+transforms its raw actor center, active direction, and mining box through the
+current Sable pose, selects only a loaded parent-world block, and then delegates
+hardness, progress, drops, and destruction to Create 6.0.8 unchanged. Raw plot
+fallback and mutation of another Sable body's hidden storage are prohibited.
+Moving-body target changes clear the old Create breaker state before progress
+starts on the new physical block. Runtime validated the visible parent-world
+breaking gates; status is `M31 CLOSED / PASS`.
+
+## M32 Create world-interaction actor coverage
+
+M32 extends the runtime-proven M31 coordinate boundary to the moving Mechanical
+Saw, Mechanical Harvester, and Mechanical Plough. Saw reuses native Create
+breaker/tree behavior; Harvester receives a parent-visible crop cell; Plough
+receives one parent-visible cell for both its breaker and diamond-hoe paths.
+Normal-world behavior bypasses every adapter, unloaded/hidden/other-Sable targets
+are safe no-ops, and native drops/config/progress remain Create-owned. Exact
+copy-paste runtime fixtures are in `M32_RUNTIME_TEST_COMMANDS.md`. Status is
+`M32 IMPLEMENTED / RUNTIME_PENDING`; Deployer remains M33.

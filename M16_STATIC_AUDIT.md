@@ -1,5 +1,9 @@
 # M16 Static Audit: Create Block-Breaking Actors
 
+> Historical note: this document records the original M16 static gate. M31
+> supersedes its raw-target assumptions with the production parent-world-only
+> mutation boundary documented in `M31_CREATE_ACTOR_WORLD_MUTATION.md`.
+
 M16 starts from the closed M13-M15 Create contraption baseline. This audit is
 only for Create block-breaking movement actors, with Mechanical Drill as the
 first canary. No Minecraft runtime was launched, and no M16 behavior patch is
@@ -220,3 +224,12 @@ M16.1 follows this recommendation: the Forge config now enables only the moving
 `SubLevelBlockBreakingUtility`. Static drill/saw damage, Saw tree behavior,
 Harvester, Deployer, fan processing, inventory handling, and trains remain
 disabled for this milestone.
+
+## Later production follow-up
+
+M31 runtime-validated the Mechanical Drill parent-visible mutation boundary. M32
+then source-audited and implemented the moving Mechanical Saw, Mechanical
+Harvester, and Mechanical Plough on that same coordinate contract. This does not
+retroactively broaden M16: static block-entity damage, Deployer, fan processing,
+inventories, and trains remain outside the M32 actor scope. See
+`M32_CREATE_WORLD_INTERACTION_ACTORS.md`.

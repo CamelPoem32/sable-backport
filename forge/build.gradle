@@ -12105,7 +12105,7 @@ tasks.register('verifyM16DrillStaticAuditBoundary') {
 
 tasks.register('verifyM16BlockBreakingMixinDeferredBoundary') {
     group = 'forge backport'
-    description = 'Verifies M16 enables only the narrow moving block-breaking actor mixin and no broader Create actor mixins.'
+    description = 'Verifies the historical M16 boundary and the source-proven M31/M32 actor expansion.'
 
     inputs.file(rootProject.file('forge/src/main/resources/sable-common-forge.mixins.json'))
     inputs.file(rootProject.file('MIXIN_BACKPORT_MATRIX.md'))
@@ -12120,13 +12120,14 @@ tasks.register('verifyM16BlockBreakingMixinDeferredBoundary') {
         [
                 '@Mixin(value = BlockBreakingMovementBehaviour.class, remap = false)',
                 '@WrapMethod(method = "visitNewPosition")',
-                '@Inject(method = "tick", at = @At("HEAD"), cancellable = true)',
-                'containingSubLevel == null',
-                'original.call(context, pos)',
-                'SubLevelBlockBreakingUtility.findBreakingPos',
+                '@Inject(method = "tick", at = @At("HEAD"))',
+                'owner == null',
+                'original.call(context, proposedRaw)',
+                'SubLevelBlockBreakingUtility.findExternalTarget',
+                'instanceof DrillMovementBehaviour',
                 'context.world.destroyBlockProgress',
                 'data.remove("BreakingPos")',
-                'SABLE_M16_BREAK'
+                'SableM31CreateActorTrace'
         ].each { canary ->
             if (!mixinText.contains(canary)) {
                 throw new GradleException("M16 BlockBreakingMovementBehaviour mixin lost required canary: ${canary}")
@@ -12135,12 +12136,19 @@ tasks.register('verifyM16BlockBreakingMixinDeferredBoundary') {
         [
                 'block_breakers.BlockBreakingKineticBlockEntityMixin',
                 'block_breakers.BlockBreakingKineticBlockEntityDamageMixin',
-                'behaviour_compatibility.harvester_behaviour.HarvesterMovementBehaviourMixin',
-                'behaviour_compatibility.harvester_block_entity.HarvesterBlockEntityUsageMixin',
-                'behaviour_compatibility.block_breaking_behaviour.SawMovementBehaviourMixin'
+                'behaviour_compatibility.harvester_block_entity.HarvesterBlockEntityUsageMixin'
         ].each { forbidden ->
             if (forgeConfig.contains(forbidden)) {
-                throw new GradleException("M16.0 must not enable deferred broad Create actor mixin yet: ${forbidden}")
+                throw new GradleException("M16/M32 must not enable static or unrelated broad actor mixin: ${forbidden}")
+            }
+        }
+        [
+                'behaviour_compatibility.block_breaking_behaviour.SawMovementBehaviourMixin',
+                'behaviour_compatibility.harvester_behaviour.HarvesterMovementBehaviourMixin',
+                'behaviour_compatibility.plough_behaviour.PloughMovementBehaviourMixin'
+        ].each { required ->
+            if (!forgeConfig.contains(required)) {
+                throw new GradleException("M32 source-proven actor mixin is not enabled: ${required}")
             }
         }
         String matrix = rootProject.file('MIXIN_BACKPORT_MATRIX.md').getText('UTF-8')
@@ -12154,7 +12162,7 @@ tasks.register('verifyM16BlockBreakingMixinDeferredBoundary') {
                 throw new GradleException("Mixin backport matrix lost deferred Create actor row: ${canary}")
             }
         }
-        logger.lifecycle('verifyM16BlockBreakingMixinDeferredBoundary PASS: Forge config enables only moving BlockBreakingMovementBehaviour for M16 and keeps Harvester/Saw/static damage actors out')
+        logger.lifecycle('verifyM16BlockBreakingMixinDeferredBoundary PASS: M16 static damage remains deferred while M31/M32 enable only source-proven moving actor adapters')
     }
 }
 
@@ -12167,21 +12175,21 @@ tasks.register('verifyM16SubLevelBlockBreakingUtilityBoundary') {
     doLast {
         String text = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SubLevelBlockBreakingUtility.java').getText('UTF-8')
         [
-                'M16 coordinate contract',
-                'final BoundingBox3d localMiningBox',
-                'visibleMiningBox.transform(subLevel.logicalPose(), visibleMiningBox)',
+                'findExternalTarget',
+                'CreateActorTargetGeometry.ActorSpace',
                 'Sable.HELPER.getAllIntersecting',
-                'visibleMiningBox.transformInverse(otherSubLevel.logicalPose(), otherLocalMiningBox)',
-                'Sable.HELPER.distanceSquaredWithSubLevels',
-                'Sable.HELPER.getContaining(level, candidate) == subLevel',
-                'return closestPosition',
-                'SABLE_M16_BREAK'
+                'new BoundingBox3i(actorSpace.visibleMiningBounds())',
+                'parentLevel.hasChunkAt',
+                'Sable.HELPER.getContaining(parentLevel, mutable) != null',
+                'PARENT_TARGET_RESOLVED',
+                'OTHER_SABLE_BODY_UNSUPPORTED',
+                'NO_BREAKABLE_PARENT_TARGET'
         ].each { canary ->
             if (!text.contains(canary)) {
                 throw new GradleException("M16 SubLevelBlockBreakingUtility lost coordinate-contract canary: ${canary}")
             }
         }
-        logger.lifecycle('verifyM16SubLevelBlockBreakingUtilityBoundary PASS: helper selects real storage targets through explicit local/visible/sublevel transforms')
+        logger.lifecycle('verifyM16SubLevelBlockBreakingUtilityBoundary PASS: historical M16 helper is consolidated into the M31 parent-world-only mutation boundary')
     }
 }
 
@@ -13412,8 +13420,9 @@ tasks.register('verifyM18RegressionBoundary') {
                 throw new GradleException("M18 must preserve visible-space render invariant: ${canary}")
             }
         }
-        if (!blockBreaking.contains('M16 coordinate contract')) {
-            throw new GradleException('M18 must preserve the closed M16 block-breaking utility boundary')
+        if (!blockBreaking.contains('findExternalTarget')
+                || !blockBreaking.contains('Decision.PARENT_TARGET_RESOLVED')) {
+            throw new GradleException('M18 must preserve the consolidated M16/M31 block-breaking utility boundary')
         }
         ['GearboxRendererMixin', 'SplitShaftRendererMixin', 'GantryContraptionUpdatePacketMixin', 'BlockBreakingMovementBehaviourMixin', 'DeployerRendererMixin', 'DeployerMovementBehaviourRenderMixin'].each { canary ->
             if (!config.contains(canary)) {
@@ -30161,5 +30170,410 @@ tasks.register('verifySableProductionBaseline') {
     dependsOn tasks.named('verifyM30ProductionConsolidationBoundary')
     doLast {
         logger.lifecycle('verifySableProductionBaseline PASS: M13/M14/M22/M24/M27/M28/M29 production contract retained')
+    }
+}
+
+tasks.register('verifyM31CreateActorWorldMutation') {
+    group = 'forge backport'
+    description = 'Executes M31 Mechanical Drill parent-world targeting math and verifies the exact Create actor boundary.'
+    dependsOn tasks.named('compileJava')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+
+    File geometry = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/CreateActorTargetGeometry.java')
+    File targetState = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/ExternalBlockBreakingTargetState.java')
+    File resolver = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SubLevelBlockBreakingUtility.java')
+    File trace = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SableM31CreateActorTrace.java')
+    File mixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java')
+    File flags = rootProject.file('common/src/main/java/dev/ryanhcode/sable/util/SableDiagnosticFlags.java')
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    File documentation = rootProject.file('M31_CREATE_ACTOR_WORLD_MUTATION.md')
+    File test = file(
+            'src/m31ActorTest/java/dev/ryanhcode/sable/compatibility/create/block_breakers/M31CreateActorTargetGeometryTest.java')
+    inputs.files(geometry, targetState, resolver, trace, mixin, flags, mixinConfig, documentation, test,
+            targetCreateJar)
+    outputs.dir(layout.buildDirectory.dir('m31CreateActorTest'))
+
+    doLast {
+        String geometrySource = geometry.getText('UTF-8')
+        String targetStateSource = targetState.getText('UTF-8')
+        String resolverSource = resolver.getText('UTF-8')
+        String traceSource = trace.getText('UTF-8')
+        String mixinSource = mixin.getText('UTF-8')
+        String flagsSource = flags.getText('UTF-8')
+        String configSource = mixinConfig.getText('UTF-8')
+        String doc = documentation.getText('UTF-8')
+
+        ['ownerPose.transformPosition(actorStorageCenter)',
+         'ownerPose.transformNormal(storageDirection).normalize()',
+         'visibleMiningBounds.transform(ownerPose, visibleMiningBounds)'].each { token ->
+            if (!geometrySource.contains(token)) {
+                throw new GradleException("M31 actor geometry lost ${token}")
+            }
+        }
+        ['parentLevel.hasChunkAt(mutable)',
+         'Sable.HELPER.getAllIntersecting',
+         'Sable.HELPER.getContaining(parentLevel, mutable) != null',
+         'Decision.PARENT_TARGET_RESOLVED',
+         'Decision.OTHER_SABLE_BODY_UNSUPPORTED',
+         'return new TargetResolution(null'].each { token ->
+            if (!resolverSource.contains(token)) {
+                throw new GradleException("M31 external target resolver lost ${token}")
+            }
+        }
+        if (resolverSource.contains('return proposed')) {
+            throw new GradleException('M31 resolver must not fall back to a raw proposal')
+        }
+        if (!resolverSource.contains('if (intersecting != owner)')
+                || !resolverSource.contains('Decision.OTHER_SABLE_BODY_UNSUPPORTED')) {
+            throw new GradleException('M31 must reject another Sable body without traversing its storage')
+        }
+        ['instanceof DrillMovementBehaviour',
+         'original.call(context, proposedRaw)',
+         'original.call(context, resolution.target())',
+         'this.getActiveAreaOffset(context)).normalize()',
+         'ExternalBlockBreakingTargetState.transition',
+         'context.world.destroyBlockProgress',
+         '@Inject(method = "destroyBlock", at = @At("HEAD"))'].each { token ->
+            if (!mixinSource.contains(token)) {
+                throw new GradleException("M31 Drill boundary lost ${token}")
+            }
+        }
+        if (mixinSource.contains('context.world =') || mixinSource.contains('Level.destroyBlock(')) {
+            throw new GradleException('M31 must preserve Create world ownership and may not globally redirect mutation')
+        }
+        ['START', 'STOP', 'RETARGET', 'UNCHANGED'].each { token ->
+            if (!targetStateSource.contains(token)) {
+                throw new GradleException("M31 target transition contract lost ${token}")
+            }
+        }
+        if (!flagsSource.contains('sable.m31.traceCreateActors')
+                || !traceSource.contains('if (!SableDiagnosticFlags.TRACE_CREATE_ACTORS)')
+                || !traceSource.contains('new WeakHashMap<>()')) {
+            throw new GradleException('M31 diagnostics must be explicitly gated and weakly bounded')
+        }
+        ['ACTOR_DISCOVERED', 'TARGET_RESOLVED', 'TARGET_CHANGED', 'BREAK_PROGRESS_STARTED',
+         'BREAK_PROGRESS_RESET', 'BLOCK_MUTATION_ATTEMPT', 'BLOCK_MUTATION_SUCCESS',
+         'BLOCK_MUTATION_REJECTED'].each { token ->
+            if (!traceSource.contains(token) && !mixinSource.contains(token)) {
+                throw new GradleException("M31 bounded trace lost ${token}")
+            }
+        }
+        if (!configSource.contains(
+                'compatibility.create.behaviour_compatibility.block_breaking_behaviour.BlockBreakingMovementBehaviourMixin')) {
+            throw new GradleException('M31 block-breaking mixin is not registered')
+        }
+        ['B: partially implemented', 'ACTOR_LOCAL', 'SABLE_RAW', 'PARENT_VISIBLE', 'PARENT_BLOCK',
+         'BlockHelper.destroyBlock', 'Mechanical Drill', 'Runtime Acceptance'].each { token ->
+            if (!doc.contains(token)) {
+                throw new GradleException("M31 architecture document lost ${token}")
+            }
+        }
+
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing Create 6.0.8 jar: ${targetCreateJar}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            Map<String, List<String>> canaries = [
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.class': [
+                            'tickActors', 'shouldActorTrigger', 'visitNewPosition', 'toGlobalVector'
+                    ],
+                    'com/simibubi/create/content/kinetics/drill/DrillMovementBehaviour.class': [
+                            'BlockBreakingMovementBehaviour', 'getActiveAreaOffset', 'canBreak', 'TRACKS'
+                    ],
+                    'com/simibubi/create/content/kinetics/base/BlockBreakingMovementBehaviour.class': [
+                            'visitNewPosition', 'tickBreaker', 'BreakingPos', 'Progress', 'BreakerId',
+                            'BlockHelper', 'destroyBlock'
+                    ]
+            ]
+            canaries.each { entryName, tokens ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("Create 6.0.8 M31 class missing: ${entryName}")
+                String classText = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                tokens.each { token ->
+                    if (!classText.contains(token)) {
+                        throw new GradleException("Create 6.0.8 ${entryName} lost ${token}")
+                    }
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        File output = layout.buildDirectory.dir('m31CreateActorTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M31 actor test requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath, test.absolutePath)
+        if (result != 0) throw new GradleException('M31 actor geometry test compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass(
+                    'dev.ryanhcode.sable.compatibility.create.block_breakers.M31CreateActorTargetGeometryTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M31 actor geometry regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM31CreateActorWorldMutation PASS: Drill targets stay parent-visible, rotated bounds are eight-corner safe, target changes reset, and Create owns mutation semantics')
+    }
+}
+
+tasks.register('verifyM32CreateWorldInteractionActors') {
+    group = 'forge backport'
+    description = 'Executes M32 Saw/Harvester/Plough targeting math and verifies exact Create 6.0.8 mutation boundaries.'
+    dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('verifyM31CreateActorWorldMutation')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+
+    File geometry = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/CreateActorTargetGeometry.java')
+    File resolver = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SubLevelBlockBreakingUtility.java')
+    File contextScope = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SableCreateActorWorldContext.java')
+    File breakerMixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java')
+    File sawMixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/SawMovementBehaviourMixin.java')
+    File harvesterMixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/harvester_behaviour/HarvesterMovementBehaviourMixin.java')
+    File ploughMixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/plough_behaviour/PloughMovementBehaviourMixin.java')
+    File drillRenderMixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/drill_rendering/DrillMovementBehaviourMixin.java')
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    File architecture = rootProject.file('M32_CREATE_WORLD_INTERACTION_ACTORS.md')
+    File commands = rootProject.file('M32_RUNTIME_TEST_COMMANDS.md')
+    File test = file(
+            'src/m32ActorTest/java/dev/ryanhcode/sable/compatibility/create/block_breakers/M32CreateActorTargetGeometryTest.java')
+    inputs.files(geometry, resolver, contextScope, breakerMixin, sawMixin, harvesterMixin, ploughMixin,
+            drillRenderMixin, mixinConfig, architecture, commands, test, targetCreateJar)
+    outputs.dir(layout.buildDirectory.dir('m32CreateActorTest'))
+
+    doLast {
+        String geometrySource = geometry.getText('UTF-8')
+        String resolverSource = resolver.getText('UTF-8')
+        String contextSource = contextScope.getText('UTF-8')
+        String breakerSource = breakerMixin.getText('UTF-8')
+        String sawSource = sawMixin.getText('UTF-8')
+        String harvesterSource = harvesterMixin.getText('UTF-8')
+        String ploughSource = ploughMixin.getText('UTF-8')
+        String drillRenderSource = drillRenderMixin.getText('UTF-8')
+        String configSource = mixinConfig.getText('UTF-8')
+        String architectureDoc = architecture.getText('UTF-8')
+        String commandDoc = commands.getText('UTF-8')
+
+        ['resolvePoint', 'ownerPose.transformPosition(actorStoragePoint)',
+         'ownerPose.transformNormal(storageDirection).normalize()'].each { token ->
+            if (!geometrySource.contains(token)) {
+                throw new GradleException("M32 point geometry lost ${token}")
+            }
+        }
+        ['findExternalPointTarget', 'parentLevel.hasChunkAt(parentTarget)',
+         'Sable.HELPER.getContaining(parentLevel, parentTarget) != null',
+         'Sable.HELPER.getAllIntersecting', 'intersecting != owner',
+         'Decision.OTHER_SABLE_BODY_UNSUPPORTED'].each { token ->
+            if (!resolverSource.contains(token)) {
+                throw new GradleException("M32 coordinate safety lost ${token}")
+            }
+        }
+        if (resolverSource.contains('return proposedRaw') || resolverSource.contains('return parentTargetRaw')) {
+            throw new GradleException('M32 resolver must not fall back to hidden raw coordinates')
+        }
+        ['SableCreateActorWorldContext.owner(context)', 'enterParentSpace(context, owner)',
+         'owner.lastPose().transformPosition(previousRawPosition)',
+         'owner.logicalPose().transformNormal(rawRelativeMotion)',
+         'this.context.position = this.rawPosition'].each { token ->
+            if (!contextSource.contains(token) && !sawSource.contains(token)
+                    && !harvesterSource.contains(token) && !ploughSource.contains(token)) {
+                throw new GradleException("M32 parent context scope lost ${token}")
+            }
+        }
+        ['instanceof DrillMovementBehaviour', 'instanceof SawMovementBehaviour',
+         'instanceof PloughMovementBehaviour', 'findExternalPointTarget',
+         'findExternalTarget', 'ExternalBlockBreakingTargetState.transition',
+         'original.call(context, proposedRaw)'].each { token ->
+            if (!breakerSource.contains(token)) {
+                throw new GradleException("M32 breaker adapter lost ${token}")
+            }
+        }
+        ['dropItemFromCutTree', 'enterParentSpace(context, owner)',
+         'original.call(context, dropPos, stack)'].each { token ->
+            if (!sawSource.contains(token)) {
+                throw new GradleException("M32 Saw adapter lost ${token}")
+            }
+        }
+        ['HarvesterMovementBehaviour', 'visitNewPosition', 'findExternalPointTarget',
+         'SableExternalActorTarget', 'NbtUtils.writeBlockPos',
+         'enterParentSpace(context, owner)', 'original.call(context, proposedRaw)'].each { token ->
+            if (!harvesterSource.contains(token)) {
+                throw new GradleException("M32 Harvester adapter lost ${token}")
+            }
+        }
+        ['PloughMovementBehaviour', 'visitNewPosition', 'resolution.target().below()',
+         'findExternalPointTarget', 'original.call(context, resolution.target())',
+         'onBlockBroken', 'enterParentSpace(context, owner)', 'original.call(context, proposedRaw)'].each { token ->
+            if (!ploughSource.contains(token)) {
+                throw new GradleException("M32 Plough adapter lost ${token}")
+            }
+        }
+        if ([breakerSource, sawSource, harvesterSource, ploughSource].any {
+            it.contains('context.world =') || it.contains('Level.destroyBlock(')
+        }) {
+            throw new GradleException('M32 must not globally redirect Level ownership or mutation')
+        }
+        if (!drillRenderSource.contains('sableContraption && SableDiagnosticFlags.TRACE_CREATE_ACTORS')) {
+            throw new GradleException('M32 must keep the historical M16 drill render probe debug-gated')
+        }
+        ['block_breaking_behaviour.SawMovementBehaviourMixin',
+         'harvester_behaviour.HarvesterMovementBehaviourMixin',
+         'plough_behaviour.PloughMovementBehaviourMixin'].each { token ->
+            if (!configSource.contains(token)) {
+                throw new GradleException("M32 mixin registration lost ${token}")
+            }
+        }
+        ['classification A', 'classification B', 'classification C',
+         'ACTOR_LOCAL', 'SABLE_RAW', 'PARENT_VISIBLE', 'PARENT_BLOCK',
+         'TreeCutter.findTree', 'BlockHelper.destroyBlockAs', 'ItemStack.useOn',
+         'Deployer is deliberately deferred'].each { token ->
+            if (!architectureDoc.contains(token)) {
+                throw new GradleException("M32 architecture document lost ${token}")
+            }
+        }
+
+        Map<String, List<String>> commandTokens = [
+                saw: ['/give @s create:mechanical_saw 1',
+                      'create:mechanical_saw[axis_along_first=false,facing=east,flipped=false]',
+                      'minecraft:oak_log[axis=y]'],
+                harvester: ['/give @s create:mechanical_harvester 1',
+                            'create:mechanical_harvester[facing=east,waterlogged=false]',
+                            'minecraft:farmland[moisture=7]', 'minecraft:wheat[age=7]'],
+                plough: ['/give @s create:mechanical_plough 1',
+                         'create:mechanical_plough[facing=east,waterlogged=false]',
+                         'minecraft:dirt'],
+                support: ['/give @s create:sticky_mechanical_piston 1',
+                          '/give @s create:piston_extension_pole 4',
+                          '/give @s create:radial_chassis 4',
+                          '/give @s create:super_glue 1',
+                          '/give @s simulated:physics_assembler 1']
+        ]
+        commandTokens.each { section, tokens ->
+            tokens.each { token ->
+                if (!commandDoc.contains(token)) {
+                    throw new GradleException("M32 ${section} runtime fixture lost ${token}")
+                }
+            }
+        }
+
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing Create 6.0.8 jar: ${targetCreateJar}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            Map<String, List<String>> canaries = [
+                    'com/simibubi/create/content/kinetics/saw/SawMovementBehaviour.class': [
+                            'BlockBreakingMovementBehaviour', 'TreeCutter', 'findTree',
+                            'dropItemFromCutTree', 'isSawable'
+                    ],
+                    'com/simibubi/create/content/contraptions/actors/harvester/HarvesterMovementBehaviour.class': [
+                            'visitNewPosition', 'isValidCrop', 'isValidOther', 'destroyBlockAs',
+                            'cutCrop', 'harvesterReplants'
+                    ],
+                    'com/simibubi/create/content/contraptions/actors/plough/PloughMovementBehaviour.class': [
+                            'BlockBreakingMovementBehaviour', 'visitNewPosition', 'below', 'ClipContext',
+                            'UseOnContext', 'PloughFakePlayer'
+                    ],
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.class': [
+                            'tickActors', 'toGlobalVector', 'visitNewPosition'
+                    ]
+            ]
+            canaries.each { entryName, tokens ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("Create 6.0.8 M32 class missing: ${entryName}")
+                String classText = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                tokens.each { token ->
+                    if (!classText.contains(token)) {
+                        throw new GradleException("Create 6.0.8 ${entryName} lost ${token}")
+                    }
+                }
+            }
+
+            Map<String, List<String>> blockstates = [
+                    'assets/create/blockstates/mechanical_saw.json': [
+                            'axis_along_first=false,facing=east,flipped=false'
+                    ],
+                    'assets/create/blockstates/mechanical_harvester.json': [
+                            'facing=east,waterlogged=false'
+                    ],
+                    'assets/create/blockstates/mechanical_plough.json': [
+                            'facing=east,waterlogged=false'
+                    ]
+            ]
+            blockstates.each { entryName, tokens ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("Create 6.0.8 fixture blockstate missing: ${entryName}")
+                String json = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.UTF_8)
+                tokens.each { token ->
+                    if (!json.contains(token)) {
+                        throw new GradleException("Create 6.0.8 fixture blockstate ${entryName} lost ${token}")
+                    }
+                }
+            }
+            ['mechanical_saw', 'mechanical_harvester', 'mechanical_plough', 'super_glue'].each { id ->
+                if (jar.getJarEntry("assets/create/models/item/${id}.json") == null) {
+                    throw new GradleException("Create 6.0.8 fixture item missing: create:${id}")
+                }
+            }
+            ['sticky_mechanical_piston', 'piston_extension_pole', 'radial_chassis',
+             'creative_motor', 'shaft'].each { id ->
+                if (jar.getJarEntry("assets/create/blockstates/${id}.json") == null) {
+                    throw new GradleException("Create 6.0.8 support block missing: create:${id}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        if (!rootProject.file('forge/src/main/resources/assets/simulated/models/item/physics_assembler.json').isFile()
+                || !rootProject.file('forge/src/main/resources/assets/simulated/blockstates/physics_assembler.json').isFile()) {
+            throw new GradleException('M32 fixture requires the registered simulated:physics_assembler item/block')
+        }
+
+        File output = layout.buildDirectory.dir('m32CreateActorTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M32 actor test requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath, test.absolutePath)
+        if (result != 0) throw new GradleException('M32 actor geometry test compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass(
+                    'dev.ryanhcode.sable.compatibility.create.block_breakers.M32CreateActorTargetGeometryTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M32 actor geometry regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM32CreateWorldInteractionActors PASS: Saw, Harvester, and Plough resolve current parent-visible targets while Create retains native mutation semantics')
     }
 }

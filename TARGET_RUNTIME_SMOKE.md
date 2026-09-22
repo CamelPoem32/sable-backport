@@ -4233,3 +4233,31 @@ whether the stationary image remains when the dynamic owner is suppressed.
 Minecraft is not launched by the build process. M28 mechanics remain PASS;
 assembled-sail rendering remains FAIL/PARTIAL until this A/B identifies and
 corrects the visible framebuffer owner.
+
+### M31 Mechanical Drill external-world mutation
+
+Launch normally, optionally with `-Dsable.m31.traceCreateActors=true`. Use a
+small Sable body carrying a real Create moving contraption with a Mechanical
+Drill at its edge. Put ordinary stone in the visible parent world, not in the
+hidden plot.
+
+1. With the assembled body stationary, advance the Drill and confirm the visible
+   parent block breaks while hidden storage remains unchanged.
+2. Translate the body and repeat at the new visible target.
+3. Rotate the body 90 degrees and confirm the target follows the rotated Drill
+   direction.
+4. Move the body slowly during progress and confirm the old crack target resets;
+   no stale block is destroyed.
+5. Disassemble and confirm the same normal-world Create Drill remains unchanged.
+
+Other-Sable-body contact is deliberately a no-op in M31. All five gates passed;
+M31 is closed.
+
+### M32 Saw, Harvester, and Plough parent-world interactions
+
+Use the exact `/give`, `/setblock`, `/fill`, reset, and cleanup commands in
+`M32_RUNTIME_TEST_COMMANDS.md`; no registry lookup is required. For each actor,
+run the normal-world moving-carriage control, assemble the outer Sable body,
+repeat while stationary, translated, rotated, and moving, then disassemble and
+repeat the control. Only visible parent-world targets may change. Deployer is not
+part of M32.
