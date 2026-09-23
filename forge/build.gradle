@@ -30889,3 +30889,130 @@ tasks.register('verifyM33_1DeployerMountedStorage') {
         logger.lifecycle('verifyM33_1DeployerMountedStorage PASS: native extraction retained, storage boundaries observable, fixture IDs and facing verified')
     }
 }
+
+tasks.register('verifyM34MovementBehaviourCoverage') {
+    group = 'forge backport'
+    description = 'Checks exhaustive Create 6.0.8 movement-behaviour registration coverage and scoped M34 actor hooks.'
+    dependsOn tasks.named('verifyM33_1DeployerMountedStorage')
+
+    File contact = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/contact_behaviour/ContactMovementBehaviourMixin.java')
+    File bell = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/haunted_bell_behaviour/HauntedBellMovementBehaviourMixin.java')
+    File mixins = file('src/main/resources/sable-common-forge.mixins.json')
+    File coverage = rootProject.file('M34_CREATE_MOVEMENT_BEHAVIOUR_COVERAGE.md')
+    File commands = rootProject.file('M34_RUNTIME_TEST_COMMANDS.md')
+    inputs.files(contact, bell, mixins, coverage, commands, targetCreateJar)
+
+    doLast {
+        def javap = { String className ->
+            File executable = new File(System.getProperty('java.home'), 'bin/javap.exe')
+            if (!executable.isFile()) throw new GradleException('M34 requires JDK javap')
+            def process = new ProcessBuilder(executable.absolutePath, '-classpath', targetCreateJar.absolutePath,
+                    '-c', '-p', className).redirectErrorStream(true).start()
+            String output = process.inputStream.getText('UTF-8')
+            if (process.waitFor() != 0) throw new GradleException("javap failed for ${className}: ${output}")
+            output
+        }
+
+        String blocks = javap('com.simibubi.create.AllBlocks')
+        String defaults = javap('com.simibubi.create.AllMovementBehaviours')
+        String doors = javap('com.simibubi.create.foundation.data.BuilderTransformers')
+        String registration = 'InterfaceMethod com/simibubi/create/api/behaviour/movement/MovementBehaviour.movementBehaviour:'
+        if (blocks.readLines().count { it.contains(registration) } != 21
+                || doors.readLines().count { it.contains(registration) } != 1
+                || defaults.readLines().count { it.contains('InterfaceMethod com/simibubi/create/api/registry/SimpleRegistry.register:') } != 5) {
+            throw new GradleException('Create movement-behaviour registration sites changed; update the M34 matrix')
+        }
+
+        Set<String> registered = new LinkedHashSet<>()
+        [blocks, doors].each { String listing ->
+            List<String> lines = listing.readLines()
+            lines.eachWithIndex { String line, int index ->
+                if (!line.contains(registration)) return
+                String prior = lines.subList(Math.max(0, index - 5), index).join(' ')
+                def constructed = prior =~ /class com\/simibubi\/create\/[^ ]+\/([A-Za-z]+(?:Behaviour|Behavior|Movement))/
+                def factory = prior =~ /Method com\/simibubi\/create\/[^ ]+\/(FunnelMovementBehaviour)\.(?:andesite|brass)/
+                registered.add(constructed.find() ? constructed.group(1)
+                        : factory.find() ? factory.group(1) : 'SeatMovementBehaviour')
+            }
+        }
+        ['BellMovementBehaviour', 'CampfireMovementBehaviour', 'DispenserMovementBehaviour',
+         'DropperMovementBehaviour'].each { registered.add(it) }
+        Set<String> expected = [
+                'BasinMovementBehaviour', 'BellMovementBehaviour', 'BlazeBurnerMovementBehaviour',
+                'CampfireMovementBehaviour', 'ContactMovementBehaviour', 'ContraptionControlsMovement',
+                'ControlsMovementBehaviour', 'DeployerMovementBehaviour', 'DispenserMovementBehaviour',
+                'DrillMovementBehaviour', 'DropperMovementBehaviour', 'FluidTankMovementBehavior',
+                'FunnelMovementBehaviour', 'HarvesterMovementBehaviour', 'HauntedBellMovementBehaviour',
+                'PloughMovementBehaviour', 'PortableStorageInterfaceMovement', 'RollerMovementBehaviour',
+                'SawMovementBehaviour', 'SeatMovementBehaviour', 'SlidingDoorMovementBehaviour',
+                'StabilizedBearingMovementBehaviour'
+        ] as Set
+        if (registered != expected) {
+            throw new GradleException("Create movement-behaviour classification incomplete: found=${registered} expected=${expected}")
+        }
+        String matrix = coverage.getText('UTF-8')
+        expected.each { String className ->
+            if (!matrix.contains(className)) throw new GradleException("M34 matrix omitted ${className}")
+        }
+
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            ['com/simibubi/create/content/redstone/contact/ContactMovementBehaviour.class':
+                     ['visitNewPosition', 'deactivateLastVisitedContact', 'lastContact', 'RedstoneContactBlock'],
+             'com/simibubi/create/content/equipment/bell/HauntedBellMovementBehaviour.class':
+                     ['visitNewPosition', 'sendPulse'],
+             'com/simibubi/create/content/contraptions/actors/roller/RollerMovementBehaviour.class':
+                     ['getPositionsToBreak', 'triggerPaver', 'tryFill'],
+             'com/simibubi/create/content/contraptions/actors/psi/PortableStorageInterfaceMovement.class':
+                     ['findInterface', 'getStationaryInterfaceAt']].each { entryName, tokens ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("Create 6.0.8 class missing: ${entryName}")
+                String bytes = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                tokens.each { token ->
+                    if (!bytes.contains(token)) throw new GradleException("Create 6.0.8 ${entryName} lost ${token}")
+                }
+            }
+            String contactStates = new String(jar.getInputStream(
+                    jar.getJarEntry('assets/create/blockstates/redstone_contact.json')).readAllBytes(),
+                    StandardCharsets.UTF_8)
+            if (!contactStates.contains('facing=east,powered=false')
+                    || !contactStates.contains('facing=west,powered=false')
+                    || !contactStates.contains('facing=west,powered=true')) {
+                throw new GradleException('M34 Contact fixture uses unavailable Create blockstates')
+            }
+            ['haunted_bell', 'redstone_contact'].each { id ->
+                if (jar.getJarEntry("assets/create/models/item/${id}.json") == null) {
+                    throw new GradleException("M34 fixture item is missing: create:${id}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        String contactSource = contact.getText('UTF-8')
+        String bellSource = bell.getText('UTF-8')
+        String mixinConfig = mixins.getText('UTF-8')
+        [contactSource, bellSource].each { source ->
+            ['@WrapMethod(method = "visitNewPosition")', 'SableCreateActorWorldContext.owner(context)',
+             'SubLevelBlockBreakingUtility.findExternalPointTarget', 'original.call(context, proposedRaw)',
+             'resolution.target()'].each { token ->
+                if (!source.contains(token)) throw new GradleException("M34 scoped actor hook lost ${token}")
+            }
+            if (source.contains('original.call(context, proposedRaw);\n        }')
+                    || source.contains('context.world.setBlock(')) {
+                throw new GradleException('M34 actor hook risks raw plot mutation')
+            }
+        }
+        if (!contactSource.contains('enterParentInteractionSpace')
+                || !contactSource.contains('deactivateLastVisitedContact(context)')
+                || !mixinConfig.contains('contact_behaviour.ContactMovementBehaviourMixin')
+                || !mixinConfig.contains('haunted_bell_behaviour.HauntedBellMovementBehaviourMixin')) {
+            throw new GradleException('M34 facing/state scope or Forge mixin registration is incomplete')
+        }
+        if (!commands.getText('UTF-8').contains('/give @s create:redstone_contact 2')
+                || !commands.getText('UTF-8').contains('/give @s create:haunted_bell 1')) {
+            throw new GradleException('M34 runtime fixture commands are incomplete')
+        }
+        logger.lifecycle('verifyM34MovementBehaviourCoverage PASS: all 22 behaviour classes / 27 registration sites classified; scoped Contact and Haunted Bell hooks verified')
+    }
+}
