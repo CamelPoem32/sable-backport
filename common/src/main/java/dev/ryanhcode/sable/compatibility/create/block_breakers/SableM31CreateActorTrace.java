@@ -7,8 +7,10 @@ import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
@@ -93,6 +95,50 @@ public final class SableM31CreateActorTrace {
         mutation(event, context, owner, target, state, decision, actorSpace);
     }
 
+    public static void deployerInteraction(final MovementContext context,
+                                           final SubLevel owner,
+                                           final BlockPos target,
+                                           final String mode,
+                                           final Vec3 actualFakePlayerPosition,
+                                           final CreateActorTargetGeometry.DeployerSpace deployerSpace,
+                                           final ItemStack heldBefore,
+                                           final ItemStack heldAfter,
+                                           final BlockState stateBefore,
+                                           final BlockState stateAfter) {
+        if (!SableDiagnosticFlags.TRACE_CREATE_ACTORS) {
+            return;
+        }
+
+        final TraceState trace = STATES.computeIfAbsent(context, ignored -> new TraceState());
+        final DeployerKey key = new DeployerKey(target, mode, itemKey(heldBefore));
+        final SubLevelBlockBreakingUtility.TargetResolution resolution =
+                new SubLevelBlockBreakingUtility.TargetResolution(target, stateAfter,
+                        deployerSpace.actorSpace(), SubLevelBlockBreakingUtility.Decision.PARENT_TARGET_RESOLVED);
+        if (!key.equals(trace.deployer)) {
+            trace.deployer = key;
+            log("FAKE_PLAYER_PREPARED", context, owner, target, resolution,
+                    "mode=" + mode
+                            + " fakePlayerPosition=" + format(actualFakePlayerPosition)
+                            + " expectedFakePlayerPosition=" + format(deployerSpace.fakePlayerPosition())
+                            + " rayStart=" + format(deployerSpace.rayStart())
+                            + " rayEnd=" + format(deployerSpace.rayEnd())
+                            + " clickedFace=" + deployerSpace.fallbackClickedFace()
+                            + " heldItem=" + itemKey(heldBefore));
+            log("INTERACTION_ATTEMPT", context, owner, target, resolution,
+                    "mode=" + mode + " decision=NATIVE_CREATE_DEPLOYER_HANDLER");
+        }
+        if (!itemKey(heldBefore).equals(itemKey(heldAfter))) {
+            log("HELD_ITEM_CHANGED", context, owner, target, resolution,
+                    "mode=" + mode + " heldBefore=" + itemKey(heldBefore)
+                            + " heldAfter=" + itemKey(heldAfter));
+        }
+        if (!stateBefore.equals(stateAfter)) {
+            log("INTERACTION_SUCCESS", context, owner, target, resolution,
+                    "mode=" + mode + " stateBefore=" + BuiltInRegistries.BLOCK.getKey(stateBefore.getBlock())
+                            + " stateAfter=" + BuiltInRegistries.BLOCK.getKey(stateAfter.getBlock()));
+        }
+    }
+
     private static void log(final String event,
                             final MovementContext context,
                             final SubLevel owner,
@@ -147,11 +193,20 @@ public final class SableM31CreateActorTrace {
     private static final class TraceState {
         private boolean discovered;
         private TargetKey target;
+        private DeployerKey deployer;
     }
 
     private record TargetKey(@Nullable BlockPos target, SubLevelBlockBreakingUtility.Decision decision) {
         private TargetKey {
             Objects.requireNonNull(decision, "decision");
         }
+    }
+
+    private static String itemKey(final ItemStack stack) {
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()) + "x" + stack.getCount()
+                + "@" + stack.getDamageValue();
+    }
+
+    private record DeployerKey(BlockPos target, String mode, String heldItem) {
     }
 }

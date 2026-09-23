@@ -4260,4 +4260,15 @@ Use the exact `/give`, `/setblock`, `/fill`, reset, and cleanup commands in
 run the normal-world moving-carriage control, assemble the outer Sable body,
 repeat while stationary, translated, rotated, and moving, then disassemble and
 repeat the control. Only visible parent-world targets may change. Deployer is not
-part of M32.
+part of M32. All M32 gates passed; M32 is closed.
+
+### M33 Deployer parent-world interaction
+
+Use the exact commands and minimal manual steps in
+`M33_RUNTIME_TEST_COMMANDS.md`. Run the block-placement, lever-activation, and
+PUNCH block-breaking fixtures first in normal world, then in stationary,
+translated, and 90-degree-rotated Sable, and finally after disassembly. Native
+Create item counts, tool durability, progress/stall, and mounted storage must
+remain authoritative. Only the visible parent target may change; hidden storage
+and another Sable body are never fallback targets. Optional bounded tracing uses
+`-Dsable.m31.traceCreateActors=true`. M33 remains runtime pending.

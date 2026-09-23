@@ -13126,11 +13126,12 @@ tasks.register('verifyM18DeployerWorldInteractionBoundary') {
         [
                 '@Mixin(targets = "com.simibubi.create.content.kinetics.deployer.DeployerMovementBehaviour", remap = false)',
                 '@WrapMethod(method = "visitNewPosition")',
-                'Sable.HELPER.getContaining(context.world, context.contraption.anchor)',
-                'original.call(context, pos)',
-                'SubLevelDeployerInteractionUtility.findInteractionPos',
-                'original.call(context, selectedPos)',
-                'sable$isUseMode'
+                '@WrapMethod(method = "activate")',
+                'SableCreateActorWorldContext.owner(context)',
+                'original.call(context, proposedRaw)',
+                'SubLevelDeployerInteractionUtility.resolveExternalTarget',
+                'original.call(context, resolution.target())',
+                'enterParentInteractionSpace(context, owner)'
         ].each { canary ->
             if (!mixin.contains(canary)) {
                 throw new GradleException("M18 Deployer movement mixin lost required canary: ${canary}")
@@ -13146,20 +13147,9 @@ tasks.register('verifyM18DeployerWorldInteractionBoundary') {
         }
         [
                 'SubLevelDeployerInteractionUtility',
-                'M18 coordinate contract',
-                'findInteractionPos',
-                'actorStorageCenter',
-                'actorSubLevelLocalCenter',
-                'ownerStorageInteractionBox',
-                'visibleInteractionCenter',
-                'candidate_selected',
-                'candidate_fallback_original',
-                'validInteractionTarget',
-                'safeBlockState',
-                'level.hasChunkAt(pos)',
-                'wouldGenerateChunk=false',
-                'Sable.HELPER.getAllIntersecting',
-                'selectedFixtureLocal'
+                'resolveExternalTarget',
+                'SubLevelBlockBreakingUtility.findExternalPointTarget',
+                'CreateActorTargetGeometry.ActorSpace'
         ].each { canary ->
             if (!utility.contains(canary)) {
                 throw new GradleException("M18 Deployer target utility lost required canary: ${canary}")
@@ -13222,7 +13212,7 @@ tasks.register('verifyM18DeployerWorldInteractionBoundary') {
             jar.close()
         }
 
-        logger.lifecycle('verifyM18DeployerWorldInteractionBoundary PASS: moving Deployer target adaptation is Sable-only and leaves Create fake-player semantics authoritative')
+        logger.lifecycle('verifyM18DeployerWorldInteractionBoundary PASS: historical Deployer hook now uses the M33 parent-visible target boundary and leaves Create fake-player semantics authoritative')
     }
 }
 
@@ -13457,26 +13447,24 @@ tasks.register('verifyM18DeployerCrashAndRenderingBoundary') {
         String status = rootProject.file('BACKPORT_STATUS.md').getText('UTF-8')
 
         [
-                'actorStorageCenter',
-                'actorSubLevelLocalCenter',
-                'interactionStorageCenter',
-                'ownerStorageInteractionBox',
-                'visibleCenter(storage, raw)',
-                'level.hasChunkAt(pos)',
-                'safeBlockState',
-                'wouldGenerateChunk=false'
+                'resolveExternalTarget',
+                'SubLevelBlockBreakingUtility.findExternalPointTarget',
+                'CreateActorTargetGeometry.ActorSpace',
+                'final SubLevel owner',
+                'final Level parentLevel'
         ].each { canary ->
             if (!utility.contains(canary)) {
-                throw new GradleException("M18.1 coordinate crash utility lost canary: ${canary}")
+                throw new GradleException("M18.1/M33 coordinate utility lost canary: ${canary}")
             }
         }
         [
                 'getPlot().getCenterBlock().offset(mutable',
                 'level.getBlockState(raw);',
-                'level.getBlockState(proposed);'
+                'level.getBlockState(proposed);',
+                'findBestCandidate'
         ].each { forbidden ->
             if (utility.contains(forbidden)) {
-                throw new GradleException("M18.1 must not reintroduce double-offset or generating block-state probes: ${forbidden}")
+                throw new GradleException("M18.1/M33 must not reintroduce raw candidate probes: ${forbidden}")
             }
         }
 
@@ -13486,6 +13474,7 @@ tasks.register('verifyM18DeployerCrashAndRenderingBoundary') {
                 'VisualizationManager;supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
                 'Sable.HELPER.getContainingClient(blockEntity) != null',
                 'sableSubLevel ? false : originalVisualizationSupported',
+                'SableDiagnosticFlags.TRACE_CREATE_ACTORS',
                 'SABLE_M18_DEPLOYER_RENDER',
                 'Create_DeployerRenderer_renderComponents',
                 'hiddenPlotPoseTranslation=false'
@@ -13500,6 +13489,7 @@ tasks.register('verifyM18DeployerCrashAndRenderingBoundary') {
                 'VisualizationManager;supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
                 'SableCreateContraptionContext.getContainingSubLevel(entity)',
                 'sableContraption ? false : originalVisualizationSupported',
+                'SableDiagnosticFlags.TRACE_CREATE_ACTORS',
                 'Create_DeployerRenderer_renderInContraption',
                 'hiddenPlotPoseTranslation=false'
         ].each { canary ->
@@ -13570,7 +13560,7 @@ tasks.register('verifyM18DeployerCrashAndRenderingBoundary') {
             jar.close()
         }
 
-        logger.lifecycle('verifyM18DeployerCrashAndRenderingBoundary PASS: no double plot offset/generating probes, Sable-only Deployer arm BER/actor fallback, and hidden-coordinate invariant are guarded')
+        logger.lifecycle('verifyM18DeployerCrashAndRenderingBoundary PASS: M33 parent-visible target delegation, gated Sable-only Deployer arm BER/actor fallback, and hidden-coordinate invariant are guarded')
     }
 }
 
@@ -30575,5 +30565,327 @@ tasks.register('verifyM32CreateWorldInteractionActors') {
             loader.close()
         }
         logger.lifecycle('verifyM32CreateWorldInteractionActors PASS: Saw, Harvester, and Plough resolve current parent-visible targets while Create retains native mutation semantics')
+    }
+}
+
+tasks.register('verifyM33DeployerParentWorldInteraction') {
+    group = 'forge backport'
+    description = 'Executes M33 Deployer parent-world pose/ray tests and verifies exact Create 6.0.8 fake-player boundaries.'
+    dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('verifyM32CreateWorldInteractionActors')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+
+    File geometry = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/CreateActorTargetGeometry.java')
+    File resolver = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SubLevelBlockBreakingUtility.java')
+    File contextScope = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SableCreateActorWorldContext.java')
+    File utility = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/SubLevelDeployerInteractionUtility.java')
+    File mixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/deployer/DeployerMovementBehaviourMixin.java')
+    File trace = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SableM31CreateActorTrace.java')
+    File movementRenderMixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerMovementBehaviourRenderMixin.java')
+    File rendererMixin = rootProject.file(
+            'common/src/main/java/dev/ryanhcode/sable/mixin/m18/create/DeployerRendererMixin.java')
+    File mixinConfig = file('src/main/resources/sable-common-forge.mixins.json')
+    File architecture = rootProject.file('M33_DEPLOYER_PARENT_WORLD_INTERACTION.md')
+    File commands = rootProject.file('M33_RUNTIME_TEST_COMMANDS.md')
+    File test = file(
+            'src/m33DeployerTest/java/dev/ryanhcode/sable/compatibility/create/block_breakers/M33DeployerInteractionGeometryTest.java')
+    inputs.files(geometry, resolver, contextScope, utility, mixin, trace, movementRenderMixin,
+            rendererMixin, mixinConfig, architecture, commands, test, targetCreateJar)
+    outputs.dir(layout.buildDirectory.dir('m33DeployerTest'))
+
+    doLast {
+        String geometrySource = geometry.getText('UTF-8')
+        String resolverSource = resolver.getText('UTF-8')
+        String contextSource = contextScope.getText('UTF-8')
+        String utilitySource = utility.getText('UTF-8')
+        String mixinSource = mixin.getText('UTF-8')
+        String traceSource = trace.getText('UTF-8')
+        String renderSource = movementRenderMixin.getText('UTF-8') + rendererMixin.getText('UTF-8')
+        String configSource = mixinConfig.getText('UTF-8')
+        String architectureDoc = architecture.getText('UTF-8')
+        String commandDoc = commands.getText('UTF-8')
+
+        ['resolveDeployer', 'ownerPose.transformPosition(actorStoragePoint)',
+         'ownerPose.transformNormal(storageDirection).normalize()',
+         'fakePlayerPosition.add(visibleDirection.scale(1.515625))',
+         'fakePlayerPosition.add(visibleDirection.scale(2.484375))',
+         'Direction.getNearest(', 'getOpposite()', 'BlockPos.containing(actorSpace.visibleCenter())'].each { token ->
+            if (!geometrySource.contains(token)) {
+                throw new GradleException("M33 Deployer geometry lost ${token}")
+            }
+        }
+        ['findExternalPointTarget', 'parentLevel.hasChunkAt(parentTarget)',
+         'Sable.HELPER.getContaining(parentLevel, parentTarget) != null',
+         'Decision.OTHER_SABLE_BODY_UNSUPPORTED'].each { token ->
+            if (!resolverSource.contains(token)) {
+                throw new GradleException("M33 target safety lost ${token}")
+            }
+        }
+        if (resolverSource.contains('return proposedRaw') || utilitySource.contains('findBestCandidate')) {
+            throw new GradleException('M33 Deployer resolver must not retain a hidden-plot fallback')
+        }
+        ['enterParentInteractionSpace', 'final UnaryOperator<Vec3> rawRotation = context.rotation',
+         'owner.logicalPose().transformNormal(rawRotation.apply(vector))',
+         'this.context.position = this.rawPosition', 'this.context.motion = this.rawMotion',
+         'this.context.relativeMotion = this.rawRelativeMotion',
+         'this.context.rotation = this.rawRotation'].each { token ->
+            if (!contextSource.contains(token)) {
+                throw new GradleException("M33 exception-safe context scope lost ${token}")
+            }
+        }
+        ['@WrapMethod(method = "visitNewPosition")', '@WrapMethod(method = "activate")',
+         'SableCreateActorWorldContext.owner(context)', 'original.call(context, proposedRaw)',
+         'original.call(context, resolution.target())', 'enterParentInteractionSpace(context, owner)',
+         'original.call(context, parentTarget, player, mode)', 'try ('].each { token ->
+            if (!mixinSource.contains(token)) {
+                throw new GradleException("M33 narrow Deployer hook lost ${token}")
+            }
+        }
+        if (mixinSource.contains('context.world =') || mixinSource.contains('player.level =')
+                || mixinSource.contains('DeployerHandler.activate(')
+                || mixinSource.contains('Level.setBlock(') || mixinSource.contains('Level.destroyBlock(')) {
+            throw new GradleException('M33 must not replace worlds or duplicate native interaction/mutation')
+        }
+        if (!utilitySource.contains('SubLevelBlockBreakingUtility.findExternalPointTarget')) {
+            throw new GradleException('M33 utility must be a thin point-target adapter')
+        }
+        if (!traceSource.contains('deployerInteraction')
+                || !traceSource.contains('if (!SableDiagnosticFlags.TRACE_CREATE_ACTORS)')
+                || !traceSource.contains('FAKE_PLAYER_PREPARED')
+                || !traceSource.contains('HELD_ITEM_CHANGED')) {
+            throw new GradleException('M33 Deployer diagnostics must remain bounded and explicitly gated')
+        }
+        if (!renderSource.contains('SableDiagnosticFlags.TRACE_CREATE_ACTORS')) {
+            throw new GradleException('M33 must keep historical M18 render diagnostics gated')
+        }
+        ['compatibility.create.deployer.DeployerMovementBehaviourMixin',
+         'm18.create.DeployerRendererMixin',
+         'm18.create.DeployerMovementBehaviourRenderMixin'].each { token ->
+            if (!configSource.contains(token)) {
+                throw new GradleException("M33 mixin registration lost ${token}")
+            }
+        }
+
+        ['D1 item use on block: supported', 'D2 block placement: supported',
+         'D3 block activation: supported', 'D4 block punch/break: supported',
+         'D5 entity interaction: supported', 'D6 entity attack: supported',
+         'ACTOR_LOCAL', 'SABLE_RAW', 'PARENT_VISIBLE', 'PARENT_BLOCK',
+         'DeployerFakePlayer', 'UseOnContext', 'BlockHitResult', 'tryGrabbingItem',
+         'tryDisposeOfExcess', 'writeExtraData'].each { token ->
+            if (!architectureDoc.contains(token)) {
+                throw new GradleException("M33 architecture document lost ${token}")
+            }
+        }
+        Map<String, List<String>> commandTokens = [
+                deployer: ['/give @s create:deployer 3', '/give @s create:wrench 1',
+                           'create:deployer[axis_along_first=false,facing=east]'],
+                placement: ['/item replace block ~ ~ ~ container.0 with minecraft:cobblestone 64',
+                            '/setblock ~ ~-1 ~ minecraft:stone'],
+                interaction: ['minecraft:lever[face=floor,facing=north,powered=false]',
+                              '/item replace block ~ ~ ~ container.0 with minecraft:air'],
+                punch: ['/item replace block ~ ~ ~ container.0 with minecraft:iron_pickaxe 1',
+                        'change from Using to Punching'],
+                support: ['/give @s create:sticky_mechanical_piston 1',
+                          '/give @s create:piston_extension_pole 4',
+                          '/give @s create:radial_chassis 4',
+                          '/give @s create:super_glue 1',
+                          '/give @s simulated:physics_assembler 1']
+        ]
+        commandTokens.each { section, tokens ->
+            tokens.each { token ->
+                if (!commandDoc.contains(token)) {
+                    throw new GradleException("M33 ${section} runtime fixture lost ${token}")
+                }
+            }
+        }
+
+        if (!targetCreateJar.isFile()) {
+            throw new GradleException("Missing Create 6.0.8 jar: ${targetCreateJar}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            Map<String, List<String>> canaries = [
+                    'com/simibubi/create/content/contraptions/AbstractContraptionEntity.class': [
+                            'tickActors', 'toGlobalVector', 'visitNewPosition'
+                    ],
+                    'com/simibubi/create/content/kinetics/deployer/DeployerMovementBehaviour.class': [
+                            'visitNewPosition', 'activate', 'getPlayer', 'getMode',
+                            'tryGrabbingItem', 'tryDisposeOfExcess', 'writeExtraData',
+                            'HeldItem', 'Inventory', 'blockBreakingProgress'
+                    ],
+                    'com/simibubi/create/content/kinetics/deployer/DeployerHandler.class': [
+                            'activate', 'activateInner', 'UseOnContext', 'BlockHitResult',
+                            'onRightClickBlock', 'onLeftClickBlock', 'tryHarvestBlock',
+                            'onInteractEntity'
+                    ],
+                    'com/simibubi/create/content/kinetics/deployer/DeployerFakePlayer.class': [
+                            'ServerLevel', 'blockBreakingProgress'
+                    ]
+            ]
+            canaries.each { entryName, tokens ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("Create 6.0.8 M33 class missing: ${entryName}")
+                String classText = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                tokens.each { token ->
+                    if (!classText.contains(token)) {
+                        throw new GradleException("Create 6.0.8 ${entryName} lost ${token}")
+                    }
+                }
+            }
+
+            def deployerState = jar.getJarEntry('assets/create/blockstates/deployer.json')
+            if (deployerState == null) {
+                throw new GradleException('Create 6.0.8 fixture blockstate missing: create:deployer')
+            }
+            String deployerJson = new String(jar.getInputStream(deployerState).readAllBytes(), StandardCharsets.UTF_8)
+            if (!deployerJson.contains('axis_along_first=false,facing=east')) {
+                throw new GradleException('Create 6.0.8 deployer blockstate lost the verified east-facing fixture variant')
+            }
+            ['deployer', 'wrench'].each { id ->
+                if (jar.getJarEntry("assets/create/models/item/${id}.json") == null) {
+                    throw new GradleException("Create 6.0.8 fixture item missing: create:${id}")
+                }
+            }
+            ['sticky_mechanical_piston', 'piston_extension_pole', 'radial_chassis',
+             'creative_motor', 'shaft'].each { id ->
+                if (jar.getJarEntry("assets/create/blockstates/${id}.json") == null) {
+                    throw new GradleException("Create 6.0.8 support block missing: create:${id}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        if (!rootProject.file('forge/src/main/resources/assets/simulated/models/item/physics_assembler.json').isFile()
+                || !rootProject.file('forge/src/main/resources/assets/simulated/blockstates/physics_assembler.json').isFile()) {
+            throw new GradleException('M33 fixture requires simulated:physics_assembler')
+        }
+
+        File output = layout.buildDirectory.dir('m33DeployerTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M33 Deployer test requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath, test.absolutePath)
+        if (result != 0) throw new GradleException('M33 Deployer geometry test compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass(
+                    'dev.ryanhcode.sable.compatibility.create.block_breakers.M33DeployerInteractionGeometryTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M33 Deployer geometry regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM33DeployerParentWorldInteraction PASS: Deployer fake-player pose, ray, face, target, native item lifecycle, and normal-world bypass are guarded')
+    }
+}
+
+tasks.register('verifyM33_1DeployerMountedStorage') {
+    group = 'forge backport'
+    description = 'Checks the native Create refill boundary and the bounded M33.1 storage diagnostic fixture.'
+    dependsOn tasks.named('verifyM33DeployerParentWorldInteraction')
+
+    File mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/deployer/DeployerMovementBehaviourMixin.java')
+    File trace = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/SableDeployerMountedStorageTrace.java')
+    File decision = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/DeployerRefillDecision.java')
+    File architecture = rootProject.file('M33_1_DEPLOYER_MOUNTED_STORAGE.md')
+    File commands = rootProject.file('M33_1_RUNTIME_TEST_COMMANDS.md')
+    File test = file('src/m33_1DeployerTest/java/dev/ryanhcode/sable/compatibility/create/deployer/M33_1MountedStorageClassificationTest.java')
+    inputs.files(mixin, trace, decision, architecture, commands, test, targetCreateJar)
+    outputs.dir(layout.buildDirectory.dir('m33_1DeployerTest'))
+
+    doLast {
+        String mixinSource = mixin.getText('UTF-8')
+        String traceSource = trace.getText('UTF-8')
+        String decisionSource = decision.getText('UTF-8')
+        String commandDoc = commands.getText('UTF-8')
+        if (!mixinSource.contains('@WrapMethod(method = "tryGrabbingItem")')
+                || !mixinSource.contains('original.call(context);')
+                || !mixinSource.contains('SableDeployerMountedStorageTrace.capture(context)')
+                || !mixinSource.contains('SableDeployerMountedStorageTrace.completed(context, owner, before)')) {
+            throw new GradleException('M33.1 must observe, not replace, native Create extraction')
+        }
+        ['!SableDiagnosticFlags.TRACE_CREATE_ACTORS', 'context.world.isClientSide',
+         'getAllItemStorages()', 'getAllItems()', 'getFilterFromBE()', 'filter.test(context.world, stack)',
+         'capturedChestCount', 'capturedChestBlockEntityCount', 'matchingItemCount',
+         'DeployerRefillDecision.classify',
+         'LAST_REJECTION', 'WeakHashMap'].each { token ->
+            if (!traceSource.contains(token)) throw new GradleException("M33.1 diagnostic lost ${token}")
+        }
+        ['CHEST_NOT_CAPTURED_BY_INNER_CONTRAPTION', 'CHEST_CAPTURED_BUT_NOT_MOUNTED',
+         'NO_MATCHING_MOUNTED_ITEM', 'NATIVE_EXTRACTION_RETURNED_EMPTY',
+         'NATIVE_EXTRACTION_SUCCEEDED'].each { token ->
+            if (!decisionSource.contains(token)) throw new GradleException("M33.1 classification lost ${token}")
+        }
+        if (traceSource.contains('extractItem(') || traceSource.contains('setItemInHand(')
+                || traceSource.contains('setStackInSlot(')) {
+            throw new GradleException('M33.1 diagnostics must not pump or mutate mounted storage')
+        }
+        ['/give @s create:deployer 1', '/give @s minecraft:chest 1',
+         '/give @s minecraft:cobblestone 64', '/give @s create:super_glue 1',
+         '/setblock ~ ~ ~ create:deployer[axis_along_first=false,facing=north]',
+         '/item replace block ~ ~ ~ container.0 with minecraft:cobblestone 16',
+         '/fill ~ ~ ~ ~7 ~ ~ minecraft:air', '/fill ~ ~-1 ~ ~7 ~-1 ~ minecraft:stone'].each { token ->
+            if (!commandDoc.contains(token)) throw new GradleException("M33.1 fixture lost ${token}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            ['com/simibubi/create/content/kinetics/deployer/DeployerMovementBehaviour.class':
+                     ['tryGrabbingItem', 'getAllItems', 'extract', 'getFilterFromBE', 'HeldItem'],
+             'com/simibubi/create/content/contraptions/MountedStorageManager.class':
+                     ['addBlock', 'initialize', 'read', 'write', 'getAllItemStorages'],
+             'com/simibubi/create/content/contraptions/Contraption.class':
+                     ['writeStorage', 'getStorage', 'readNBT', 'writeNBT']].each { entryName, tokens ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("Create 6.0.8 class missing: ${entryName}")
+                String bytes = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                tokens.each { token ->
+                    if (!bytes.contains(token)) throw new GradleException("Create 6.0.8 ${entryName} lost ${token}")
+                }
+            }
+            def state = jar.getJarEntry('assets/create/blockstates/deployer.json')
+            String stateJson = new String(jar.getInputStream(state).readAllBytes(), StandardCharsets.UTF_8)
+            if (!stateJson.contains('axis_along_first=false,facing=north')) {
+                throw new GradleException('M33.1 north-facing Deployer fixture is not valid in Create 6.0.8')
+            }
+        } finally {
+            jar.close()
+        }
+        File output = layout.buildDirectory.dir('m33_1DeployerTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M33.1 classification test requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath, test.absolutePath)
+        if (result != 0) throw new GradleException('M33.1 classification test compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.deployer.M33_1MountedStorageClassificationTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M33.1 storage classification regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM33_1DeployerMountedStorage PASS: native extraction retained, storage boundaries observable, fixture IDs and facing verified')
     }
 }

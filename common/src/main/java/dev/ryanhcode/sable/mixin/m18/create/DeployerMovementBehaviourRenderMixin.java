@@ -9,6 +9,7 @@ import com.simibubi.create.foundation.virtualWorld.VirtualRenderWorld;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableCreateContraptionContext;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.LevelAccessor;
@@ -39,7 +40,7 @@ public class DeployerMovementBehaviourRenderMixin {
         final SubLevel containing = entity == null ? null : SableCreateContraptionContext.getContainingSubLevel(entity);
         final boolean sableContraption = containing != null;
         final boolean returnedVisualizationSupported = sableContraption ? false : originalVisualizationSupported;
-        if (sableContraption) {
+        if (sableContraption && SableDiagnosticFlags.TRACE_CREATE_ACTORS) {
             final String key = entity.getId() + ":" + context.localPos.asLong() + ":"
                     + originalVisualizationSupported + ":" + returnedVisualizationSupported;
             if (LOGGED_DEPLOYER_ACTOR_RENDER.add(key)) {

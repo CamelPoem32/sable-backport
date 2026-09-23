@@ -5,6 +5,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.content.kinetics.deployer.DeployerBlockEntity;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.LevelAccessor;
@@ -32,7 +33,7 @@ public class DeployerRendererMixin {
         final boolean returnedVisualizationSupported = sableSubLevel ? false : originalVisualizationSupported;
         final String key = blockEntity.getBlockPos().asLong() + ":" + sableSubLevel + ":"
                 + originalVisualizationSupported + ":" + returnedVisualizationSupported;
-        if (LOGGED_DEPLOYER_BER.add(key)) {
+        if (SableDiagnosticFlags.TRACE_CREATE_ACTORS && LOGGED_DEPLOYER_BER.add(key)) {
             Sable.LOGGER.info("SABLE_M18_DEPLOYER_RENDER stage=STATIC_BER_VISUAL_DECISION renderer={} blockEntityClass={} blockId={} pos={} sableSubLevel={} originalVisualizationSupported={} returnedVisualizationSupported={} kineticSpeed={} handOffset={} hiddenPlotPoseTranslation=false renderPath=Create_DeployerRenderer_renderComponents",
                     "DeployerRenderer",
                     blockEntity.getClass().getName(),

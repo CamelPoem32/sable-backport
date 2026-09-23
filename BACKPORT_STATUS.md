@@ -2727,4 +2727,17 @@ receives one parent-visible cell for both its breaker and diamond-hoe paths.
 Normal-world behavior bypasses every adapter, unloaded/hidden/other-Sable targets
 are safe no-ops, and native drops/config/progress remain Create-owned. Exact
 copy-paste runtime fixtures are in `M32_RUNTIME_TEST_COMMANDS.md`. Status is
-`M32 IMPLEMENTED / RUNTIME_PENDING`; Deployer remains M33.
+`M32 CLOSED / PASS` after runtime validation.
+
+## M33 Create Deployer parent-world interaction
+
+M33 adapts the moving Create 6.0.8 Deployer at its narrow movement-behaviour
+boundary. The existing fake player already belongs to the parent `ServerLevel`;
+M33 transforms only the actor position, movement, orientation, target cell, ray,
+and clicked face from Sable raw space into current parent-visible space before
+delegating to native `DeployerHandler`. Native USE/PUNCH hooks, held-item
+inventory, consumption, durability, drops, entity interaction, and breaking
+progress remain Create-owned. Normal-world Deployers bypass the adapter, hidden
+raw fallback is prohibited, and other-Sable targets remain safe no-ops. Exact
+fixtures are in `M33_RUNTIME_TEST_COMMANDS.md`. Status is
+`M33 IMPLEMENTED / RUNTIME_PENDING`.
