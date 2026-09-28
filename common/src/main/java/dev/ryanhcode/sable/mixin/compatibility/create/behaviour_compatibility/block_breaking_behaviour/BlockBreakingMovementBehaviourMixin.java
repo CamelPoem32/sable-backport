@@ -8,10 +8,12 @@ import com.simibubi.create.content.kinetics.base.BlockBreakingMovementBehaviour;
 import com.simibubi.create.content.contraptions.actors.plough.PloughMovementBehaviour;
 import com.simibubi.create.content.kinetics.drill.DrillMovementBehaviour;
 import com.simibubi.create.content.kinetics.saw.SawMovementBehaviour;
+import com.simibubi.create.content.contraptions.actors.roller.RollerMovementBehaviour;
 import dev.ryanhcode.sable.compatibility.create.block_breakers.CreateActorTargetGeometry;
 import dev.ryanhcode.sable.compatibility.create.block_breakers.ExternalBlockBreakingTargetState;
 import dev.ryanhcode.sable.compatibility.create.block_breakers.SableM31CreateActorTrace;
 import dev.ryanhcode.sable.compatibility.create.block_breakers.SableCreateActorWorldContext;
+import dev.ryanhcode.sable.compatibility.create.block_breakers.SableRollerTerrain;
 import dev.ryanhcode.sable.compatibility.create.block_breakers.SubLevelBlockBreakingUtility;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.util.SableDiagnosticFlags;
@@ -96,6 +98,21 @@ public abstract class BlockBreakingMovementBehaviourMixin implements MovementBeh
         if (resolution.target() != null) {
             ((BlockBreakingMovementBehaviour) (Object) this).visitNewPosition(context, resolution.target());
         }
+    }
+
+    @WrapMethod(method = "tick")
+    public void sable$tickRollerInParentSpace(final MovementContext context, final Operation<Void> original) {
+        if (!((Object) this instanceof RollerMovementBehaviour roller)) {
+            original.call(context);
+            return;
+        }
+        final SubLevel owner = SableCreateActorWorldContext.owner(context);
+        if (owner == null) {
+            original.call(context);
+            return;
+        }
+        SableRollerTerrain.retarget(context, owner, roller);
+        original.call(context);
     }
 
     @WrapMethod(method = "destroyBlock")

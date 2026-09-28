@@ -127,7 +127,8 @@ public final class SubLevelBlockBreakingUtility {
         NO_BREAKABLE_PARENT_TARGET,
         PARENT_CHUNK_NOT_LOADED,
         OTHER_SABLE_BODY_UNSUPPORTED,
-        SOURCE_LEVEL_MISMATCH
+        SOURCE_LEVEL_MISMATCH,
+        UNSUPPORTED_ROLLER_ORIENTATION
     }
 
     public record TargetResolution(@Nullable BlockPos target,

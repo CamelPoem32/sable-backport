@@ -3661,6 +3661,33 @@ tasks.register('verifyStandaloneForgeArtifact') {
                     'META-INF/jarjar/metadata.json'
             ]
             requiredEntries.each(requireEntry)
+            ['setup', 'baseline', 'sable', 'reset', 'cleanup', 'retract',
+             'internal/create', 'internal/lane',
+             'internal/reset_static'].each { name ->
+                requireEntry("data/sable/functions/m35/${name}.mcfunction")
+            }
+            String m35Cleanup = readText('data/sable/functions/m35/cleanup.mcfunction').trim()
+            if (m35Cleanup != 'sable_m35 cleanup'
+                    || readText('data/sable/functions/m35/retract.mcfunction').trim() != 'sable_m35 retract'
+                    || readText('data/sable/functions/m35/baseline.mcfunction').trim() != 'sable_m35 baseline'
+                    || readText('data/sable/functions/m35/sable.mcfunction').trim() != 'sable_m35 sable'
+                    || readText('data/sable/functions/m35/reset.mcfunction').trim() != 'sable_m35 reset'
+                    || !readText('data/sable/functions/m35/internal/create.mcfunction')
+                            .contains('"sable_m35_v5"')
+                    || !readText('data/sable/functions/m35/internal/create.mcfunction').trim()
+                            .endsWith('sable_m35 validate')) {
+                throw new GradleException('Final M35 function dispatch/version differs from the registered lifecycle')
+            }
+            requireEntry('dev/ryanhcode/sable/command/M35RollerFixtureLifecycleCommands.class')
+            requireEntry('dev/ryanhcode/sable/command/M35FixtureLookup.class')
+            requireEntry('dev/ryanhcode/sable/command/M35FixtureSelection.class')
+            String m35CommandBytes = new String(forgeJar.getInputStream(forgeJar.getJarEntry(
+                    'dev/ryanhcode/sable/command/M35RollerFixtureLifecycleCommands.class')).readAllBytes(),
+                    StandardCharsets.ISO_8859_1)
+            if (!m35CommandBytes.contains('sable_m35') || !m35CommandBytes.contains('CLEANUP ENTRY version=5')
+                    || !m35CommandBytes.contains('SETUP ROLLBACK COMPLETE')) {
+                throw new GradleException('Final M35 lifecycle entry command is missing')
+            }
 
             forgeServiceProviders.each { service, provider ->
                 String servicePath = "META-INF/services/${service}"
@@ -31014,5 +31041,532 @@ tasks.register('verifyM34MovementBehaviourCoverage') {
             throw new GradleException('M34 runtime fixture commands are incomplete')
         }
         logger.lifecycle('verifyM34MovementBehaviourCoverage PASS: all 22 behaviour classes / 27 registration sites classified; scoped Contact and Haunted Bell hooks verified')
+    }
+}
+
+tasks.register('verifyM35MechanicalRollerParentWorld') {
+    group = 'forge backport'
+    description = 'Checks Create Roller terrain hooks, command fixture, and physical footprint geometry.'
+    dependsOn tasks.named('compileJava')
+    dependsOn tasks.named('processResources')
+    dependsOn tasks.named('verifyM34MovementBehaviourCoverage')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+
+    File terrain = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SableRollerTerrain.java')
+    File roller = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/roller_behaviour/RollerMovementBehaviourMixin.java')
+    File breaker = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java')
+    File trace = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SableM31CreateActorTrace.java')
+    File config = file('src/main/resources/sable-common-forge.mixins.json')
+    File architecture = rootProject.file('M35_MECHANICAL_ROLLER_PARENT_WORLD.md')
+    File commands = rootProject.file('M35_RUNTIME_TEST_COMMANDS.md')
+    File functionsDir = file('src/main/resources/data/sable/functions/m35')
+    File lifecycle = file('src/main/java/dev/ryanhcode/sable/command/M35RollerFixtureLifecycleCommands.java')
+    File runState = file('src/main/java/dev/ryanhcode/sable/command/M35FixtureRunState.java')
+    File fixtureLookup = file('src/main/java/dev/ryanhcode/sable/command/M35FixtureLookup.java')
+    File fixtureSelection = file('src/main/java/dev/ryanhcode/sable/command/M35FixtureSelection.java')
+    File forgeEntry = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+    File test = file('src/m35RollerTest/java/dev/ryanhcode/sable/compatibility/create/block_breakers/M35RollerTerrainGeometryTest.java')
+    File selectionTest = file('src/m35RollerTest/java/dev/ryanhcode/sable/command/M35FixtureSelectionTest.java')
+    inputs.files(terrain, roller, breaker, trace, config, architecture, commands, test, selectionTest,
+            lifecycle, runState, fixtureLookup, fixtureSelection, forgeEntry,
+            fileTree(functionsDir), targetCreateJar)
+    outputs.dir(layout.buildDirectory.dir('m35RollerTest'))
+
+    doLast {
+        String terrainSource = terrain.getText('UTF-8')
+        String rollerSource = roller.getText('UTF-8')
+        String breakerSource = breaker.getText('UTF-8')
+        String traceSource = trace.getText('UTF-8')
+        String fixture = commands.getText('UTF-8')
+        def functionText = { String name ->
+            File functionFile = new File(functionsDir, "${name}.mcfunction")
+            if (!functionFile.isFile()) throw new GradleException("M35 function missing: ${name}")
+            File packaged = new File(layout.buildDirectory.get().asFile,
+                    "resources/main/data/sable/functions/m35/${name}.mcfunction")
+            if (!packaged.isFile()) throw new GradleException("M35 function not staged: ${name}")
+            functionFile.getText('UTF-8')
+        }
+        String setupFunction = functionText('setup')
+        String buildFunction = functionText('internal/create')
+        String laneFunction = functionText('internal/lane')
+        String resetFunction = functionText('reset')
+        String cleanupFunction = functionText('cleanup')
+        String retractFunction = functionText('retract')
+        ['baseline', 'sable', 'internal/reset_static'].each(functionText)
+        ['run', 'yaw90', 'translate', 'depletion'].each { name ->
+            if (functionText(name).trim() != "sable_m35 ${name}") {
+                throw new GradleException("M35 ${name} function must dispatch one fixture command")
+            }
+        }
+        ['CreateActorTargetGeometry.resolvePoint', 'findExternalPointTarget',
+         'pose.transformNormal(WORLD_UP)', 'isSafeCell',
+         'context.world.hasChunkAt(parentCell)', 'Sable.HELPER.getContaining',
+         'Sable.HELPER.getAllIntersecting', 'if (intersecting != owner)',
+         'ExternalBlockBreakingTargetState.transition', 'roller.cancelStall(context)',
+         'context.data.remove("WaitingTicks")', 'context.data.remove("ReferencePos")',
+         'hasNativeTerrainState(context)', 'context.data.remove("BreakingPos")',
+         'CarriageContraptionEntity'].each { token ->
+            if (!terrainSource.contains(token)) throw new GradleException("M35 terrain contract lost ${token}")
+        }
+        ['@WrapMethod(method = "visitNewPosition")', '@WrapMethod(method = "testBreakerTarget")',
+         '@WrapMethod(method = "destroyBlock")', '@WrapOperation(method = "tryFill"',
+         'isLoaded(Lnet/minecraft/core/BlockPos;)Z', 'setBlockAndUpdate',
+         'original.call(context, proposedRaw)', 'original.call(context, resolution.target())',
+         'SableCreateActorWorldContext.enterParentSpace', 'SableRollerTerrain.isSafeCell'].each { token ->
+            if (!rollerSource.contains(token)) throw new GradleException("M35 Roller hook lost ${token}")
+        }
+        if (!breakerSource.contains('instanceof RollerMovementBehaviour roller')
+                || !breakerSource.contains('SableRollerTerrain.retarget(context, owner, roller)')
+                || !config.getText('UTF-8').contains('roller_behaviour.RollerMovementBehaviourMixin')) {
+            throw new GradleException('M35 inherited tick hook or mixin registration missing')
+        }
+        if (rollerSource.contains('context.world.setBlock(') || rollerSource.contains('context.world.destroyBlock(')
+                || terrainSource.contains('return proposedRaw')) {
+            throw new GradleException('M35 must not implement custom or raw-plot terrain mutation')
+        }
+        if (!traceSource.contains('if (!SableDiagnosticFlags.TRACE_CREATE_ACTORS)')
+                || !traceSource.contains('state.rollerEvents.size() >= 64')) {
+            throw new GradleException('M35 trace is not gated/bounded')
+        }
+
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            Map<String, List<String>> canaries = [
+                    'com/simibubi/create/content/contraptions/actors/roller/RollerMovementBehaviour.class': [
+                            'visitNewPosition', 'getPositionsToBreak', 'testBreakerTarget', 'destroyBlock',
+                            'triggerPaver', 'tryFill', 'ReferencePos', 'BreakingPos', 'WaitingTicks', 'LastPos',
+                            'ScrollValue', 'Filter', 'getAllItems'
+                    ],
+                    'com/simibubi/create/content/kinetics/base/BlockBreakingMovementBehaviour.class': [
+                            'tickBreaker', 'cancelStall', 'Progress', 'BlockHelper'
+                    ],
+                    'com/simibubi/create/content/contraptions/glue/SuperGlueEntity.class': [
+                            'From', 'To', 'readBoundingBox', 'resetPositionToBB', 'contains'
+                    ],
+                    'com/simibubi/create/content/contraptions/chassis/RadialChassisBlock.class': [
+                            'getGlueableSide', 'STICKY_NORTH', 'STICKY_EAST'
+                    ],
+                    'com/simibubi/create/content/contraptions/chassis/ChassisBlockEntity.class': [
+                            'getIncludedBlockPositionsRadial', 'getGlueableSide', 'isBrittle'
+                    ],
+                    'com/simibubi/create/foundation/blockEntity/behaviour/filtering/FilteringBehaviour.class': [
+                            'Filter', 'getFilter'
+                    ],
+                    'com/simibubi/create/foundation/blockEntity/behaviour/scrollValue/ScrollValueBehaviour.class': [
+                            'ScrollValue'
+                    ],
+                    'com/simibubi/create/content/contraptions/piston/MechanicalPistonBlockEntity.class': [
+                            'getMovementSpeed', 'convertToLinear', 'PistonContraption'
+                    ],
+                    'com/simibubi/create/content/kinetics/motor/CreativeMotorBlockEntity.class': [
+                            'getGeneratedSpeed', 'convertToDirection'
+                    ]
+            ]
+            canaries.each { entryName, tokens ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("Create 6.0.8 class missing: ${entryName}")
+                String bytes = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                tokens.each { token ->
+                    if (!bytes.contains(token)) throw new GradleException("M35 Create canary lost ${token} in ${entryName}")
+                }
+            }
+            Map<String, String> stateCanaries = [
+                    'mechanical_roller': 'facing=east,waterlogged=false',
+                    'sticky_mechanical_piston': 'axis_along_first=true,facing=east,state=retracted',
+                    'piston_extension_pole': 'facing=east',
+                    'radial_chassis': 'sticky_east',
+                    'creative_motor': 'facing=up',
+                    'clutch': 'axis=y,powered=true'
+            ]
+            stateCanaries.each { id, state ->
+                def entry = jar.getJarEntry("assets/create/blockstates/${id}.json")
+                if (entry == null) throw new GradleException("M35 fixture block missing: create:${id}")
+                String json = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.UTF_8)
+                if (!json.contains(state)) throw new GradleException("M35 fixture state missing: ${id} ${state}")
+            }
+            String chassisJson = new String(jar.getInputStream(
+                    jar.getJarEntry('assets/create/blockstates/radial_chassis.json')).readAllBytes(),
+                    StandardCharsets.UTF_8)
+            if (!chassisJson.contains('sticky_north') || !chassisJson.contains('sticky_east')) {
+                throw new GradleException('M35 chassis cannot attach the Roller and chest by sticky sides')
+            }
+            String entityBytes = new String(jar.getInputStream(
+                    jar.getJarEntry('com/simibubi/create/AllEntityTypes.class')).readAllBytes(),
+                    StandardCharsets.ISO_8859_1)
+            if (!entityBytes.contains('super_glue')) throw new GradleException('M35 native glue entity type changed')
+        } finally {
+            jar.close()
+        }
+        ['create:mechanical_roller[facing=east,waterlogged=false]',
+         'create:radial_chassis[axis=x,sticky_north=true,sticky_east=true]',
+         'create:clutch[axis=y,powered=false]',
+         'simulated:physics_assembler', 'container.0 with minecraft:cobblestone 16',
+         'Filter:{id:"minecraft:cobblestone",Count:1b}', 'ScrollValue:0',
+         'ScrollValue:-64', 'minecraft:lever[face=wall,facing=south,powered=true]'].each { token ->
+            if (!buildFunction.contains(token)) throw new GradleException("M35 generated fixture lost ${token}")
+        }
+        if (setupFunction.trim() != 'sable_m35 baseline'
+                || functionText('baseline').trim() != 'sable_m35 baseline'
+                || functionText('sable').trim() != 'sable_m35 sable'
+                || !buildFunction.contains('setblock ~ ~ ~-2 minecraft:iron_block')
+                || !buildFunction.contains('setblock ~ ~1 ~-2 simulated:physics_assembler')
+                || !buildFunction.trim().endsWith('sable_m35 validate')
+                || buildFunction.contains('READY:')
+                || buildFunction.readLines().any { it.startsWith('function ') }
+                || !laneFunction.contains('fill ~4 ~-1 ~ ~14 ~1 ~ minecraft:air')
+                || laneFunction.contains('fill ~1 ~-1 ~')
+                || resetFunction.trim() != 'sable_m35 reset'
+                || cleanupFunction.readLines().findAll { line -> !line.trim().isEmpty() && !line.startsWith('#') }
+                        != ['sable_m35 cleanup']
+                || retractFunction.readLines().findAll { line -> !line.trim().isEmpty() && !line.startsWith('#') }
+                        != ['sable_m35 retract']) {
+            throw new GradleException('M35 fixture geometry or moving-state safety contract lost')
+        }
+        if (!buildFunction.contains('"sable_m35_v5"')
+                || cleanupFunction.contains('CLEANUP REFUSED')
+                || cleanupFunction.contains('if block ')) {
+            throw new GradleException('M35 function must dispatch exactly one versioned Java lifecycle command')
+        }
+        String lifecycleSource = lifecycle.getText('UTF-8')
+        String runSource = runState.getText('UTF-8')
+        String lookupSource = fixtureLookup.getText('UTF-8')
+        String selectionSource = fixtureSelection.getText('UTF-8')
+        String forgeSource = forgeEntry.getText('UTF-8')
+        ['M35RollerFixtureLifecycleCommands.install()',
+         'M35RollerFixtureLifecycleCommands.register(event.getDispatcher())']
+                .each { token ->
+                    if (!forgeSource.contains(token)) throw new GradleException("M35 lifecycle wiring lost ${token}")
+                }
+        ['Commands.literal("run")', 'Commands.literal("yaw90")',
+         'Commands.literal("translate")', 'Commands.literal("depletion")',
+         'M35FixtureRunState.tick(event.getServer())', 'M35FixtureRunState.stop(task.markerId)',
+         'M35FixtureRunState.clear()',
+         'MinecraftForge.EVENT_BUS.addListener(M35FixtureRunState::postPhysicsTick)',
+         'M35FixtureRunState.alignForCleanup(task.markerId, oldBody)'].each { token ->
+            if (!lifecycleSource.contains(token)) throw new GradleException("M35 run dispatch/cleanup lost ${token}")
+        }
+        ['marker().getTags().contains("sable_m35_mode_sable")', 'candidate.match().bodyId() == null',
+         'SableRollerTerrain.supportsWorldDown(body)', 'handle.teleport(target, levelYaw)',
+         'event.getPhysicsSystem()',
+         'handle.setLinearAndAngularVelocity(new Vector3d(), new Vector3d())',
+         'body.logicalPose().transformPosition(Vec3.atCenterOf(raw))',
+         'Sable.HELPER.getContaining(run.level, visible)',
+         'M35RollerFixtureLifecycleCommands.setFixtureLever(run.level, body, run.rawOrigin, false)',
+         'SableM31CreateActorTrace.rollerEvidence(run.bodyId)',
+         'run.startingMaterial > now', 'rawTerrainUnchanged(run, body)',
+         'restoreLane(run)', 'new ItemStack(Items.COBBLESTONE, count)',
+         'Vec3.atCenterOf(run.markerOrigin), 0, Mode.RUN',
+         'mode == Mode.YAW90 ? Math.PI / 2 : 0',
+         'mode == Mode.TRANSLATE ? new Vec3(0, 0, 18)',
+         'mode == Mode.DEPLETION ? 2 : 16',
+         'evidence.footprints() > 0 && terrainChanged && consumed && rawUntouched',
+         'evidence.clears() > 0 && evidence.paves() > 0'].each { token ->
+            if (!runSource.contains(token)) throw new GradleException("M35 fixture-only run contract lost ${token}")
+        }
+        if (!traceSource.contains('if (!context.world.isClientSide)')
+                || !traceSource.contains('ROLLER_EVIDENCE.computeIfPresent(owner.getUniqueId()')
+                || !traceSource.contains('beginRollerEvidence(final UUID bodyId)')
+                || !runSource.contains('SableDiagnosticFlags.TRACE_CREATE_ACTORS')) {
+            throw new GradleException('M35 native Roller observations must be per-body and debug-gated')
+        }
+        if (runSource.contains('RollerMovementBehaviourMixin') || runSource.contains('SableRollerTerrain.resolve(')
+                || runSource.contains('context.world.setBlock')) {
+            throw new GradleException('M35 run helper must not replace production Roller actor behavior')
+        }
+        ['private static final int RETRACT_RPM = 64', 'private static final int EXTEND_RPM = -64',
+         'private static final String VERSION_TAG = M35FixtureLookup.VERSION_TAG',
+         'dispatcher.register(Commands.literal("sable_m35")',
+         'Commands.literal("baseline").executes(context -> setup(context.getSource(), "baseline"))',
+         'Commands.literal("sable").executes(context -> setup(context.getSource(), "sable"))',
+         'Commands.literal("reset").executes(context -> reset(context.getSource()))',
+         'Commands.literal("cleanup").executes(context -> start(context.getSource(), true))',
+         'announce(source, "[M35] CLEANUP ENTRY version=5")',
+         'M35FixtureLookup.find(level, source.getPosition())',
+         'M35FixtureLookup.find(source.getLevel(), source.getPosition())',
+         'reportLookup(source, lookup)',
+         'fixtureVersion=', 'PREVIOUS', 'CLEANUP phase=STOP', 'CLEANUP phase=REVERSE',
+         'CLEANUP phase=RETRACT_WAIT', 'CLEANUP phase=INNER_DISASSEMBLED',
+         'CLEANUP phase=OUTER_DISASSEMBLE', 'CLEANUP phase=REMOVE', 'CLEANUP COMPLETE version=5',
+         'TASKS.containsKey(marker.getUUID())',
+         'blockEntity(level, body, origin.below(2)) instanceof CreativeMotorBlockEntity',
+         'fullFingerprint(task.level, task.origin, oldBody)',
+         'origin.below().south()', 'motor.generatedSpeed.setValue(RETRACT_RPM)',
+         'motor.generatedSpeed.setValue(EXTEND_RPM)', 'case STOP', 'case REVERSE',
+         'case ENGAGE', 'case WAIT', 'case OUTER -> disassembleOuter(task)',
+         'case CLEAN -> cleanStatic(task)', 'staticRetracted(task)',
+         'assembler.assembleOrDisassemble(null)',
+         'if (body(task) != null || !fullFingerprint(task.level, restoredOrigin, null))',
+         'TIMEOUT_TICKS', 'TASKS.remove(task.markerId)', 'ServerStoppedEvent',
+         'controller.running || controller.movedContraption != null',
+         'SETUP phase=VALIDATE', 'SETUP phase=ROLLBACK', 'rollbackFreshSetup(pending)',
+         'validateFreshFixture(pending, candidate)', 'SETUP phase=READY',
+         'origin.above().north(2)', 'origin.north(2)']
+                .each { token ->
+                    if (!lifecycleSource.contains(token)) throw new GradleException("M35 retract safety lost ${token}")
+                }
+        ['level.getAllEntities()', 'marker.getTags().contains(ORIGIN_TAG)',
+         'M35FixtureSelection.classify', 'SimAssemblyHelper.collectBlocks(level, body)',
+         'SubLevelBlockStateLookup.getBlockEntity(body, pos)',
+         'SubLevelBlockStateLookup.getBlockStateOrAir(body, pos)',
+         'piston.movedContraption', 'PistonContraption', 'movingPayloadComplete',
+         'RECOVERABLE_ASSEMBLED_OUTER', 'RECOVERABLE_MOVING_INNER',
+         'RECOVERABLE_PARTIAL_V4', 'extendedPayload', 'extendedOffset',
+         'hasDisplacedFixtureBlocks', 'STATIC_PAYLOAD_MISSING',
+         'RUNNING_PISTON_ENTITY_MISSING'].each { token ->
+            if (!lookupSource.contains(token)) throw new GradleException("M35 unified lookup lost ${token}")
+        }
+        ['return Status.NONE', 'return Status.AMBIGUOUS', 'Status.READY', 'Status.CORRUPT',
+         'Status.ORPHAN_MARKER', 'boolean setupAllowed()', 'boolean cleanupAllowed()'].each { token ->
+            if (!selectionSource.contains(token)) throw new GradleException("M35 shared decision lost ${token}")
+        }
+        if (lifecycleSource.indexOf('staticRetracted(task)') > lifecycleSource.indexOf('case OUTER -> disassembleOuter(task)')
+                || lifecycleSource.indexOf('case OUTER -> disassembleOuter(task)') > lifecycleSource.indexOf('case CLEAN -> cleanStatic(task)')
+                || lifecycleSource.contains('teleportTo(') || lifecycleSource.contains('setPos(')) {
+            throw new GradleException('M35 teardown order or native-motion contract lost')
+        }
+        int failureStart = lifecycleSource.indexOf('if (failure != null) {')
+        int readyStart = lifecycleSource.indexOf('tell(pending, "[M35] SETUP phase=READY")')
+        String failedSetupBranch = failureStart >= 0 && readyStart > failureStart
+                ? lifecycleSource.substring(failureStart, readyStart) : ''
+        if (!failedSetupBranch.contains('rollbackFreshSetup(pending);')
+                || !failedSetupBranch.contains('return 0;')
+                || !failedSetupBranch.contains('pendingSetup = null;')
+                || !lookupSource.contains('marker.getTags().contains("sable_m35_v4")')
+                || !lifecycleSource.contains('task.partialV4')) {
+            throw new GradleException('M35 failed setup could reach READY or version-4 recovery was removed')
+        }
+        File compiledLifecycle = file('build/classes/java/main/dev/ryanhcode/sable/command/M35RollerFixtureLifecycleCommands.class')
+        if (!compiledLifecycle.isFile()
+                || !new String(compiledLifecycle.bytes, StandardCharsets.ISO_8859_1).contains('sable_m35')) {
+            throw new GradleException('M35 dedicated command is not compiled into the Forge classes')
+        }
+        if (!fixture.contains('/function sable:m35/sable')
+                || !fixture.contains('/function sable:m35/baseline')
+                || !fixture.contains('/function sable:m35/reset')
+                || !fixture.contains('/function sable:m35/cleanup')
+                || !fixture.contains('/function sable:m35/retract')
+                || !fixture.contains('/function sable:m35/run')
+                || !fixture.contains('/function sable:m35/yaw90')
+                || !fixture.contains('/function sable:m35/depletion')) {
+            throw new GradleException('M35 one-command tester workflow lost')
+        }
+        def blockAt = [:]
+        def structuralCells = [] as Set
+        def coord = { String value -> value == '~' ? 0 : Integer.parseInt(value.substring(1)) }
+        buildFunction.readLines().each { line ->
+            def parts = line.split(' ')
+            if (parts[0] == 'setblock') {
+                def cell = [coord(parts[1]), coord(parts[2]), coord(parts[3])]
+                blockAt[cell] = parts[4]
+                if (parts[4] != 'minecraft:air') structuralCells.add(cell)
+            } else if (parts[0] == 'fill') {
+                def from = [coord(parts[1]), coord(parts[2]), coord(parts[3])]
+                def to = [coord(parts[4]), coord(parts[5]), coord(parts[6])]
+                for (int x = Math.min(from[0], to[0]); x <= Math.max(from[0], to[0]); x++) {
+                    for (int y = Math.min(from[1], to[1]); y <= Math.max(from[1], to[1]); y++) {
+                        for (int z = Math.min(from[2], to[2]); z <= Math.max(from[2], to[2]); z++) {
+                            def cell = [x, y, z]
+                            if (parts[7] == 'minecraft:air' && structuralCells.contains(cell)) {
+                                throw new GradleException("M35 terrain clearing erases fixture cell ${cell}")
+                            }
+                            blockAt[cell] = parts[7]
+                        }
+                    }
+                }
+            }
+        }
+        if (blockAt[[0, 1, -2]] != 'simulated:physics_assembler'
+                || blockAt[[0, 0, -2]] != 'minecraft:iron_block'
+                || blockAt[[0, 0, -1]] != 'minecraft:iron_block'
+                || !blockAt[[0, 0, 0]].startsWith('create:sticky_mechanical_piston')
+                || !blockAt[[0, -2, 0]].startsWith('create:creative_motor')
+                || !blockAt[[0, -1, 0]].startsWith('create:clutch')
+                || !blockAt[[0, -1, 1]].startsWith('minecraft:lever')
+                || !blockAt[[1, 0, 0]].startsWith('create:radial_chassis')
+                || !blockAt[[1, 1, 0]].startsWith('create:mechanical_roller')
+                || !blockAt[[1, 0, 1]].startsWith('minecraft:chest')) {
+            throw new GradleException('M35 fixture would have AIR under the assembler or a detached Roller/chest')
+        }
+        (-12..-1).each { x ->
+            if (!blockAt[[x, 0, 0]].startsWith('create:piston_extension_pole')) {
+                throw new GradleException("M35 piston pole missing at ${x}")
+            }
+        }
+        if (blockAt[[2, 0, 0]] != null || blockAt[[3, 0, 0]] != null
+                || blockAt[[4, -2, 0]] != 'minecraft:stone') {
+            throw new GradleException('M35 external terrain touches the moving payload or is absent')
+        }
+        if (buildFunction.contains('summon create:super_glue')
+                || buildFunction.contains('From:[') || buildFunction.contains('To:[')) {
+            throw new GradleException('M35 must not command-summon glue with a bounding box reset by Entity.moveTo')
+        }
+        ['new SuperGlueEntity(level, expected)', 'stationaryGlue.addTag("sable_m35_glue")',
+         'level.addFreshEntity(stationaryGlue)', 'glue.size() != 1',
+         'chassis.getIncludedBlockPositions(Direction.EAST, false)',
+         'included.contains(origin.east().above())', 'included.contains(origin.east().south())',
+         'new SimAssemblyContraption(null)', 'outerSelection.searchMovedStructure(level, origin.north(2))',
+         'OUTER_ASSEMBLY_MISSING_OWNED_COMPONENT', 'OUTER_ASSEMBLY_CAPTURED_PARENT_TERRAIN',
+         'GLUE status=VALID movingPayload=CHASSIS_NATIVE_ATTACHMENT'].each { token ->
+            if (!lifecycleSource.contains(token)) {
+                throw new GradleException("M35 native attachment/assembly preflight lost ${token}")
+            }
+        }
+        if (structuralCells.any { it[0] >= 4 }) {
+            throw new GradleException('M35 structural fixture reaches the external terrain lane')
+        }
+        laneFunction.readLines().findAll { it.startsWith('fill ') }.each { line ->
+            int firstX = Integer.parseInt(line.split(' ')[1].substring(1))
+            if (firstX < 4) throw new GradleException('M35 terrain lane overlaps static carriage')
+        }
+        if (!architecture.getText('UTF-8').contains('world axes')
+                || !architecture.getText('UTF-8').contains('ItemHelper.extract')) {
+            throw new GradleException('M35 architecture must document gravity and native material accounting')
+        }
+
+        File output = layout.buildDirectory.dir('m35RollerTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M35 requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath, test.absolutePath, selectionTest.absolutePath)
+        if (result != 0) throw new GradleException('M35 Roller geometry test compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.block_breakers.M35RollerTerrainGeometryTest')
+                    .getMethod('run').invoke(null)
+            loader.loadClass('dev.ryanhcode.sable.command.M35FixtureSelectionTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M35 Roller geometry regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM35MechanicalRollerParentWorld PASS: native footprint guarded, geometry mapped, fixture canaries verified')
+    }
+}
+
+tasks.register('verifyM35RollerMovingRendering') {
+    group = 'forge backport'
+    description = 'Checks the exact Create Roller actor-render decision and Sable-only CPU rendering path.'
+    dependsOn tasks.named('verifyM35MechanicalRollerParentWorld')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+
+    File rollerRender = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/roller_behaviour/RollerMovementBehaviourRenderMixin.java')
+    File config = file('src/main/resources/sable-common-forge.mixins.json')
+    File bridge = file('src/main/java/dev/ryanhcode/sable/forge/SableForgeCreateContraptionRenderBridge.java')
+    File contraptionRender = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java')
+    File test = file('src/m35RollerTest/java/dev/ryanhcode/sable/compatibility/create/block_breakers/M35RollerMovingRenderTransformTest.java')
+    inputs.files(rollerRender, config, bridge, contraptionRender, test, targetCreateJar)
+    outputs.dir(layout.buildDirectory.dir('m35RollerRenderTest'))
+
+    doLast {
+        String mixin = rollerRender.getText('UTF-8')
+        String mixins = config.getText('UTF-8')
+        String bridgeSource = bridge.getText('UTF-8')
+        String contraptionSource = contraptionRender.getText('UTF-8')
+        String registration = '"compatibility.create.behaviour_compatibility.roller_behaviour.RollerMovementBehaviourRenderMixin"'
+        int clientEnd = mixins.indexOf('"mixins"')
+        if (mixins.indexOf(registration) < 0 || mixins.indexOf(registration) > clientEnd) {
+            throw new GradleException('M35.6 Roller render mixin must be registered client-side')
+        }
+        [
+                '@Mixin(value = RollerMovementBehaviour.class, remap = false)',
+                'method = "renderInContraption(',
+                'VisualizationManager;supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
+                'RollerRenderer;renderInContraption(',
+                'SableCreateContraptionContext.getContainingSubLevel(entity)',
+                'containing == null && originalVisualizationSupported',
+                'original.call(context, renderWorld, matrices, buffers)',
+                'SableDiagnosticFlags.TRACE_CREATE_ACTORS',
+                'SABLE_M35_ROLLER_RENDER'
+        ].each { canary ->
+            if (!mixin.contains(canary)) throw new GradleException("M35.6 lost scoped render canary: ${canary}")
+        }
+        ['@Overwrite', 'setRemoved(', 'renderSingleBlock(', 'getBlockBreakingSpeed(',
+         'setBlock(', 'destroyBlock(', 'AABB.INFINITE'].each { forbidden ->
+            if (mixin.contains(forbidden)) throw new GradleException("M35.6 Roller render hook broadened: ${forbidden}")
+        }
+        ['visiblePosition.x - cameraPosition.x', 'dispatcher.render(contraptionEntity, x, y, z'].each { canary ->
+            if (!bridgeSource.contains(canary)) throw new GradleException("M35.6 lost visible-space bridge: ${canary}")
+        }
+        if (!contraptionSource.contains('poseStack.mulPose(new Quaternionf(renderPose.orientation()))')
+                || !contraptionSource.contains('sableContraption ? false : originalVisualizationSupported')) {
+            throw new GradleException('M35.6 lost outer pose or CPU contraption render selection')
+        }
+
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            String rollerClass = 'com/simibubi/create/content/contraptions/actors/roller/RollerMovementBehaviour.class'
+            def renderCalls = []
+            new org.objectweb.asm.ClassReader(jar.getInputStream(jar.getJarEntry(rollerClass)).readAllBytes()).accept(
+                    new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                        @Override
+                        org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                                   String signature, String[] exceptions) {
+                            if (name != 'renderInContraption') return null
+                            if (descriptor != '(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lcom/simibubi/create/foundation/virtualWorld/VirtualRenderWorld;Lcom/simibubi/create/content/contraptions/render/ContraptionMatrices;Lnet/minecraft/client/renderer/MultiBufferSource;)V') {
+                                throw new GradleException('Create Roller renderInContraption descriptor changed')
+                            }
+                            return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                                @Override
+                                void visitMethodInsn(int opcode, String owner, String calledName,
+                                                     String calledDescriptor, boolean isInterface) {
+                                    renderCalls.add("${owner}.${calledName}${calledDescriptor}")
+                                }
+                            }
+                        }
+                    }, 0)
+            if (renderCalls != [
+                    'dev/engine_room/flywheel/api/visualization/VisualizationManager.supportsVisualization(Lnet/minecraft/world/level/LevelAccessor;)Z',
+                    'com/simibubi/create/content/contraptions/actors/roller/RollerRenderer.renderInContraption(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lcom/simibubi/create/foundation/virtualWorld/VirtualRenderWorld;Lcom/simibubi/create/content/contraptions/render/ContraptionMatrices;Lnet/minecraft/client/renderer/MultiBufferSource;)V'
+            ]) {
+                throw new GradleException("Create 6.0.8 Roller actor-render branch changed: ${renderCalls}")
+            }
+            [
+                    'com/simibubi/create/content/contraptions/actors/roller/RollerMovementBehaviour.class':
+                            ['disableBlockEntityRendering', 'RollerActorVisual', 'supportsVisualization', 'RollerRenderer', 'renderInContraption'],
+                    'com/simibubi/create/content/contraptions/actors/roller/RollerRenderer.class':
+                            ['ROLLER_WHEEL', 'ROLLER_FRAME', 'getAnimationSpeed', 'getModel', 'getViewProjection', 'renderInto'],
+                    'com/simibubi/create/content/contraptions/render/ContraptionEntityRenderer.class':
+                            ['renderActors', 'getActors', 'renderInContraption', 'supportsVisualization']
+            ].each { entryName, canaries ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("Create 6.0.8 rendering class missing: ${entryName}")
+                String bytes = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                canaries.each { canary ->
+                    if (!bytes.contains(canary)) throw new GradleException("Create 6.0.8 rendering bytecode changed: ${entryName} ${canary}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        File output = layout.buildDirectory.dir('m35RollerRenderTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M35.6 requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath, test.absolutePath)
+        if (result != 0) throw new GradleException('M35.6 render transform test compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.block_breakers.M35RollerMovingRenderTransformTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M35.6 render transform regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM35RollerMovingRendering PASS: native CPU wheel/frame, scoped bypass, visible transforms')
     }
 }

@@ -13,6 +13,7 @@ import dev.ryanhcode.sable.command.M25AeronauticsCommands;
 import dev.ryanhcode.sable.command.M26AeronauticsPropulsionCommands;
 import dev.ryanhcode.sable.command.M27AerodynamicsCommands;
 import dev.ryanhcode.sable.command.M28GoldenAircraftCommands;
+import dev.ryanhcode.sable.command.M35RollerFixtureLifecycleCommands;
 import dev.ryanhcode.sable.command.argument.SubLevelSelectorModifiers;
 import dev.ryanhcode.sable.index.SableAttributes;
 import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
@@ -47,6 +48,7 @@ public final class SableForge {
 
         Sable.init();
         SableForgeRuntimeSmoke.installCommon(modBus);
+        M35RollerFixtureLifecycleCommands.install();
         MinecraftForge.EVENT_BUS.addListener(this::registerCommand);
         MinecraftForge.EVENT_BUS.addListener(this::registerReloadListeners);
         MinecraftForge.EVENT_BUS.addListener(this::syncDataPack);
@@ -93,6 +95,7 @@ public final class SableForge {
         M27AerodynamicsCommands.register(m21Builder, event.getBuildContext());
         M28GoldenAircraftCommands.register(m21Builder, event.getBuildContext());
         event.getDispatcher().register(m21Builder);
+        M35RollerFixtureLifecycleCommands.register(event.getDispatcher());
         SableForgeRuntimeSmoke.commandRegistered();
     }
 

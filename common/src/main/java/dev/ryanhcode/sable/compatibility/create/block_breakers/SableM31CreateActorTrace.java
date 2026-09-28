@@ -16,11 +16,38 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Bounded, transition-only diagnostics for M31 external Create actors. */
 public final class SableM31CreateActorTrace {
     private static final Map<MovementContext, TraceState> STATES = Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<UUID, RollerEvidence> ROLLER_EVIDENCE = new ConcurrentHashMap<>();
+
+    public record RollerEvidence(int footprints, int clears, int paves) {
+        private RollerEvidence observe(final String event) {
+            return new RollerEvidence(this.footprints + (event.equals("ROLLER_FOOTPRINT_RESOLVED") ? 1 : 0),
+                    this.clears + (event.equals("ROLLER_CLEAR_SUCCESS") ? 1 : 0),
+                    this.paves + (event.equals("ROLLER_PAVE_SUCCESS") ? 1 : 0));
+        }
+    }
+
+    public static void beginRollerEvidence(final UUID bodyId) {
+        if (SableDiagnosticFlags.TRACE_CREATE_ACTORS) {
+            ROLLER_EVIDENCE.put(bodyId, new RollerEvidence(0, 0, 0));
+        }
+    }
+
+    public static RollerEvidence rollerEvidence(final UUID bodyId) {
+        return ROLLER_EVIDENCE.getOrDefault(bodyId, new RollerEvidence(0, 0, 0));
+    }
+
+    public static void clearRollerEvidence(final UUID bodyId) {
+        ROLLER_EVIDENCE.remove(bodyId);
+    }
 
     private SableM31CreateActorTrace() {
     }
@@ -93,6 +120,30 @@ public final class SableM31CreateActorTrace {
                               final String decision,
                               final CreateActorTargetGeometry.ActorSpace actorSpace) {
         mutation(event, context, owner, target, state, decision, actorSpace);
+    }
+
+    public static void roller(final String event, final MovementContext context, final SubLevel owner,
+                              final BlockPos target, final String decision,
+                              final CreateActorTargetGeometry.ActorSpace space) {
+        if (!SableDiagnosticFlags.TRACE_CREATE_ACTORS) {
+            return;
+        }
+        if (!context.world.isClientSide) {
+            ROLLER_EVIDENCE.computeIfPresent(owner.getUniqueId(), (id, evidence) -> evidence.observe(event));
+        }
+        final TraceState state = STATES.computeIfAbsent(context, ignored -> new TraceState());
+        if (state.rollerEvents.size() >= 64 || !state.rollerEvents.add(new RollerEventKey(event, target, decision))) {
+            return;
+        }
+        log(event, context, owner, target,
+                new SubLevelBlockBreakingUtility.TargetResolution(target,
+                        decision.startsWith("REJECT")
+                                ? net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()
+                                : context.world.getBlockState(target),
+                        space, SubLevelBlockBreakingUtility.Decision.PARENT_TARGET_RESOLVED),
+                "decision=" + decision + " rawMotion=" + format(context.motion)
+                        + " visibleMotion=" + format(space.visibleCenter()
+                        .subtract(owner.lastPose().transformPosition(space.storageCenter().subtract(context.motion)))));
     }
 
     public static void deployerInteraction(final MovementContext context,
@@ -194,6 +245,7 @@ public final class SableM31CreateActorTrace {
         private boolean discovered;
         private TargetKey target;
         private DeployerKey deployer;
+        private final Set<RollerEventKey> rollerEvents = new HashSet<>();
     }
 
     private record TargetKey(@Nullable BlockPos target, SubLevelBlockBreakingUtility.Decision decision) {
@@ -208,5 +260,8 @@ public final class SableM31CreateActorTrace {
     }
 
     private record DeployerKey(BlockPos target, String mode, String heldItem) {
+    }
+
+    private record RollerEventKey(String event, BlockPos target, String decision) {
     }
 }
