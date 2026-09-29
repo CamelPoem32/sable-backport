@@ -31570,3 +31570,171 @@ tasks.register('verifyM35RollerMovingRendering') {
         logger.lifecycle('verifyM35RollerMovingRendering PASS: native CPU wheel/frame, scoped bypass, visible transforms')
     }
 }
+
+tasks.register('verifyM36PortableInterfaces') {
+    group = 'forge backport'
+    description = 'Checks the Create 6.0.8 portable-interface handshake and Sable parent-space boundary.'
+    dependsOn tasks.named('classes')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+
+    File movement = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/portable_interface/PortableStorageInterfaceMovementMixin.java')
+    File rendering = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/portable_interface/PortableStorageInterfaceRenderMixin.java')
+    File geometry = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/portable_interface/SablePortableInterfaceTarget.java')
+    File config = file('src/main/resources/sable-common-forge.mixins.json')
+    File test = file('src/m36PortableInterfaceTest/java/dev/ryanhcode/sable/compatibility/create/portable_interface/M36PortableInterfaceGeometryTest.java')
+    File lifecycleTest = file('src/m36PortableInterfaceTest/java/dev/ryanhcode/sable/command/M36FixtureLifecycleTest.java')
+    File fixture = file('src/main/java/dev/ryanhcode/sable/command/M36PortableInterfaceFixtureCommands.java')
+    File forgeEntry = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+    File functions = file('src/main/resources/data/sable/functions/m36')
+    inputs.files(movement, rendering, geometry, config, test, lifecycleTest, fixture, forgeEntry, targetCreateJar)
+    inputs.dir(functions)
+    outputs.dir(layout.buildDirectory.dir('m36PortableInterfaceTest'))
+
+    doLast {
+        String mixins = config.getText('UTF-8')
+        String movementSource = movement.getText('UTF-8')
+        String renderSource = rendering.getText('UTF-8')
+        String geometrySource = geometry.getText('UTF-8')
+        String fixtureSource = fixture.getText('UTF-8')
+        String entrySource = forgeEntry.getText('UTF-8')
+        int commonBoundary = mixins.indexOf('"mixins"')
+        int movementRegistration = mixins.indexOf('"compatibility.create.behaviour_compatibility.portable_interface.PortableStorageInterfaceMovementMixin"')
+        int renderRegistration = mixins.indexOf('"compatibility.create.behaviour_compatibility.portable_interface.PortableStorageInterfaceRenderMixin"')
+        if (movementRegistration < commonBoundary || renderRegistration < 0 || renderRegistration > commonBoundary) {
+            throw new GradleException('M36 portable-interface mixins have incorrect common/client registration')
+        }
+        ['SableCreateActorWorldContext.owner(context)', 'SablePortableInterfaceTarget.resolve(context, owner)',
+         'enterParentInteractionSpace(context, owner)', 'this.findInterface(context, target.parentBlock())',
+         'original.call(context, target.parentBlock())', 'original.call(context)', 'this.reset(context)'].each { canary ->
+            if (!movementSource.contains(canary)) throw new GradleException("M36 lost handshake scope: ${canary}")
+        }
+        ['MIN_UP_DOT', 'CREATE_FACING_ERROR_SQR', 'transformPosition(rawActivePoint)',
+         'transformNormal(innerFacing)', 'PARENT_CHUNK_UNLOADED', 'OTHER_SABLE_BODY',
+         'HIDDEN_PLOT_TARGET'].each { canary ->
+            if (!geometrySource.contains(canary)) throw new GradleException("M36 lost physical candidate guard: ${canary}")
+        }
+        ['renderInContraption(', 'VisualizationManager;supportsVisualization',
+         'SableCreateContraptionContext.getContainingSubLevel(entity)', 'visualizationSupported : false'].each { canary ->
+            if (!renderSource.contains(canary)) throw new GradleException("M36 lost scoped CPU render fallback: ${canary}")
+        }
+        [movementSource, renderSource, geometrySource].each { source ->
+            ['@Overwrite', 'Entity.remove(', 'Level.setBlock(', 'Level.destroyBlock(',
+             'getAllEntities(', 'AABB.INFINITE'].each { forbidden ->
+                if (source.contains(forbidden)) throw new GradleException("M36 broadened interface hook: ${forbidden}")
+            }
+        }
+        if (!entrySource.contains('M36PortableInterfaceFixtureCommands.install()')
+                || !entrySource.contains('M36PortableInterfaceFixtureCommands.register(event.getDispatcher())')) {
+            throw new GradleException('M36 one-command fixture handler is not registered')
+        }
+        [item:'item', fluid:'fluid', run_item:'run_item', run_fluid:'run_fluid',
+         yaw90:'yaw90', disconnect:'disconnect', reset:'reset', cleanup:'cleanup'].each { name, action ->
+            File function = new File(functions, "${name}.mcfunction")
+            if (!function.isFile() || function.getText('UTF-8').trim() != "sable_m36 ${action}") {
+                throw new GradleException("M36 ${name} function must dispatch to the one authoritative command")
+            }
+            File packaged = file("${buildDir}/resources/main/data/sable/functions/m36/${name}.mcfunction")
+            if (!packaged.isFile()) throw new GradleException("M36 function not packaged: ${name}")
+        }
+        ['create_item', 'create_fluid'].each { name ->
+            File setup = new File(functions, "internal/${name}.mcfunction")
+            String commands = setup.getText('UTF-8')
+            int hull = commands.indexOf('setblock ~ ~ ~-2 minecraft:iron_block')
+            int assembler = commands.indexOf('setblock ~ ~1 ~-2 simulated:physics_assembler')
+            int validator = commands.indexOf('sable_m36 validate')
+            if (hull < 0 || assembler < hull || validator < assembler
+                    || commands.contains('fill ~4 ~-1 ~ ~14 ~1 ~ minecraft:air')) {
+                throw new GradleException("M36 ${name} outer starting block/order invalid")
+            }
+            ['create:sticky_mechanical_piston[facing=east',
+             'create:radial_chassis[axis=x,sticky_north=true,sticky_east=true]',
+             'create:creative_motor[facing=up]', 'create:clutch[axis=y,powered=false]',
+             'sable_m36 validate', 'sable_m36_station'].each { canary ->
+                if (!commands.contains(canary)) throw new GradleException("M36 ${name} fixture lost ${canary}")
+            }
+            if (name == 'create_item' && (!commands.contains('create:portable_storage_interface[facing=east]')
+                    || !commands.contains('create:portable_storage_interface[facing=west]')
+                    || !commands.contains('minecraft:hopper[facing=south,enabled=true]')
+                    || !commands.contains('minecraft:cobblestone 16'))) {
+                throw new GradleException('M36 item fixture lost native item transfer topology')
+            }
+            if (name == 'create_fluid' && (!commands.contains('create:portable_fluid_interface[facing=east]')
+                    || !commands.contains('create:portable_fluid_interface[facing=west]')
+                    || !commands.contains('create:mechanical_pump[facing=east]')
+                    || !commands.contains('create:fluid_tank'))) {
+                throw new GradleException('M36 fluid fixture lost native pump/tank topology')
+            }
+        }
+        ['searchMovedStructure(level, origin.north(2))', 'selected.size() != 22',
+         'getIncludedBlockPositions(Direction.EAST, false)',
+         'sourceCount(fixture)', 'destinationCount(fixture)', 'interfaceEntity.canTransfer()',
+         'CLEANUP phase=RETRACT_WAIT', 'assembler.assembleOrDisassemble(null)',
+         'CLEANUP COMPLETE', 'SETUP ROLLBACK COMPLETE'].each { canary ->
+            if (!fixtureSource.contains(canary)) throw new GradleException("M36 fixture contract lost: ${canary}")
+        }
+        ['final Lookup existing = lookup(source.getLevel())',
+         'final Lookup found = lookup(source.getLevel())',
+         'found.status.allowsCleanup()', 'existing.status.allowsSetup()',
+         'CleanupPhase.DISCONNECT_WAIT', 'powerFixtureStation(fixture)',
+         'stationConnected(fixture)', 'removeKnownFixture(fixture)',
+         'LookupStatus.PARTIALLY_CLEANED', 'LookupStatus.ORPHAN_MARKER',
+         'logCleanupException(cleanup, fixture, exception)',
+         'Sable.LOGGER.error("SABLE_M36_CLEANUP_EXCEPTION {}", details, exception)'].each { canary ->
+            if (!fixtureSource.contains(canary)) throw new GradleException("M36 resumable cleanup lost: ${canary}")
+        }
+        if (fixtureSource.contains('SETUP REFUSED: existing M36 fixture')
+                || fixtureSource.contains('CLEANUP REFUSED: fixture absent, ambiguous, or already cleaning up')) {
+            throw new GradleException('M36 retained contradictory setup/cleanup detectors')
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            [
+                'com/simibubi/create/content/contraptions/actors/psi/PortableStorageInterfaceMovement.class':
+                        ['visitNewPosition', 'findInterface', 'getStationaryInterfaceAt', 'getCurrentFacingIfValid',
+                         'WorkingPos', 'startTransferringTo', 'keepAlive', 'cancelStall', 'reset', 'renderInContraption',
+                         'supportsVisualization', 'PortableStorageInterfaceRenderer'],
+                'com/simibubi/create/content/contraptions/actors/psi/PortableStorageInterfaceBlockEntity.class':
+                        ['startTransferringTo', 'stopTransferring', 'keepAlive', 'connectedEntity',
+                         'neighbourChanged', 'isPowered'],
+                'com/simibubi/create/content/contraptions/actors/psi/PortableItemInterfaceBlockEntity.class':
+                        ['InterfaceItemHandler', 'getAllItems', 'startTransferringTo', 'getCapability'],
+                'com/simibubi/create/content/contraptions/actors/psi/PortableFluidInterfaceBlockEntity.class':
+                        ['InterfaceFluidHandler', 'getFluids', 'startTransferringTo', 'getCapability']
+            ].each { entryName, canaries ->
+                def entry = jar.getJarEntry(entryName)
+                if (entry == null) throw new GradleException("M36 Create class missing: ${entryName}")
+                String bytes = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                canaries.each { canary ->
+                    if (!bytes.contains(canary)) throw new GradleException("M36 Create bytecode changed: ${entryName} ${canary}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+
+        File output = layout.buildDirectory.dir('m36PortableInterfaceTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M36 requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath, test.absolutePath, lifecycleTest.absolutePath)
+        if (result != 0) throw new GradleException('M36 interface geometry compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.portable_interface.M36PortableInterfaceGeometryTest')
+                    .getMethod('run').invoke(null)
+            loader.loadClass('dev.ryanhcode.sable.command.M36FixtureLifecycleTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M36 interface geometry regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM36PortableInterfaces PASS: source canaries, scope and parent-space geometry')
+    }
+}
