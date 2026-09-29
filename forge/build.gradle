@@ -31686,6 +31686,39 @@ tasks.register('verifyM36PortableInterfaces') {
                 || fixtureSource.contains('CLEANUP REFUSED: fixture absent, ambiguous, or already cleaning up')) {
             throw new GradleException('M36 retained contradictory setup/cleanup detectors')
         }
+        ['chooseYawPlan(fixture, active.observers)', 'yawTargetCells(plan, fixture.kind)',
+         'classifyYawCell(fixture, cell)', 'ownership.allowed()',
+         'Occupancy.OLD_M36_STATION_BLOCK', 'Occupancy.UNRELATED_WORLD_BLOCK',
+         'YawPhase.DISCONNECT_WAIT', 'powerFixtureStation(fixture)',
+         'YawPhase.RETRACT_WAIT', 'retracted(fixture)',
+         'relocateYawStation(yaw, fixture)', 'removeStation(fixture, old)',
+         'buildStation(fixture.level, yaw.plan.station', 'YAW90 ROLLBACK',
+         'restoreYawDestination(fixture, oldDestinationCount)',
+         'setYawSource(fixture, oldSourceCount)',
+         'refillYawSource(fixture)', 'stationFacing == Direction.NORTH ? Math.PI / 2 : 0',
+         'YAWS.containsKey(fixture.marker.getUUID())', 'YAW90 COMPLETE'].each { canary ->
+            if (!fixtureSource.contains(canary)) throw new GradleException("M36 transactional yaw contract lost: ${canary}")
+        }
+        if (fixtureSource.contains('active.yaw = Math.PI / 2;')
+                || fixtureSource.contains('YAW90 REFUSED: new physical station cells are occupied')) {
+            throw new GradleException('M36 restored unsafe yaw-before-preflight behavior')
+        }
+        ['final BlockPos pump = station.relative(outward);',
+         'final BlockPos cog = pump.relative(outward.getCounterClockWise());',
+         'station.relative(outward, 2)', 'inspectOldFluidStation(yaw, fixture)',
+         'structuralFluidStateMatches(structuralState, actual, index)',
+         'component=SUPPORT_HULL', 'tankFluid=', 'tankAmount=',
+         'old stationary hardware mismatch: ', 'removePartialYawStation(fixture, yaw.plan)'].each { canary ->
+            if (!fixtureSource.contains(canary)) throw new GradleException("M36 fluid yaw footprint or inspection lost: ${canary}")
+        }
+        String fluidCommands = new File(functions, 'internal/create_fluid.mcfunction').getText('UTF-8')
+        ['setblock ~15 ~1 ~ create:portable_fluid_interface[facing=west]',
+         'setblock ~16 ~1 ~ create:mechanical_pump[facing=east]',
+         'setblock ~17 ~1 ~ create:fluid_tank',
+         'setblock ~16 ~1 ~-1 create:cogwheel[axis=x]',
+         'setblock ~15 ~1 ~-1 create:creative_motor[facing=east]'].each { command ->
+            if (!fluidCommands.contains(command)) throw new GradleException("M36 fluid station fixture changed: ${command}")
+        }
         JarFile jar = new JarFile(targetCreateJar)
         try {
             [

@@ -1,6 +1,6 @@
 # M36 Runtime Test Commands
 
-Use cheats/operator permission. Stand in an open area with a clear box at least 31 blocks east-west, 7 blocks tall and 5 blocks north-south. The setup function builds the entire Create piston, Sable assembler, moving interface, mounted storage, stationary interface, and native transfer equipment four blocks above your feet. No blocks, glue, items, or fluids need to be placed manually.
+Use cheats/operator permission. Stand in an open area with a clear box at least 31 blocks east-west, 7 blocks tall and 5 blocks north-south. The yaw test also needs clear space about 15 blocks north of the fixture, potentially up to 16 blocks above it. The setup function builds the entire Create piston, Sable assembler, moving interface, mounted storage, stationary interface, and native transfer equipment four blocks above your feet. No blocks, glue, items, or fluids need to be placed manually.
 
 ## Item interface
 
@@ -22,7 +22,13 @@ To test a level 90-degree yaw after the first run, use:
 /function sable:m36/yaw90
 ```
 
-The helper moves only the tagged M36 Sable and its command-owned stationary equipment; the piston retraction/extension remains native Create. The old station is removed, so it cannot remain a stale connection.
+Wait for `[M36] YAW90 COMPLETE`. The helper disconnects and retracts the native Create piston, moves only the tagged M36 Sable and its command-owned stationary equipment, and refills the finite mounted source. It leaves the piston retracted and stopped. Then run the same native test again:
+
+```mcfunction
+/function sable:m36/run_item
+```
+
+The second `ITEM ... PASS` must come from a fresh native connection and actual transfer at the new north-facing physical station. The old station is removed, so it cannot remain a stale connection. If a destination cell contains an unrelated block, yaw refuses before changing the body or station and prints its exact position and blockstate.
 
 To move the body out of connection range without moving the stationary interface:
 
@@ -44,7 +50,7 @@ The moving Create tank is filled with 4000 mB water by the setup validator. The 
 /function sable:m36/run_fluid
 ```
 
-PASS requires native `canTransfer`, a decrease in the moving tank and an increase in the stationary parent-world tank. A visual extension alone is not PASS. The yaw and disconnect helpers above apply to this fixture too.
+PASS requires native `canTransfer`, a decrease in the moving tank and an increase in the stationary parent-world tank. A visual extension alone is not PASS. After the first PASS, run `/function sable:m36/yaw90`, wait for `YAW90 COMPLETE station=<new> facing=north source=4000 destination=0`, then run `/function sable:m36/run_fluid` again. The helper inspects the five fixture-owned old station components, then refills the mounted tank to 4000 mB for this second native transfer. The second run must report a new native connection and `FLUID ... transferred=true hiddenPlotHandshake=false PASS`. The disconnect helper above also applies to this fixture.
 
 ## Teardown
 

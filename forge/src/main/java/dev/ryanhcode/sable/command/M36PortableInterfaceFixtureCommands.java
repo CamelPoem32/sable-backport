@@ -7,7 +7,10 @@ import com.simibubi.create.content.contraptions.chassis.ChassisBlockEntity;
 import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import com.simibubi.create.content.contraptions.piston.MechanicalPistonBlockEntity;
 import com.simibubi.create.content.contraptions.actors.psi.PortableStorageInterfaceBlockEntity;
+import com.simibubi.create.content.contraptions.actors.psi.PortableFluidInterfaceBlockEntity;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
+import com.simibubi.create.content.fluids.pump.PumpBlockEntity;
+import com.simibubi.create.content.fluids.tank.FluidTankBlockEntity;
 import com.simibubi.create.content.kinetics.motor.CreativeMotorBlockEntity;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
@@ -62,6 +65,7 @@ public final class M36PortableInterfaceFixtureCommands {
     private static Pending pending;
     private static final Map<UUID, Run> RUNS = new HashMap<>();
     private static final Map<UUID, Cleanup> CLEANUPS = new HashMap<>();
+    private static final Map<UUID, Yaw> YAWS = new HashMap<>();
 
     private M36PortableInterfaceFixtureCommands() {
     }
@@ -220,37 +224,29 @@ public final class M36PortableInterfaceFixtureCommands {
         }
         if (yaw90) {
             final Run active = RUNS.get(fixture.marker.getUUID());
-            if (active == null) {
+            if (active == null || YAWS.containsKey(fixture.marker.getUUID())
+                    || CLEANUPS.containsKey(fixture.marker.getUUID())) {
                 return refuse(source, "YAW90 REFUSED: start /function sable:m36/run_"
                         + fixture.kind.name().toLowerCase(java.util.Locale.ROOT) + " first");
             }
-            final double previousYaw = active.yaw;
-            active.yaw = Math.PI / 2;
-            active.offset = Vec3.ZERO;
-            hold(active);
-            if (!prepareStation(active)) {
-                active.yaw = previousYaw;
-                hold(active);
-                return refuse(source, "YAW90 REFUSED: new physical station cells are occupied");
+            final YawPlan plan = chooseYawPlan(fixture, active.observers);
+            if (plan == null) {
+                return refuse(source, "YAW90 REFUSED: all supported physical station targets contain unrelated blocks");
             }
-            active.sourceBefore = sourceCount(fixture);
-            active.destinationBefore = destinationCount(fixture);
-            active.age = 0;
-            active.connected = false;
-            active.actorObserved = false;
-            active.reported = false;
-            active.restarting = !retracted(fixture);
-            final CreativeMotorBlockEntity motor = fixtureMotor(fixture);
-            if (motor == null) {
-                return refuse(source, "YAW90 REFUSED: native piston motor missing");
-            }
-            motor.generatedSpeed.setValue(active.restarting ? 64 : -64);
-            M35RollerFixtureLifecycleCommands.setFixtureLever(fixture.level, fixture.body,
-                    fixture.origin, false);
-            tell(active.observers, fixture.level, "[M36] YAW90: level pose, physical station and native piston direction updated");
+            tell(active.observers, fixture.level, "[M36] YAW90 currentPose=yaw="
+                    + Math.toDegrees(active.yaw) + " offset=" + active.offset
+                    + " movingInterfaceBefore=" + movingInterface(fixture)
+                    + " stationBefore=" + fixture.station.blockPosition() + "/" + stationOutward(fixture));
+            tell(active.observers, fixture.level, "[M36] YAW90 targetPose=yaw=90 offset=" + plan.offset
+                    + " movingInterfaceAfter=" + plannedMovingInterface(fixture, plan.offset)
+                    + " stationAfter=" + plan.station + "/" + plan.outward);
+            RUNS.remove(fixture.marker.getUUID());
+            YAWS.put(fixture.marker.getUUID(), new Yaw(fixture, active, plan));
+            tell(active.observers, fixture.level, "[M36] YAW90 phase=STOP");
             return 1;
         }
-        if (!retracted(fixture)) {
+        if (YAWS.containsKey(fixture.marker.getUUID()) || CLEANUPS.containsKey(fixture.marker.getUUID())
+                || !retracted(fixture)) {
             return refuse(source, "RUN REFUSED: inner native piston must be retracted first");
         }
         final SubLevelPhysicsSystem physics = SubLevelPhysicsSystem.get(fixture.level);
@@ -258,8 +254,19 @@ public final class M36PortableInterfaceFixtureCommands {
             return refuse(source, "RUN REFUSED: fixture physics handle missing");
         }
         final Run prior = RUNS.remove(fixture.marker.getUUID());
-        final double yaw = yaw90 ? Math.PI / 2 : 0;
+        final Direction stationFacing = stationOutward(fixture);
+        if (stationFacing != Direction.EAST && stationFacing != Direction.NORTH) {
+            return refuse(source, "RUN REFUSED: M36 station has unsupported physical facing " + stationFacing);
+        }
+        final double yaw = stationFacing == Direction.NORTH ? Math.PI / 2 : 0;
         final Run run = new Run(fixture, yaw, observers(source));
+        if (yaw != 0) {
+            final int lift = fixture.station.blockPosition().getY() - fixture.marker.blockPosition().getY() - 1;
+            if (lift != 0 && lift != 8 && lift != 16) {
+                return refuse(source, "RUN REFUSED: yaw station lift is not fixture-owned: " + lift);
+            }
+            run.offset = new Vec3(0, lift, 0);
+        }
         hold(run);
         if (!prepareStation(run)) {
             if (prior != null) {
@@ -419,7 +426,7 @@ public final class M36PortableInterfaceFixtureCommands {
     }
 
     private static Direction stationOutward(final Fixture fixture) {
-        if (fixture.station == null || fixture.kind == Kind.ITEM) {
+        if (fixture.station == null) {
             return Direction.EAST;
         }
         final BlockPos station = fixture.station.blockPosition();
@@ -521,6 +528,85 @@ public final class M36PortableInterfaceFixtureCommands {
         return true;
     }
 
+    private static YawPlan chooseYawPlan(final Fixture fixture, final List<UUID> observers) {
+        for (final Vec3 offset : List.of(Vec3.ZERO, new Vec3(0, 8, 0), new Vec3(0, 16, 0))) {
+            final BlockPos station = rotatedStation(fixture.marker.blockPosition(), (int) offset.y);
+            final YawPlan plan = new YawPlan(station, Direction.NORTH, offset);
+            boolean clear = true;
+            for (final BlockPos cell : yawTargetCells(plan, fixture.kind)) {
+                final Occupancy ownership = classifyYawCell(fixture, cell);
+                if (!ownership.allowed()) {
+                    clear = false;
+                    tell(observers, fixture.level, "[M36] YAW90 OCCUPIED pos=" + cell.toShortString()
+                            + " state=" + (ownership == Occupancy.UNLOADED ? "<unloaded>"
+                                    : fixture.level.getBlockState(cell)) + " ownership=" + ownership);
+                }
+            }
+            if (clear) {
+                return plan;
+            }
+        }
+        return null;
+    }
+
+    static BlockPos rotatedStation(final BlockPos marker, final int lift) {
+        final Vector3d relative = new Vector3d(15, 1, 0);
+        new Quaterniond().rotationY(Math.PI / 2).transform(relative);
+        final Vec3 anchor = Vec3.atCenterOf(marker).add(0, lift, 0);
+        return BlockPos.containing(anchor.x + relative.x, anchor.y + relative.y, anchor.z + relative.z);
+    }
+
+    private static List<BlockPos> yawTargetCells(final YawPlan plan, final Kind kind) {
+        final List<BlockPos> cells = new ArrayList<>(stationCells(plan.station, plan.outward, kind));
+        cells.add(plan.station.above());
+        return cells;
+    }
+
+    private static Occupancy classifyYawCell(final Fixture fixture, final BlockPos cell) {
+        if (!fixture.level.hasChunkAt(cell)) {
+            return Occupancy.UNLOADED;
+        }
+        final BlockState state = fixture.level.getBlockState(cell);
+        if (state.isAir()) {
+            return Occupancy.AIR;
+        }
+        final BlockPos oldStation = fixture.station.blockPosition();
+        final Direction oldOutward = stationOutward(fixture);
+        if (oldOutward != null) {
+            final List<BlockPos> oldCells = stationCells(oldStation, oldOutward, fixture.kind);
+            final List<Block> expected = fixture.kind == Kind.ITEM
+                    ? List.of(fixture.kind.actor(), Blocks.HOPPER, Blocks.CHEST)
+                    : List.of(fixture.kind.actor(), AllBlocks.MECHANICAL_PUMP.get(),
+                            AllBlocks.FLUID_TANK.get(), AllBlocks.COGWHEEL.get(),
+                            AllBlocks.CREATIVE_MOTOR.get());
+            final int index = oldCells.indexOf(cell);
+            if (index >= 0 && state.is(expected.get(index))) {
+                return Occupancy.OLD_M36_STATION_BLOCK;
+            }
+            if (cell.equals(oldStation.above()) && state.is(Blocks.REDSTONE_BLOCK)) {
+                return Occupancy.CURRENT_M36_FIXTURE_BLOCK;
+            }
+        }
+        return Occupancy.UNRELATED_WORLD_BLOCK;
+    }
+
+    private static String movingInterface(final Fixture fixture) {
+        final BlockEntity controller = M35FixtureLookup.blockEntity(fixture.level, fixture.body, fixture.origin);
+        final int travel = controller instanceof MechanicalPistonBlockEntity piston ? Math.round(piston.offset) : 0;
+        final Vec3 raw = Vec3.atCenterOf(fixture.origin.east(travel + 1).above());
+        return BlockPos.containing(fixture.body.logicalPose().transformPosition(raw)).toShortString();
+    }
+
+    private static String plannedMovingInterface(final Fixture fixture, final Vec3 offset) {
+        final BlockEntity controller = M35FixtureLookup.blockEntity(fixture.level, fixture.body, fixture.origin);
+        final int travel = controller instanceof MechanicalPistonBlockEntity piston ? Math.round(piston.offset) : 0;
+        final Vector3d relative = new Vector3d(travel + 1, 1, 0);
+        new Quaterniond().rotationY(Math.PI / 2).transform(relative);
+        final Vec3 anchor = Vec3.atCenterOf(fixture.marker.blockPosition()).add(offset);
+        return BlockPos.containing(anchor.x + relative.x, anchor.y + relative.y, anchor.z + relative.z)
+                .toShortString();
+    }
+
     private static int sourceCount(final Fixture fixture) {
         final BlockEntity controller = M35FixtureLookup.blockEntity(fixture.level, fixture.body, fixture.origin);
         if (controller instanceof final MechanicalPistonBlockEntity piston
@@ -602,14 +688,14 @@ public final class M36PortableInterfaceFixtureCommands {
         return true;
     }
 
-    private static List<BlockPos> stationCells(final BlockPos station, final Direction outward, final Kind kind) {
+    static List<BlockPos> stationCells(final BlockPos station, final Direction outward, final Kind kind) {
         if (kind == Kind.ITEM) {
             return List.of(station, station.below(), station.below().south());
         }
-        final Direction back = outward.getOpposite();
-        final BlockPos pump = station.relative(back);
-        final BlockPos cog = pump.relative(back.getCounterClockWise());
-        return List.of(station, pump, station.relative(back, 2), cog, cog.relative(back.getOpposite()));
+        final BlockPos pump = station.relative(outward);
+        final BlockPos cog = pump.relative(outward.getCounterClockWise());
+        return List.of(station, pump, station.relative(outward, 2), cog,
+                cog.relative(outward.getOpposite()));
     }
 
     private static boolean removeStation(final Fixture fixture, final BlockPos station) {
@@ -634,6 +720,116 @@ public final class M36PortableInterfaceFixtureCommands {
         return true;
     }
 
+    private static String inspectOldFluidStation(final Yaw yaw, final Fixture fixture) {
+        final BlockPos station = fixture.station.blockPosition();
+        final Direction outward = yaw.originalOutward;
+        if (outward == null) {
+            return "station facing is ambiguous";
+        }
+        final boolean marked = fixture.marker.getTags().contains(ORIGIN_TAG)
+                && fixture.station.getTags().contains(STATION_TAG)
+                && !fixture.marker.isRemoved() && !fixture.station.isRemoved();
+        final List<BlockPos> cells = stationCells(station, outward, Kind.FLUID);
+        final List<String> names = List.of("PORTABLE_FLUID_INTERFACE", "MECHANICAL_PUMP",
+                "FLUID_TANK", "COGWHEEL", "CREATIVE_MOTOR");
+        final List<BlockState> expected = List.of(
+                Kind.FLUID.actor().defaultBlockState().setValue(BlockStateProperties.FACING,
+                        outward.getOpposite()),
+                AllBlocks.MECHANICAL_PUMP.get().defaultBlockState()
+                        .setValue(BlockStateProperties.FACING, outward),
+                AllBlocks.FLUID_TANK.get().defaultBlockState(),
+                AllBlocks.COGWHEEL.get().defaultBlockState()
+                        .setValue(BlockStateProperties.AXIS, outward.getAxis()),
+                AllBlocks.CREATIVE_MOTOR.get().defaultBlockState()
+                        .setValue(BlockStateProperties.FACING, outward));
+        final List<Class<? extends BlockEntity>> expectedEntities = List.of(
+                PortableFluidInterfaceBlockEntity.class, PumpBlockEntity.class,
+                FluidTankBlockEntity.class, BlockEntity.class, CreativeMotorBlockEntity.class);
+        String mismatch = marked ? null : "fixture marker ownership missing";
+        for (int index = 0; index < cells.size(); index++) {
+            final BlockPos cell = cells.get(index);
+            final boolean loaded = fixture.level.hasChunkAt(cell);
+            final BlockState actual = loaded ? fixture.level.getBlockState(cell) : Blocks.AIR.defaultBlockState();
+            final BlockEntity blockEntity = loaded ? fixture.level.getBlockEntity(cell) : null;
+            final BlockState structuralState = expected.get(index);
+            final boolean stateMatches = loaded && structuralFluidStateMatches(structuralState, actual, index);
+            final boolean entityMatches = expectedEntities.get(index).isInstance(blockEntity);
+            final boolean match = marked && stateMatches && entityMatches;
+            final String actualEntity = blockEntity == null ? "absent" : blockEntity.getClass().getSimpleName();
+            final StringBuilder diagnostic = new StringBuilder("[M36] YAW90 OLD_HARDWARE component=")
+                    .append(names.get(index)).append(" pos=").append(cell.toShortString())
+                    .append(" expectedState=").append(structuralState)
+                    .append(" actualState=").append(loaded ? actual : "<unloaded>")
+                    .append(" expectedBE=").append(expectedEntities.get(index).getSimpleName())
+                    .append(" actualBE=").append(actualEntity)
+                    .append(" ownership=").append(marked ? "M36_MARKED_STATION" : "UNKNOWN")
+                    .append(" match=").append(match);
+            if (index == 2 && blockEntity != null) {
+                final IFluidHandler fluids = blockEntity.getCapability(ForgeCapabilities.FLUID_HANDLER)
+                        .resolve().orElse(null);
+                final FluidStack fluid = fluids == null || fluids.getTanks() == 0
+                        ? FluidStack.EMPTY : fluids.getFluidInTank(0);
+                diagnostic.append(" tankFluid=").append(fluid.getFluid())
+                        .append(" tankAmount=").append(fluid.getAmount());
+                if (!fluid.isEmpty() && fluid.getFluid() != Fluids.WATER && mismatch == null) {
+                    mismatch = "FLUID_TANK at " + cell.toShortString()
+                            + " contains non-fixture fluid " + fluid.getFluid();
+                }
+            } else if (blockEntity instanceof final PumpBlockEntity pump) {
+                diagnostic.append(" pumpSpeed=").append(pump.getSpeed());
+            } else if (blockEntity instanceof final CreativeMotorBlockEntity motor) {
+                diagnostic.append(" motorSpeed=").append(motor.generatedSpeed.getValue());
+            }
+            tell(yaw.previous.observers, fixture.level, diagnostic.toString());
+            if (!match && mismatch == null) {
+                mismatch = names.get(index) + " at " + cell.toShortString()
+                        + " expected " + structuralState.getBlock() + " but found "
+                        + (loaded ? actual : "<unloaded>") + " / BE=" + actualEntity;
+            }
+        }
+        tell(yaw.previous.observers, fixture.level, "[M36] YAW90 OLD_HARDWARE component=SUPPORT_HULL"
+                + " expectedState=NONE ownership=M36_STATION_INDEPENDENT match=" + marked);
+        tell(yaw.previous.observers, fixture.level,
+                "[M36] YAW90 OLD_HARDWARE component=PIPE expectedState=NONE"
+                        + " ownership=M36_STATION_DIRECT_PUMP_TO_TANK match=true");
+        return mismatch;
+    }
+
+    private static boolean fixtureFluidSourceIsWater(final Fixture fixture) {
+        final BlockEntity storage = M35FixtureLookup.blockEntity(fixture.level, fixture.body,
+                fixture.origin.east().south());
+        final IFluidHandler fluids = storage == null ? null
+                : storage.getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElse(null);
+        if (fluids == null || fluids.getTanks() == 0) {
+            return false;
+        }
+        final FluidStack fluid = fluids.getFluidInTank(0);
+        return fluid.isEmpty() || fluid.getFluid() == Fluids.WATER;
+    }
+
+    static boolean structuralFluidStateMatches(final BlockState expected, final BlockState actual,
+                                               final int componentIndex) {
+        if (!actual.is(expected.getBlock())) {
+            return false;
+        }
+        if (componentIndex == 2) {
+            return structuralFluidSignatureMatches(true, false, componentIndex);
+        }
+        if (componentIndex == 3) {
+            return structuralFluidSignatureMatches(true,
+                    actual.getValue(BlockStateProperties.AXIS)
+                            == expected.getValue(BlockStateProperties.AXIS), componentIndex);
+        }
+        return structuralFluidSignatureMatches(true,
+                actual.getValue(BlockStateProperties.FACING)
+                        == expected.getValue(BlockStateProperties.FACING), componentIndex);
+    }
+
+    static boolean structuralFluidSignatureMatches(final boolean sameBlock,
+                                                   final boolean aligned, final int componentIndex) {
+        return sameBlock && (componentIndex == 2 || aligned);
+    }
+
     private static void buildStation(final ServerLevel level, final BlockPos station,
                                      final Direction outward, final Kind kind) {
         level.setBlock(station, kind.actor().defaultBlockState()
@@ -644,17 +840,16 @@ public final class M36PortableInterfaceFixtureCommands {
             level.setBlock(station.below().south(), Blocks.CHEST.defaultBlockState(), 3);
             return;
         }
-        final Direction back = outward.getOpposite();
-        final BlockPos pump = station.relative(back);
-        final BlockPos cog = pump.relative(back.getCounterClockWise());
+        final BlockPos pump = station.relative(outward);
+        final BlockPos cog = pump.relative(outward.getCounterClockWise());
         level.setBlock(pump, AllBlocks.MECHANICAL_PUMP.get().defaultBlockState()
-                .setValue(BlockStateProperties.FACING, back), 3);
-        level.setBlock(station.relative(back, 2), AllBlocks.FLUID_TANK.get().defaultBlockState(), 3);
+                .setValue(BlockStateProperties.FACING, outward), 3);
+        level.setBlock(station.relative(outward, 2), AllBlocks.FLUID_TANK.get().defaultBlockState(), 3);
         level.setBlock(cog, AllBlocks.COGWHEEL.get().defaultBlockState()
-                .setValue(BlockStateProperties.AXIS, back.getAxis()), 3);
-        level.setBlock(cog.relative(back.getOpposite()), AllBlocks.CREATIVE_MOTOR.get().defaultBlockState()
-                .setValue(BlockStateProperties.FACING, back), 3);
-        if (level.getBlockEntity(cog.relative(back.getOpposite()))
+                .setValue(BlockStateProperties.AXIS, outward.getAxis()), 3);
+        level.setBlock(cog.relative(outward.getOpposite()), AllBlocks.CREATIVE_MOTOR.get().defaultBlockState()
+                .setValue(BlockStateProperties.FACING, outward), 3);
+        if (level.getBlockEntity(cog.relative(outward.getOpposite()))
                 instanceof final CreativeMotorBlockEntity motor) {
             motor.generatedSpeed.setValue(64);
         }
@@ -716,6 +911,9 @@ public final class M36PortableInterfaceFixtureCommands {
             return refuse(source, "CLEANUP REFUSED: fixture status=" + found.status);
         }
         final Fixture fixture = found.fixture;
+        if (YAWS.containsKey(fixture.marker.getUUID())) {
+            return refuse(source, "CLEANUP REFUSED: M36 yaw relocation is still retracting; wait for YAW90 COMPLETE");
+        }
         if (CLEANUPS.containsKey(fixture.marker.getUUID())) {
             tell(observers(source), fixture.level, "[M36] CLEANUP: already in progress");
             return 1;
@@ -744,6 +942,11 @@ public final class M36PortableInterfaceFixtureCommands {
                 advance(cleanup);
             }
         }
+        for (final Yaw yaw : List.copyOf(YAWS.values())) {
+            if (yaw.previous.fixture.level.getServer() == event.getServer()) {
+                advance(yaw);
+            }
+        }
         for (final Run run : List.copyOf(RUNS.values())) {
             if (run.fixture.level.getServer() == event.getServer()) {
                 advance(run);
@@ -752,6 +955,11 @@ public final class M36PortableInterfaceFixtureCommands {
     }
 
     private static void postPhysicsTick(final ForgeSablePostPhysicsTickEvent event) {
+        for (final Yaw yaw : YAWS.values()) {
+            if (yaw.previous.fixture.level == event.getPhysicsSystem().getLevel()) {
+                hold(yaw.previous);
+            }
+        }
         for (final Run run : RUNS.values()) {
             if (run.fixture.level == event.getPhysicsSystem().getLevel()) {
                 hold(run);
@@ -771,6 +979,211 @@ public final class M36PortableInterfaceFixtureCommands {
                 }
             }
         }
+    }
+
+    private static void advance(final Yaw yaw) {
+        final Fixture fixture = fixture(yaw.previous.fixture.level);
+        if (fixture == null || fixture.body == null
+                || !fixture.marker.getUUID().equals(yaw.previous.fixture.marker.getUUID())) {
+            failYaw(yaw, "fixture ownership or outer body changed");
+            return;
+        }
+        if (++yaw.age > TIMEOUT_TICKS) {
+            failYaw(yaw, "native piston did not retract within " + TIMEOUT_TICKS
+                    + " ticks; fixture remains available to cleanup");
+            return;
+        }
+        try {
+            hold(yaw.previous);
+            if (yaw.phase == YawPhase.STOP) {
+                M35RollerFixtureLifecycleCommands.setFixtureLever(fixture.level, fixture.body,
+                        fixture.origin, true);
+                yaw.phase = YawPhase.DISCONNECT_WAIT;
+                tell(yaw.previous.observers, fixture.level, "[M36] YAW90 phase=DISCONNECT_WAIT");
+            } else if (yaw.phase == YawPhase.DISCONNECT_WAIT) {
+                if (!powerFixtureStation(fixture)) {
+                    failYaw(yaw, "old station disconnect cell is not fixture-owned");
+                } else if (++yaw.disconnectAge >= 4 && !stationConnected(fixture)
+                        && !actorHandshakeActive(fixture)) {
+                    yaw.phase = YawPhase.REVERSE;
+                    tell(yaw.previous.observers, fixture.level, "[M36] YAW90 phase=REVERSE");
+                }
+            } else if (yaw.phase == YawPhase.REVERSE) {
+                if (retracted(fixture)) {
+                    yaw.phase = YawPhase.RELOCATE;
+                    return;
+                }
+                final CreativeMotorBlockEntity motor = fixtureMotor(fixture);
+                if (motor == null) {
+                    failYaw(yaw, "native piston motor missing");
+                    return;
+                }
+                motor.generatedSpeed.setValue(64);
+                M35RollerFixtureLifecycleCommands.setFixtureLever(fixture.level, fixture.body,
+                        fixture.origin, false);
+                yaw.phase = YawPhase.RETRACT_WAIT;
+                tell(yaw.previous.observers, fixture.level, "[M36] YAW90 phase=RETRACT_WAIT");
+            } else if (yaw.phase == YawPhase.RETRACT_WAIT && retracted(fixture)) {
+                M35RollerFixtureLifecycleCommands.setFixtureLever(fixture.level, fixture.body,
+                        fixture.origin, true);
+                yaw.phase = YawPhase.RELOCATE;
+            } else if (yaw.phase == YawPhase.RELOCATE) {
+                relocateYawStation(yaw, fixture);
+            }
+        } catch (final RuntimeException exception) {
+            Sable.LOGGER.error("SABLE_M36_YAW90_RELOCATION_FAILURE marker={} phase={}",
+                    fixture.marker.getUUID(), yaw.phase, exception);
+            failYaw(yaw, exception.getClass().getSimpleName() + ": " + exception.getMessage());
+        }
+    }
+
+    private static void relocateYawStation(final Yaw yaw, final Fixture fixture) {
+        if (!retracted(fixture)) {
+            failYaw(yaw, "native piston is no longer retracted");
+            return;
+        }
+        for (final BlockPos cell : yawTargetCells(yaw.plan, fixture.kind)) {
+            final Occupancy ownership = classifyYawCell(fixture, cell);
+            if (!ownership.allowed()) {
+                tell(yaw.previous.observers, fixture.level, "[M36] YAW90 OCCUPIED pos="
+                        + cell.toShortString() + " state=" + (ownership == Occupancy.UNLOADED ? "<unloaded>"
+                                : fixture.level.getBlockState(cell))
+                        + " ownership=" + ownership);
+                failYaw(yaw, "destination changed during native retraction; old station was preserved");
+                return;
+            }
+        }
+        final BlockPos old = fixture.station.blockPosition();
+        if (fixture.kind == Kind.FLUID) {
+            final String mismatch = inspectOldFluidStation(yaw, fixture);
+            if (mismatch != null) {
+                failYaw(yaw, "old stationary hardware mismatch: " + mismatch);
+                return;
+            }
+            if (!fixtureFluidSourceIsWater(fixture)) {
+                failYaw(yaw, "mounted source tank contains an unexpected fluid or has no native capability");
+                return;
+            }
+        }
+        final int oldDestinationCount = destinationCount(fixture);
+        final int oldSourceCount = sourceCount(fixture);
+        if (oldDestinationCount < 0 || !removeStation(fixture, old)) {
+            failYaw(yaw, "old stationary hardware changed after structural inspection at "
+                    + old.toShortString() + " destinationCount=" + oldDestinationCount);
+            return;
+        }
+        removeIf(fixture.level, old.above(), Blocks.REDSTONE_BLOCK);
+        boolean committed = false;
+        try {
+            yaw.previous.yaw = Math.PI / 2;
+            yaw.previous.offset = yaw.plan.offset;
+            hold(yaw.previous);
+            final BlockPos transformedStation = BlockPos.containing(fixture.body.logicalPose()
+                    .transformPosition(Vec3.atCenterOf(fixture.origin.offset(15, 1, 0))));
+            final Vec3 transformedFacing = fixture.body.logicalPose().transformNormal(new Vec3(1, 0, 0));
+            if (!transformedStation.equals(yaw.plan.station)
+                    || transformedFacing.distanceToSqr(new Vec3(0, 0, -1)) > 0.5) {
+                throw new IllegalStateException("transformed moving-interface pose differs from preflight target");
+            }
+            buildStation(fixture.level, yaw.plan.station, yaw.plan.outward, fixture.kind);
+            fixture.station.setPos(yaw.plan.station.getX(), yaw.plan.station.getY(), yaw.plan.station.getZ());
+            if (!fixture.level.getBlockState(yaw.plan.station).is(fixture.kind.actor())
+                    || destinationCount(fixture) != 0 || !refillYawSource(fixture)) {
+                throw new IllegalStateException("new station or finite native source could not be prepared");
+            }
+            final CreativeMotorBlockEntity motor = fixtureMotor(fixture);
+            if (motor == null) {
+                throw new IllegalStateException("native piston motor missing after rotation");
+            }
+            motor.generatedSpeed.setValue(-64);
+            M35RollerFixtureLifecycleCommands.setFixtureLever(fixture.level, fixture.body,
+                    fixture.origin, true);
+            committed = true;
+        } finally {
+            if (!committed) {
+                removePartialYawStation(fixture, yaw.plan);
+                fixture.station.setPos(old.getX(), old.getY(), old.getZ());
+                yaw.previous.yaw = yaw.originalYaw;
+                yaw.previous.offset = yaw.originalOffset;
+                hold(yaw.previous);
+                buildStation(fixture.level, old, yaw.originalOutward, fixture.kind);
+                restoreYawDestination(fixture, oldDestinationCount);
+                setYawSource(fixture, oldSourceCount);
+                tell(yaw.previous.observers, fixture.level, "[M36] YAW90 ROLLBACK old pose and station restored");
+            }
+        }
+        YAWS.remove(fixture.marker.getUUID());
+        tell(yaw.previous.observers, fixture.level, "[M36] YAW90 COMPLETE station="
+                + yaw.plan.station.toShortString() + " facing=" + yaw.plan.outward
+                + " source=" + sourceCount(fixture) + " destination=" + destinationCount(fixture));
+    }
+
+    private static void removePartialYawStation(final Fixture fixture, final YawPlan plan) {
+        final List<Block> expected = fixture.kind == Kind.ITEM
+                ? List.of(fixture.kind.actor(), Blocks.HOPPER, Blocks.CHEST)
+                : List.of(fixture.kind.actor(), AllBlocks.MECHANICAL_PUMP.get(),
+                        AllBlocks.FLUID_TANK.get(), AllBlocks.COGWHEEL.get(),
+                        AllBlocks.CREATIVE_MOTOR.get());
+        final List<BlockPos> cells = stationCells(plan.station, plan.outward, fixture.kind);
+        for (int index = 0; index < cells.size(); index++) {
+            removeIf(fixture.level, cells.get(index), expected.get(index));
+        }
+    }
+
+    private static boolean refillYawSource(final Fixture fixture) {
+        return setYawSource(fixture, fixture.kind == Kind.ITEM ? 16 : 4000);
+    }
+
+    private static boolean setYawSource(final Fixture fixture, final int count) {
+        if (count < 0) {
+            return false;
+        }
+        final BlockEntity storage = M35FixtureLookup.blockEntity(fixture.level, fixture.body,
+                fixture.origin.east().south());
+        if (fixture.kind == Kind.ITEM && storage instanceof final net.minecraft.world.Container chest) {
+            chest.clearContent();
+            chest.setItem(0, new ItemStack(Items.COBBLESTONE, count));
+            chest.setChanged();
+            return sourceCount(fixture) == count;
+        }
+        if (fixture.kind == Kind.FLUID && storage != null) {
+            final IFluidHandler fluids = storage.getCapability(ForgeCapabilities.FLUID_HANDLER)
+                    .resolve().orElse(null);
+            if (fluids != null) {
+                fluids.drain(Integer.MAX_VALUE, IFluidHandler.FluidAction.EXECUTE);
+                return fluids.fill(new FluidStack(Fluids.WATER, count),
+                        IFluidHandler.FluidAction.EXECUTE) == count;
+            }
+        }
+        return false;
+    }
+
+    private static void restoreYawDestination(final Fixture fixture, final int count) {
+        final BlockPos station = fixture.station.blockPosition();
+        if (fixture.kind == Kind.ITEM && fixture.level.getBlockEntity(station.below().south())
+                instanceof final net.minecraft.world.Container chest) {
+            int remaining = count;
+            for (int slot = 0; slot < chest.getContainerSize() && remaining > 0; slot++) {
+                final int amount = Math.min(remaining, 64);
+                chest.setItem(slot, new ItemStack(Items.COBBLESTONE, amount));
+                remaining -= amount;
+            }
+            chest.setChanged();
+        } else if (fixture.kind == Kind.FLUID) {
+            final Direction outward = stationOutward(fixture);
+            final BlockEntity tank = outward == null ? null
+                    : fixture.level.getBlockEntity(station.relative(outward.getOpposite(), 2));
+            final IFluidHandler fluids = tank == null ? null
+                    : tank.getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElse(null);
+            if (fluids != null) {
+                fluids.fill(new FluidStack(Fluids.WATER, count), IFluidHandler.FluidAction.EXECUTE);
+            }
+        }
+    }
+
+    private static void failYaw(final Yaw yaw, final String reason) {
+        YAWS.remove(yaw.previous.fixture.marker.getUUID());
+        tell(yaw.previous.observers, yaw.previous.fixture.level, "[M36] YAW90 FAILED: " + reason);
     }
 
     private static void advance(final Run run) {
@@ -1095,6 +1508,7 @@ public final class M36PortableInterfaceFixtureCommands {
         pending = null;
         RUNS.clear();
         CLEANUPS.clear();
+        YAWS.clear();
     }
 
     private static void removeStatic(final ServerLevel level, final BlockPos origin, final Kind kind,
@@ -1175,6 +1589,40 @@ public final class M36PortableInterfaceFixtureCommands {
 
     enum CleanupPhase {
         STOP, DISCONNECT_WAIT, REVERSE, RETRACT_WAIT, INNER_DISASSEMBLED, OUTER_DISASSEMBLE, REMOVE
+    }
+
+    enum Occupancy {
+        AIR, CURRENT_M36_FIXTURE_BLOCK, OLD_M36_STATION_BLOCK, UNRELATED_WORLD_BLOCK, UNLOADED;
+
+        boolean allowed() {
+            return this == AIR || this == CURRENT_M36_FIXTURE_BLOCK || this == OLD_M36_STATION_BLOCK;
+        }
+    }
+
+    private record YawPlan(BlockPos station, Direction outward, Vec3 offset) {
+    }
+
+    private enum YawPhase {
+        STOP, DISCONNECT_WAIT, REVERSE, RETRACT_WAIT, RELOCATE
+    }
+
+    private static final class Yaw {
+        final Run previous;
+        final YawPlan plan;
+        final double originalYaw;
+        final Vec3 originalOffset;
+        final Direction originalOutward;
+        YawPhase phase = YawPhase.STOP;
+        int age;
+        int disconnectAge;
+
+        Yaw(final Fixture fixture, final Run previous, final YawPlan plan) {
+            this.previous = previous;
+            this.plan = plan;
+            this.originalYaw = previous.yaw;
+            this.originalOffset = previous.offset;
+            this.originalOutward = stationOutward(fixture);
+        }
     }
 
     private static final class Run {
