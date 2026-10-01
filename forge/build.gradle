@@ -31771,3 +31771,262 @@ tasks.register('verifyM36PortableInterfaces') {
         logger.lifecycle('verifyM36PortableInterfaces PASS: source canaries, scope and parent-space geometry')
     }
 }
+
+tasks.register('verifyM37FunnelParentWorld') {
+    group = 'forge backport'
+    description = 'Checks the Create 6.0.8 moving-Funnel entity/storage boundary in parent-visible space.'
+    dependsOn tasks.named('classes')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+
+    File mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/funnel/FunnelMovementBehaviourMixin.java')
+    File target = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/funnel/SableMovingFunnelTarget.java')
+    File config = file('src/main/resources/sable-common-forge.mixins.json')
+    File test = file('src/m37FunnelTest/java/dev/ryanhcode/sable/compatibility/create/funnel/M37FunnelGeometryTest.java')
+    File fixture = file('src/main/java/dev/ryanhcode/sable/command/M37FunnelFixtureCommands.java')
+    File fixtureObservation = file('src/main/java/dev/ryanhcode/sable/command/M37FixtureGeometryObservation.java')
+    File fixtureLayout = file('src/main/java/dev/ryanhcode/sable/command/M37FunnelFixtureLayout.java')
+    File timingMixin = file('src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/funnel/FunnelFixtureTimingMixin.java')
+    File chestRenderProbe = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java')
+    File forgeEntry = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+    File functions = file('src/main/resources/data/sable/functions/m37')
+    inputs.files(mixin, target, config, test, fixture, fixtureObservation, fixtureLayout, timingMixin,
+            chestRenderProbe, forgeEntry, targetCreateJar)
+    inputs.dir(functions)
+    outputs.dir(layout.buildDirectory.dir('m37FunnelTest'))
+
+    doLast {
+        String mixinSource = mixin.getText('UTF-8')
+        String targetSource = target.getText('UTF-8')
+        String mixins = config.getText('UTF-8')
+        String fixtureSource = fixture.getText('UTF-8')
+        String observationSource = fixtureObservation.getText('UTF-8')
+        String entrySource = forgeEntry.getText('UTF-8')
+        if (!mixins.contains('"compatibility.create.behaviour_compatibility.funnel.FunnelMovementBehaviourMixin"')) {
+            throw new GradleException('M37 moving-Funnel mixin is not registered')
+        }
+        if (!mixins.contains('"compatibility.create.behaviour_compatibility.funnel.FunnelFixtureTimingMixin"')
+                || !timingMixin.getText('UTF-8').contains('@Inject(method = "succ", at = @At("HEAD"))')
+                || !timingMixin.getText('UTF-8').contains('M37FunnelFixtureCommands.observeNativeSucc(context, pos);')) {
+            throw new GradleException('M37 read-only native query witness is not registered')
+        }
+        ['@Mixin(value = FunnelMovementBehaviour.class, remap = false)',
+         '@WrapMethod(method = "visitNewPosition")', 'SableCreateActorWorldContext.owner(context)',
+         'if (owner == null)', 'original.call(context, proposedRaw)',
+         'SableMovingFunnelTarget.resolve(context, owner)', 'if (!target.accepted())',
+         'enterParentSpace(context, owner)', 'original.call(context, target.parentBlock())',
+         'public void tick(final MovementContext context)', 'SABLE$EXTERNAL_FUNNEL_CELL'].each { canary ->
+            if (!mixinSource.contains(canary)) throw new GradleException("M37 actor hook lost ${canary}")
+        }
+        ['@WrapOperation(method = "succ"', '@WrapOperation(method = "extract"',
+         'Sable.HELPER.getContaining(level, entity.position()) == null'].each { canary ->
+            if (!mixinSource.contains(canary)) throw new GradleException("M37 parent-only entity query lost ${canary}")
+        }
+        ['FunnelBlock.getFunnelFacing(context.state)', 'resolveGeometry(owner.logicalPose()',
+         'PARENT_CHUNK_UNLOADED', 'HIDDEN_PLOT_TARGET', 'OTHER_SABLE_BODY',
+         'Sable.HELPER.getAllIntersecting'].each { canary ->
+            if (!targetSource.contains(canary)) throw new GradleException("M37 target guard lost ${canary}")
+        }
+        [mixinSource, targetSource].each { source ->
+            ['@Overwrite', 'Level.setBlock(', 'Level.destroyBlock(', 'getAllEntities(',
+             'AABB.INFINITE', 'getCapability(', 'new ItemEntity('].each { forbidden ->
+                if (source.contains(forbidden)) throw new GradleException("M37 broadened native Funnel path: ${forbidden}")
+            }
+        }
+        if (!entrySource.contains('M37FunnelFixtureCommands.install()')
+                || !entrySource.contains('M37FunnelFixtureCommands.register(event.getDispatcher())')) {
+            throw new GradleException('M37 one-command fixture handler is not registered')
+        }
+        [insert:'insert', extract:'extract', entity:'entity', run:'run', yaw90:'yaw90',
+         disconnect:'disconnect', cleanup:'cleanup'].each { name, action ->
+            File function = new File(functions, "${name}.mcfunction")
+            if (!function.isFile() || function.getText('UTF-8').trim() != "sable_m37 ${action}") {
+                throw new GradleException("M37 ${name} must dispatch to the fixture command")
+            }
+            if (!file("${buildDir}/resources/main/data/sable/functions/m37/${name}.mcfunction").isFile()) {
+                throw new GradleException("M37 ${name} is not packaged")
+            }
+        }
+        [insert:[12, 2, 0], extract:[14, 1, 0], entity:[14, 1, 0]].each { mode, station ->
+            File setup = new File(functions, "internal/create_${mode}.mcfunction")
+            if (!setup.isFile()
+                    || !file("${buildDir}/resources/main/data/sable/functions/m37/internal/create_${mode}.mcfunction").isFile()) {
+                throw new GradleException("M37 ${mode} setup is not packaged")
+            }
+            String commands = setup.getText('UTF-8')
+            if (!commands.trim().endsWith('sable_m37 validate')
+                    || !commands.contains('create:radial_chassis[axis=x,sticky_north=true,sticky_east=true]')
+                    || !commands.contains('create:andesite_funnel[')
+                    || !commands.contains('minecraft:chest[')
+                    || !commands.contains('minecraft:iron_block')) {
+                throw new GradleException("M37 ${mode} lost fixture topology")
+            }
+            Map<List<Integer>, String> cells = [:]
+            commands.eachLine { line ->
+                if (line.startsWith('fill ') && !line.contains('create:piston_extension_pole[facing=east]')) {
+                    throw new GradleException("M37 ${mode} has an unverified fill: ${line}")
+                }
+                if (line.startsWith('setblock ')) {
+                    String[] pieces = line.split(/\s+/)
+                    def coord = (1..3).collect { index -> pieces[index] == '~' ? 0 : pieces[index].substring(1).toInteger() }
+                    cells[coord] = pieces[4]
+                }
+            }
+            if (cells[[0, 0, -2]] != 'minecraft:iron_block'
+                    || cells[[0, 1, -2]] != 'simulated:physics_assembler'
+                    || !cells[[1, 1, 0]].startsWith('create:andesite_funnel[')
+                    || (mode == 'insert' && (cells.containsKey(station)
+                            || !cells[[12, -2, 0]].startsWith('create:andesite_funnel[')
+                            || !cells[[12, -3, 0]].startsWith('minecraft:chest[')))
+                    || (mode == 'extract' && !cells[station].startsWith('create:andesite_funnel['))
+                    || (mode == 'entity' && cells[[14, 0, 0]] != 'minecraft:stone')) {
+                throw new GradleException("M37 ${mode} final assembler/payload/station map invalid")
+            }
+            if (mode == 'insert' && (cells.containsKey([12, -2, 1])
+                    || !cells[[1, 0, 0]].contains('sticky_north=true,sticky_east=true')
+                    || !cells[[1, 1, 0]].contains('facing=up,extracting=true')
+                    || !cells[[1, 0, 1]].startsWith('minecraft:chest['))) {
+                throw new GradleException('M37 INSERT collector must start unpowered and native chassis faces attached')
+            }
+            if (mode == 'extract' && (!cells[[15, 1, 0]].startsWith('minecraft:chest[')
+                    || cells[[14, 0, 0]] != 'minecraft:stone'
+                    || cells[[14, 1, 1]] != 'minecraft:redstone_block')) {
+                throw new GradleException('M37 EXTRACT station/hold does not match native pickup cell')
+            }
+            if (station[0] < 12 || (mode != 'insert' && station[2] != 0)) {
+                throw new GradleException("M37 ${mode} station touches outer hull")
+            }
+        }
+        ['searchMovedStructure(level, origin.north(2))', 'selected.size() != 22',
+         'getIncludedBlockPositions(Direction.EAST, false)', 'SETUP ROLLBACK COMPLETE',
+         'SETUP phase=READY', 'Lookup existing = lookup(level)', 'final Lookup found = lookup(source.getLevel())',
+         'CleanupPhase.RETRACT_WAIT', 'assembler.assembleOrDisassemble(null)',
+         'CLEANUP COMPLETE', 'YAW90 COMPLETE', 'old station fingerprint changed',
+         'sourceCount(fixture)', 'destinationCount(fixture)'].each { canary ->
+            if (!fixtureSource.contains(canary)) throw new GradleException("M37 fixture lost ${canary}")
+        }
+        ['traceStationComponent(build, "PARENT_FUNNEL"', 'traceStationComponent(build, "PARENT_CHEST"',
+         'traceStationConnectivity(build', 'traceStationSignal(build',
+         'level.hasNeighborSignal(intake)', '!level.hasNeighborSignal(station)',
+         'MOVING_PAYLOAD capturedBlockCount=', 'capturedChestBECount=', 'mountedStorageCount='].each { canary ->
+            if (!fixtureSource.contains(canary)) throw new GradleException("M37 station/payload validation lost ${canary}")
+        }
+        ['INSERT_GEOMETRY', 'EXTRACT_GEOMETRY', 'movingExtractObserved', 'movingInsertObserved',
+         'entityQueryResolved=', 'endToEndTransfer=', 'STATIONARY_ITEM_SPAWN',
+         'MOVING_SUCC_QUERY', 'MOVING_INSERT_SUCCESS', 'sourceItemStaged=true'].each { canary ->
+            if (!fixtureSource.contains(canary)) throw new GradleException("M37 fixture witness lost ${canary}")
+        }
+        ['INSERT_ATTACHMENT chassis=', 'nativeIncludedBlocks=', 'funnelIncluded=', 'chestIncluded=',
+         'nativeAttachmentValid=true', 'itemTrajectoryIntersectsCollector=',
+         'payloadSweptAabbIntersectsStation=',
+         'run.stationControlSecured = powerStation(found.fixture)',
+         'run.stationarySpawnCount++', 'UNEXPECTED_SECOND_STATIONARY_ITEM',
+         'staged.size() == 1', 'FunnelBlock.POWERED', 'itemQueryResolved='].each { canary ->
+            if (!fixtureSource.contains(canary)) throw new GradleException("M37 attachment or one-item stage lost ${canary}")
+        }
+        if (!fixtureSource.contains('M37FunnelFixtureLayout.collisionFree(origin, intake)')
+                || !fixtureSource.contains('M37FixtureGeometryObservation.actorPositionUnavailable(')
+                || !fixtureSource.contains('run.lastActivePoint = actorPose.get().visibleActivePoint()')
+                || fixtureSource.contains('run.lastActivePoint = null;')) {
+            throw new GradleException('M37 swept collision or last valid actor pose invariant lost')
+        }
+        if (fixtureSource.contains('logicalPose().transformPosition(actor.getRight().position)')
+                || (fixtureSource =~ /\.transformPosition\s*\(/).find()) {
+            throw new GradleException('M37 fixture again transforms a possibly-null actor position directly')
+        }
+        ['M37FixtureGeometryObservation.captureActorPose(', 'if (actorPose.isEmpty())',
+         'GEOMETRY pending reason=', 'NO_ACTOR_POSITION_YET', 'NO_EMITTED_ITEM_YET',
+         'RUN FAILED reason=', 'RUNS.remove(fixture.marker.getUUID());'].each { canary ->
+            if (!fixtureSource.contains(canary)) throw new GradleException("M37 null-timing repair lost ${canary}")
+        }
+        int nullGuard = observationSource.indexOf('if (rawPosition == null)')
+        int transform = observationSource.indexOf('pose.transformPosition(rawPosition)')
+        if (nullGuard < 0 || transform < nullGuard || !observationSource.contains('return Optional.empty();')) {
+            throw new GradleException('M37 actor-position transform lost its source-proven null guard')
+        }
+        ['WAIT_FOR_MOVING_CONTRAPTION', 'WAIT_FOR_ACTOR_POSITION',
+         'WAIT_FOR_RELEVANT_ITEM_ENTITY', 'CAPTURED'].each { phase ->
+            if (!observationSource.contains(phase)) throw new GradleException("M37 geometry phase lost ${phase}")
+        }
+        int cleanupStart = fixtureSource.indexOf('private static int cleanup(')
+        int cleanupEnd = fixtureSource.indexOf('private static void advance(final Cleanup', cleanupStart)
+        String cleanupSource = cleanupStart >= 0 && cleanupEnd > cleanupStart
+                ? fixtureSource.substring(cleanupStart, cleanupEnd) : ''
+        if (!cleanupSource.contains('RUNS.remove(fixture.marker.getUUID());')
+                || cleanupSource.contains('geometryPhase')) {
+            throw new GradleException('M37 cleanup must cancel even a pending geometry observation')
+        }
+        if (fixtureSource.contains('!collector.getValue(com.simibubi.create.content.logistics.funnel.FunnelBlock.POWERED)')
+                || fixtureSource.contains('!stationaryFunnel.getValue(com.simibubi.create.content.logistics.funnel.FunnelBlock.POWERED)')) {
+            throw new GradleException('M37 setup again requires Create scheduled redstone state before its tick')
+        }
+        String chestProbe = chestRenderProbe.getText('UTF-8')
+        ['SABLE_M37_CHEST_RENDER', 'CHEST_BE_MISSING_CLIENT', 'CHEST_RENDER_SKIPPED_LIST',
+         'CHEST_RENDER_SKIPPED_MASK', 'CHEST_RENDER_DISPATCH', 'hiddenPlotPoseTranslation',
+         'SableDiagnosticFlags.TRACE_CREATE_ACTORS', 'SableCreateContraptionContext.getContainingSubLevel(entity)'].each { canary ->
+            if (!chestProbe.contains(canary)) throw new GradleException("M37 scoped chest-render diagnosis lost ${canary}")
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            String name = 'com/simibubi/create/content/logistics/funnel/FunnelMovementBehaviour.class'
+            def entry = jar.getJarEntry(name)
+            if (entry == null) throw new GradleException('Create 6.0.8 FunnelMovementBehaviour missing')
+            String bytes = new String(jar.getInputStream(entry).readAllBytes(), StandardCharsets.ISO_8859_1)
+            ['visitNewPosition', 'getActiveAreaOffset', 'extract', 'succ', 'getAllItems',
+             'FilterAmount', 'UpTo', 'ItemEntity', 'm_6249_', 'm_45976_'].each { canary ->
+                if (!bytes.contains(canary)) throw new GradleException("M37 Create Funnel bytecode changed: ${canary}")
+            }
+            if (bytes.contains('getCapability')) {
+                throw new GradleException('M37 moving Funnel unexpectedly gained direct inventory capability access')
+            }
+            ['com/simibubi/create/content/logistics/funnel/AbstractFunnelBlock.class',
+             'com/simibubi/create/content/contraptions/render/ClientContraption.class',
+             'com/simibubi/create/content/contraptions/render/ContraptionEntityRenderer.class',
+             'com/simibubi/create/foundation/render/BlockEntityRenderHelper.class'].each { className ->
+                def createClassEntry = jar.getJarEntry(className)
+                if (createClassEntry == null) throw new GradleException("M37 Create rendering/state class missing: ${className}")
+                String classBytes = new String(jar.getInputStream(createClassEntry).readAllBytes(), StandardCharsets.ISO_8859_1)
+                def required = className.contains('AbstractFunnelBlock') ? ['m_6861_', 'm_213897_', 'POWERED']
+                        : className.contains('ClientContraption') ? ['readBlockEntity', 'renderedBlockEntityView', 'shouldRenderBlockEntities']
+                        : className.contains('ContraptionEntityRenderer') ? ['renderBlockEntities', 'getAndAdjustShouldRenderBlockEntities']
+                        : ['renderBlockEntities', 'skipVanillaRender']
+                required.each { symbol ->
+                    if (!classBytes.contains(symbol)) throw new GradleException("M37 Create method changed: ${className} ${symbol}")
+                }
+            }
+            def stateEntry = jar.getJarEntry('assets/create/blockstates/andesite_funnel.json')
+            if (stateEntry == null) throw new GradleException('M37 Andesite Funnel registry blockstate missing')
+            String states = new String(jar.getInputStream(stateEntry).readAllBytes(), StandardCharsets.UTF_8)
+            ['extracting=true,facing=up,powered=false,waterlogged=false',
+             'extracting=false,facing=east,powered=false,waterlogged=false',
+             'extracting=false,facing=down,powered=false,waterlogged=false',
+             'extracting=false,facing=up,powered=false,waterlogged=false',
+             'extracting=true,facing=west,powered=false,waterlogged=false'].each { state ->
+                if (!states.contains(state)) throw new GradleException("M37 fixture blockstate unavailable: ${state}")
+            }
+        } finally {
+            jar.close()
+        }
+        File output = layout.buildDirectory.dir('m37FunnelTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M37 requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        int result = compiler.run(null, System.out, System.err, '--release', '17',
+                '-classpath', classpath, '-d', output.absolutePath, test.absolutePath)
+        if (result != 0) throw new GradleException('M37 Funnel geometry compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.funnel.M37FunnelGeometryTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M37 Funnel geometry regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM37FunnelParentWorld PASS: exact Create actor path, Sable scope and visible geometry')
+    }
+}

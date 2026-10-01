@@ -128,6 +128,8 @@
         "compatibility.create.behaviour_compatibility.plough_behaviour.PloughMovementBehaviourMixin",
         "compatibility.create.behaviour_compatibility.roller_behaviour.RollerMovementBehaviourMixin",
         "compatibility.create.behaviour_compatibility.portable_interface.PortableStorageInterfaceMovementMixin",
+        "compatibility.create.behaviour_compatibility.funnel.FunnelMovementBehaviourMixin",
+        "compatibility.create.behaviour_compatibility.funnel.FunnelFixtureTimingMixin",
         "compatibility.create.crushing_wheel.CrushingWheelBlockMixin",
         "compatibility.create.crushing_wheel_entity_processing.CrushingWheelControllerBlockEntityMixin",
         "compatibility.create.deployer.DeployerMovementBehaviourMixin",
