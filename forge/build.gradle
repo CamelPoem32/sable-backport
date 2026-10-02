@@ -32030,3 +32030,185 @@ tasks.register('verifyM37FunnelParentWorld') {
         logger.lifecycle('verifyM37FunnelParentWorld PASS: exact Create actor path, Sable scope and visible geometry')
     }
 }
+
+tasks.register('verifyM38DispenserParentWorld') {
+    group = 'forge backport'
+    description = 'Checks exact Create 6.0.8 mounted dispensing and the scoped parent-visible M38 fixture.'
+    dependsOn tasks.named('classes')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+
+    File mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/dispenser/DropperMovementBehaviourMixin.java')
+    File target = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/dispenser/SableMountedDispenserTarget.java')
+    File fixture = file('src/main/java/dev/ryanhcode/sable/command/M38DispenserFixtureCommands.java')
+    File placement = file('src/main/java/dev/ryanhcode/sable/command/M38DispenserFixturePlacement.java')
+    File test = file('src/m38DispenserTest/java/dev/ryanhcode/sable/compatibility/create/dispenser/M38DispenserGeometryTest.java')
+    File placementTest = file('src/m38DispenserTest/java/dev/ryanhcode/sable/compatibility/create/dispenser/M38DispenserFixturePlacementTest.java')
+    File lifecycle = file('src/main/java/dev/ryanhcode/sable/command/M38DispenserFixtureLayout.java')
+    File lifecycleTest = file('src/m38DispenserTest/java/dev/ryanhcode/sable/compatibility/create/dispenser/M38DispenserFixtureLifecycleTest.java')
+    File config = file('src/main/resources/sable-common-forge.mixins.json')
+    File entry = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java')
+    File functions = file('src/main/resources/data/sable/functions/m38')
+    inputs.files(mixin, target, fixture, placement, test, placementTest, lifecycle, lifecycleTest, config, entry, targetCreateJar)
+    inputs.dir(functions)
+    outputs.dir(layout.buildDirectory.dir('m38DispenserTest'))
+
+    doLast {
+        String hook = mixin.getText('UTF-8')
+        String resolver = target.getText('UTF-8')
+        String harness = fixture.getText('UTF-8')
+        String footprint = placement.getText('UTF-8')
+        if (!config.getText('UTF-8').contains('"compatibility.create.behaviour_compatibility.dispenser.DropperMovementBehaviourMixin"')) {
+            throw new GradleException('M38 mounted-dispenser mixin is not registered')
+        }
+        ['@Mixin(value = DropperMovementBehaviour.class, remap = false)',
+         '@WrapMethod(method = "visitNewPosition")', 'if (owner == null || context.world.isClientSide)',
+         'original.call(context, rawCell)', 'SableMountedDispenserTarget.resolve(context, owner)',
+         'if (!target.accepted() || behavior == null)',
+         'enterParentInteractionSpace(context, owner)', 'original.call(context, target.source())',
+         'public void tick(final MovementContext context)', 'SABLE$VISIBLE_DISPENSER_CELL',
+         'DefaultMountedDispenseBehavior.INSTANCE', 'MountedProjectileDispenseBehavior',
+         'Items.ARROW', 'Items.FLINT_AND_STEEL'].each { canary ->
+            if (!hook.contains(canary)) throw new GradleException("M38 mounted actor hook lost ${canary}")
+        }
+        ['owner.getLevel() != context.world', 'resolveGeometry(', 'PARENT_CHUNK_UNLOADED',
+         'HIDDEN_PLOT_TARGET', 'OTHER_SABLE_BODY', 'getAllIntersecting',
+         'source.relative(geometry.parentFacing())'].each { canary ->
+            if (!resolver.contains(canary)) throw new GradleException("M38 parent target guard lost ${canary}")
+        }
+        [hook, resolver].each { source ->
+            ['@Overwrite', 'new ItemEntity(', 'new Arrow(', 'setBlock(', 'destroyBlock(',
+             'AABB.INFINITE', 'getAllEntities(', 'PoseStack'].each { forbidden ->
+                if (source.contains(forbidden)) throw new GradleException("M38 added a non-native dispense path: ${forbidden}")
+            }
+        }
+        String forgeEntry = entry.getText('UTF-8')
+        if (!forgeEntry.contains('M38DispenserFixtureCommands.install()')
+                || !forgeEntry.contains('M38DispenserFixtureCommands.register(event.getDispatcher())')) {
+            throw new GradleException('M38 one-command fixture handler is not registered')
+        }
+        [dropper:'dropper', dispenser_item:'dispenser_item', projectile:'projectile',
+         block:'block', run:'run', yaw90:'yaw90', cleanup:'cleanup'].each { name, action ->
+            File command = new File(functions, "${name}.mcfunction")
+            if (!command.isFile() || command.getText('UTF-8').trim() != "sable_m38 ${action}"
+                    || !file("${buildDir}/resources/main/data/sable/functions/m38/${name}.mcfunction").isFile()) {
+                throw new GradleException("M38 ${name} function is missing or bypasses authoritative Java dispatch")
+            }
+        }
+        String setup = lifecycle.getText('UTF-8')
+        if (new File(functions, 'internal/create_base.mcfunction').exists()
+                || harness.contains('performPrefixedCommand')
+                || !setup.contains('create:radial_chassis[axis=x,sticky_north=true,sticky_east=true]')
+                || !setup.contains('create:sticky_mechanical_piston[facing=east,axis_along_first=true,state=retracted]')
+                || !setup.contains('simulated:physics_assembler')
+                || !setup.contains('minecraft:chest[facing=north,type=single,waterlogged=false]')) {
+            throw new GradleException('M38 synchronous native piston/chassis/assembler fixture changed or queued BUILD returned')
+        }
+        if (!harness.contains('getIncludedBlockPositions(Direction.EAST, false)')
+                || !harness.contains('included.contains(actorPos(origin))')
+                || !harness.contains('included.contains(origin.east().south())')
+                || !harness.contains('blocks.size() != 22')) {
+            throw new GradleException('M38 starting hull or native payload capture is not source-verified')
+        }
+        int markerCreate = harness.indexOf('final ArmorStand marker = createMarker(level, origin, kind);')
+        int markerVerify = harness.indexOf('if (marker == null)', markerCreate)
+        int build = harness.indexOf('SETUP phase=BUILD')
+        int validate = harness.indexOf('failure = validate(')
+        int ready = harness.indexOf('marker.addTag(M38DispenserFixtureLayout.READY_TAG)')
+        if (markerCreate < 0 || markerVerify < markerCreate || build < markerVerify || validate < build || ready < validate
+                || !harness.contains('level.getEntity(marker.getUUID()) != marker')
+                || !harness.contains('!marker.blockPosition().equals(origin)')
+                || !harness.contains('BlockStateParser.parseForBlock(')) {
+            throw new GradleException('M38 marker must be synchronously verified at the selected origin before BUILD')
+        }
+        ['ORIGIN_DATA', 'NbtUtils.writeBlockPos(origin)', 'BODY_DATA', 'ready(marker)',
+         'legacyPartialSignature', 'Status.ASSEMBLED_RECOVERABLE', 'Status.ORPHAN_MARKER',
+         'OWNERSHIP status=', 'inspectRestoreSpace(cleanup, fixture, true)', 'RESTORE_BLOCKER pos=',
+         'ownership=', 'TRANSACTIONAL_REMOVE', 'restoreResidue', 'innerRestored(fixture)',
+         'post-cleanup footprint scan', 'SETUP ROLLBACK INCOMPLETE', 'footprintClear(level, origin, kind)',
+         'CLEANUPS.containsKey(found.fixture.marker.getUUID())'].each { canary ->
+            if (!harness.contains(canary)) throw new GradleException("M38 recovery/rollback guard lost ${canary}")
+        }
+        if (!setup.contains('sable_m38_ready_v2') || !setup.contains('LEGACY_ORIGIN = new BlockPos(-31, 101, 69)')) {
+            throw new GradleException('M38 READY identity or bounded previous-world recovery anchor changed')
+        }
+        ['SETUP ROLLBACK COMPLETE', 'SETUP phase=READY', 'CLEANUP phase=RETRACT_WAIT',
+         'assembler.assembleOrDisassemble(null)', 'CLEANUP COMPLETE', 'YAW90 COMPLETE',
+         'EntityJoinLevelEvent', 'output.getDeltaMovement()', 'sourceBefore',
+         'sourceAfter', 'hiddenPlotSpawn', 'Items.ARROW', 'Items.FLINT_AND_STEEL'].each { canary ->
+            if (!harness.contains(canary)) throw new GradleException("M38 fixture lifecycle or witness lost ${canary}")
+        }
+        ['M38DispenserFixturePlacement.find(', 'LEGACY_CELL pos=', 'RESERVATION_REJECT pos=',
+         'chunkLoaded=', 'state=', 'fluid=', 'blockEntity=', 'replaceable=', 'reason=',
+         'getChunkSource().hasChunk(', 'Reason.UNLOADED', 'Reason.BLOCK_ENTITY',
+         'SETUP origin=', 'no valid nearby fixture origin'].each { canary ->
+            if (!harness.contains(canary)) throw new GradleException("M38 placement diagnostic lost ${canary}")
+        }
+        if (harness.contains('reserved cell occupied/unloaded')
+                || !footprint.contains('Category.MAY_BE_SUPPORT_GROUND')
+                || !footprint.contains('Category.EMISSION_CORRIDOR')
+                || !footprint.contains('Category.ASSEMBLER_HULL')
+                || !footprint.contains('Category.INNER_CREATE_MECHANISM')
+                || !footprint.contains('for (final int lift : new int[] {0, 2, 4})')) {
+            throw new GradleException('M38 fixture reverted to the broad air cube or lost its bounded search')
+        }
+        int chunkCheck = harness.indexOf('getChunkSource().hasChunk(')
+        int blockRead = harness.indexOf('final BlockState state = level.getBlockState(pos);', chunkCheck)
+        if (chunkCheck < 0 || blockRead < chunkCheck
+                || harness.indexOf('if (placement.origin() == null)') > harness.indexOf('SETUP phase=BUILD')) {
+            throw new GradleException('M38 must reject unloaded/no-space candidates before world reads or BUILD')
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            [
+                'com/simibubi/create/content/contraptions/behaviour/dispenser/DropperMovementBehaviour.class':
+                    ['visitNewPosition', 'getItemStorage', 'getSlot', 'getDispenseBehavior', 'setStackInSlot'],
+                'com/simibubi/create/content/contraptions/behaviour/dispenser/DispenserMovementBehaviour.class':
+                    ['getDispenseBehavior', 'REGISTRY', 'DefaultMountedDispenseBehavior'],
+                'com/simibubi/create/api/contraption/dispenser/DefaultMountedDispenseBehavior.class':
+                    ['getDispenserNormal', 'HopperBlockEntity', 'ItemEntity', 'spawnItem'],
+                'com/simibubi/create/api/contraption/dispenser/MountedProjectileDispenseBehavior.class':
+                    ['getProjectile', 'execute', 'MovementContext', 'Projectile'],
+                'com/simibubi/create/content/contraptions/behaviour/dispenser/ContraptionBlockSource.class':
+                    ['MovementContext', 'overrideFacing', 'pos', 'world', 'state', 'ServerLevel'],
+                'com/simibubi/create/impl/contraption/dispenser/DispenserBehaviorConverter$FallbackBehavior.class':
+                    ['dispense', 'ContraptionBlockSource']
+            ].each { className, canaries ->
+                def bytecode = jar.getJarEntry(className)
+                if (bytecode == null) throw new GradleException("M38 Create class missing: ${className}")
+                String bytes = new String(jar.getInputStream(bytecode).readAllBytes(), StandardCharsets.ISO_8859_1)
+                canaries.each { symbol ->
+                    if (!bytes.contains(symbol)) throw new GradleException("M38 Create bytecode changed: ${className} ${symbol}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        File output = layout.buildDirectory.dir('m38DispenserTest').get().asFile
+        output.mkdirs()
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null) throw new GradleException('M38 requires a JDK')
+        def companionClasses = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companionClasses).asPath
+        if (compiler.run(null, System.out, System.err, '--release', '17', '-classpath', classpath,
+                '-d', output.absolutePath, test.absolutePath, placementTest.absolutePath, lifecycleTest.absolutePath) != 0) {
+            throw new GradleException('M38 dispenser geometry compilation failed')
+        }
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companionClasses.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.dispenser.M38DispenserGeometryTest')
+                    .getMethod('run').invoke(null)
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.dispenser.M38DispenserFixturePlacementTest')
+                    .getMethod('run').invoke(null)
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.dispenser.M38DispenserFixtureLifecycleTest')
+                    .getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M38 dispenser geometry regression failed', failure.targetException)
+        } finally {
+            loader.close()
+        }
+        logger.lifecycle('verifyM38DispenserParentWorld PASS: Create bytecode, scoped hook, fixture, visible geometry')
+    }
+}
