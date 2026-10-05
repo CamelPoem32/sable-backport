@@ -4,6 +4,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.authlib.GameProfile;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.compatibility.create.seat.SableSeatPassengers;
 import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
@@ -32,6 +33,11 @@ public abstract class ServerPlayerMixin extends Player {
     @WrapOperation(method = "startRiding", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;teleport(DDDFF)V"))
     private void sable$adjustTeleportPacket(final ServerGamePacketListenerImpl instance, final double x, final double y, final double z, final float rot1, final float rot2, final Operation<Void> original) {
         final Entity vehicle = this.getVehicle();
+
+        if (vehicle != null && SableSeatPassengers.parentPassenger(vehicle, this)) {
+            original.call(instance, x, y, z, rot1, rot2);
+            return;
+        }
 
         if (vehicle == null) {
             original.call(instance, x, y, z, rot1, rot2);

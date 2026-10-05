@@ -32031,6 +32031,275 @@ tasks.register('verifyM37FunnelParentWorld') {
     }
 }
 
+tasks.register('verifyM39RuntimeMixinTargets') {
+    group = 'forge backport'
+    description = 'ASM structural smoke of every packaged M39 Seat injection and the direct outer teardown boundary.'
+    dependsOn tasks.named('verifyStandaloneForgeArtifact')
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+    inputs.file(tasks.named('jarJar').flatMap { it.archiveFile })
+    inputs.file(targetCreateJar)
+    inputs.file(rootProject.file('buildSrc/src/main/java/M39RuntimeMixinTargetVerifier.java'))
+    doLast {
+        def inspect = { File artifact ->
+            JarFile jar = new JarFile(artifact)
+            try {
+                def config = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry('sable-common-forge.mixins.json')).getText('UTF-8'))
+                def reference = jar.getJarEntry(config.refmap)
+                if (reference == null) throw new GradleException("M39 packaged refmap missing ${config.refmap}")
+                def refmap = new JsonSlurper().parseText(jar.getInputStream(reference).getText('UTF-8'))
+                int count = M39RuntimeMixinTargetVerifier.verifyInjections(artifact, targetCreateJar, config, refmap)
+                M39RuntimeMixinTargetVerifier.verifyDirectTeardown(artifact, config.mixins)
+                return count
+            } finally { jar.close() }
+        }
+        File previous = file('build/m39Regression/broken-all.jar')
+        if (previous.isFile()) {
+            boolean rejected = false
+            try { inspect(previous) }
+            catch (IllegalStateException failure) {
+                if (!failure.message.contains('matches=0') || !failure.message.contains('SeatOuterDisassemblyMixin')
+                        || !failure.message.contains('Ljava/util/List;')) throw failure
+                rejected = true
+                logger.lifecycle("M39 broken-artifact negative test PASS: ${failure.message}")
+            }
+            if (!rejected) throw new GradleException('M39 broken artifact was not rejected')
+        }
+        int count = inspect(tasks.named('jarJar').get().archiveFile.get().asFile)
+        logger.lifecycle("verifyM39RuntimeMixinTargets PASS: ${count} production annotation/call-site matches; direct detach exactly once before transfer; obsolete mixin absent")
+    }
+}
+tasks.named('check').configure { dependsOn tasks.named('verifyM39RuntimeMixinTargets') }
+
+tasks.register('verifyM39SeatParentWorld') {
+    group = 'forge backport'
+    description = 'Checks exact Create Seat hooks, parent passenger transforms and the scoped native riding fixture.'
+    dependsOn tasks.named('classes')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+    File helper = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/seat/SableSeatPassengers.java')
+    File hooks = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/seat')
+    File fixture = file('src/main/java/dev/ryanhcode/sable/command/M39SeatFixtureCommands.java')
+    File test = file('src/m39SeatTest/java/dev/ryanhcode/sable/compatibility/create/seat/M39SeatTransformTest.java')
+    File vehicleTest = file('src/m39SeatTest/java/dev/ryanhcode/sable/command/M39SeatFixtureVehicleTest.java')
+    File vehicleIdentity = file('src/main/java/dev/ryanhcode/sable/command/M39SeatFixtureVehicleIdentity.java')
+    File functions = file('src/main/resources/data/sable/functions/m39')
+    inputs.files(helper, fixture, test, vehicleTest, vehicleIdentity, targetCreateJar)
+    inputs.dir(hooks)
+    inputs.dir(functions)
+    outputs.dir(layout.buildDirectory.dir('m39SeatTest'))
+    doLast {
+        String resolver = helper.getText('UTF-8')
+        String harness = fixture.getText('UTF-8')
+        String config = file('src/main/resources/sable-common-forge.mixins.json').getText('UTF-8')
+        ['SeatContraptionEntityMixin', 'SeatMovementBehaviourMixin', 'SeatInteractionPacketMixin', 'SeatOuterRemovalMixin',
+         'SeatInteractionClientMixin'].each { name ->
+            if (!config.contains(name)) throw new GradleException("M39 mixin unregistered: ${name}")
+        }
+        if (config.contains('SeatOuterDisassemblyMixin')) throw new GradleException('M39 obsolete self-mixin still registered')
+        String disassembly = file('src/main/java/dev/simulated_team/simulated/util/SimAssemblyHelper.java').getText('UTF-8')
+        int occupied = disassembly.indexOf('throw SimAssemblyException.occupied(occupied)')
+        int detach = disassembly.indexOf('SableSeatPassengers.detachOuter(subLevel)')
+        int transfer = disassembly.indexOf('SableNestedBearingOwnershipTransfer.begin(level, blocks, "OUTER_DISASSEMBLY")')
+        if (occupied < 0 || detach <= occupied || transfer <= detach) throw new GradleException('M39 direct outer detach order lost')
+        def parsed = new JsonSlurper().parseText(config)
+        if (!parsed.client.contains('compatibility.create.seat.SeatInteractionClientMixin')
+                || parsed.mixins.contains('compatibility.create.seat.SeatInteractionClientMixin')) {
+            throw new GradleException('M39 visible ray bridge must be client-only')
+        }
+        ['vehicle instanceof ControlledContraptionEntity', 'passenger instanceof LivingEntity',
+         'passenger.level() == vehicle.level()', 'getContaining(passenger) == null',
+         'getSeatOf(passenger.getUUID()) == null', 'client.renderPose(partialTicks)',
+         'pose.transformPosition(nativePosition.add(0, height, 0)).subtract(0, height, 0)',
+         'DismountHelper.findSafeDismountLocation', 'DismountHelper.canDismountTo',
+         'CanFallAtleastHelper.canFallAtleastWithSubLevels', 'passenger.stopRiding()',
+         'SableDiagnosticFlags.TRACE_CREATE_ACTORS'].each { token ->
+            if (!resolver.contains(token)) throw new GradleException("M39 passenger invariant lost: ${token}")
+        }
+        String seatHook = new File(hooks, 'SeatContraptionEntityMixin.java').getText('UTF-8')
+        ['getPassengerPosition', 'getDismountLocationForPassenger', 'addSittingPassenger',
+         'getReturnValue(), partialTicks', 'disassemble', 'saveWithoutId',
+         'neverGatherSeatPassengerIntoPlot', 'SableSeatPassengers.detach'].each { token ->
+            if (!seatHook.contains(token)) throw new GradleException("M39 Create hook lost: ${token}")
+        }
+        String client = new File(hooks, 'SeatInteractionClientMixin.java').getText('UTF-8')
+        if (!client.contains('body == null ? point : body.logicalPose().transformPositionInverse(point)')
+                || !client.contains('body == null ? raw : body.logicalPose().transformPosition(raw)')) {
+            throw new GradleException('M39 native ray/hit ordinary-world bypass lost')
+        }
+        String packet = new File(hooks, 'SeatInteractionPacketMixin.java').getText('UTF-8')
+        if (!packet.contains('getSeats().contains(this.localPos)') || !packet.contains('original.call(player, target)')
+                || !packet.contains('Double.POSITIVE_INFINITY')) throw new GradleException('M39 physical Seat packet ownership/reach lost')
+        [resolver, seatHook, client, packet].each { source ->
+            ['PoseStack', 'AABB.INFINITE', '@Overwrite', 'setPos(', 'setDeltaMovement(',
+             'setYRot(', 'setXRot(', 'changeDimension('].each { forbidden ->
+                if (source.contains(forbidden)) throw new GradleException("M39 added fake attachment/rendering: ${forbidden}")
+            }
+        }
+        String entry = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java').getText('UTF-8')
+        ['M39SeatFixtureCommands.install()', 'M39SeatFixtureCommands.register(event.getDispatcher())',
+         'M39SeatLifecycleEvents.install()'].each { token ->
+            if (!entry.contains(token)) throw new GradleException("M39 entrypoint missing ${token}")
+        }
+        ['player', 'mob', 'run', 'yaw90', 'dismount', 'cleanup'].each { name ->
+            File command = new File(functions, "${name}.mcfunction")
+            if (!command.isFile() || command.getText('UTF-8').trim() != "sable_m39 ${name}"
+                    || !file("${buildDir}/resources/main/data/sable/functions/m39/${name}.mcfunction").isFile()) {
+                throw new GradleException("M39 authoritative function missing: ${name}")
+            }
+        }
+        ['final Lookup previous = lookup(level)', 'marker.getPersistentData().put("M39Origin"',
+         'level.getEntity(marker.getUUID()) != marker', 'placed.stream().allMatch',
+         'getIncludedBlockPositions(Direction.EAST, false)', 'outer.getBlocks().size() != 22',
+         'platform().keySet().stream()', 'Phase.BOARDING', 'vehicle.addSittingPassenger(pig, 0)',
+         'SableSeatPassengers.detach(vehicle)', 'Phase.RETRACT', 'Phase.OUTER', 'Phase.REMOVE',
+         'controller.assembleOrDisassemble(null)', 'post-cleanup footprint not clear',
+         'M39Body', 'M39Yaw90', 'handle.teleport(', 'maxError <= .25', 'hiddenPlotPosition='].each { token ->
+            if (!harness.contains(token)) throw new GradleException("M39 fixture lifecycle/measurement lost ${token}")
+        }
+        if (harness.indexOf('level.getEntity(marker.getUUID()) != marker') > harness.indexOf('SETUP phase=BUILD')
+                || harness.indexOf('SETUP phase=VALIDATE') > harness.indexOf('marker.addTag(READY)')
+                || harness.contains('performPrefixedCommand')) throw new GradleException('M39 setup again queued or not transactional')
+        ['resolveVehicle(fixture, task.vehicle)', 'resolveVehicle(fixture, task == null ? null : task.vehicle)',
+         'task.vehicle = vehicle.getUUID()', 'M39SeatFixtureVehicleIdentity.select(expected, identities)',
+         'fixture.body.getLevel().getEntity(expected)', 'candidate instanceof ControlledContraptionEntity && nativePiston',
+         'getSeats().contains(seat)', 'visibleSeat.distanceToSqr(expectedVisible)',
+         'VEHICLE_DISCOVERY uuid=', 'VEHICLE_LOOKUP', 'VEHICLE_LOST', 'removalReason=', 'gameTime=',
+         'M39SeatFixtureCommands::mountAttempt', 'final EntityMountEvent event', 'observation=NATIVE_FORGE_MOUNT_EVENT',
+         'RUN phase=BOARDING_WAIT_FOR_PLAYER', 'MovementMode.MOVE_NEVER_PLACE',
+         'MovementMode.MOVE_PLACE_RETURNED', 'piston.getBehaviour(ScrollValueBehaviour.TYPE)',
+         'option.setValue(mode.ordinal())', 'M39SeatFixtureVehicleIdentity.lifecycleTimedOut'].each { token ->
+            if (!harness.contains(token)) throw new GradleException("M39 boarding identity/hold invariant missing ${token}")
+        }
+        int assemblyCase = harness.indexOf('case ASSEMBLING ->')
+        int boardingMode = harness.indexOf('movementMode(fixture, MovementMode.MOVE_NEVER_PLACE)', assemblyCase)
+        int boardingStop = harness.indexOf('drive(fixture, -64, true)', assemblyCase)
+        int boardingCase = harness.indexOf('case BOARDING ->')
+        int waitForRider = harness.indexOf('if (vehicle.getPassengers().isEmpty()) return;', boardingCase)
+        int startTravel = harness.indexOf('drive(fixture, -64, false)', boardingCase)
+        int returnTransition = harness.indexOf('task.phase == Phase.HOLD && ++task.holdTicks >= 160')
+        int returnedMode = harness.indexOf('movementMode(fixture, MovementMode.MOVE_PLACE_RETURNED)', returnTransition)
+        int returnDrive = harness.indexOf('drive(fixture, 64, false)', returnedMode)
+        String boardingBranch = harness.substring(boardingCase, harness.indexOf('case EXTEND, HOLD, RETURN ->', boardingCase))
+        if (boardingMode < assemblyCase || boardingStop < boardingMode || startTravel < waitForRider
+                || returnedMode < returnTransition || returnDrive < returnedMode || boardingBranch.contains('MOVE_PLACE_RETURNED')
+                || !harness.contains('M39SeatFixtureVehicleIdentity.canBeginReturnedPlacement(piston.offset)')
+                || harness.contains('boarding vehicle vanished') || harness.contains('WAIT_FOR_VEHICLE_REGISTRATION')) {
+            throw new GradleException('M39 boarding must hold native assembly before waiting and start travel only after mount')
+        }
+        String mountObserver = harness.substring(harness.indexOf('private static void mountAttempt('), harness.indexOf('private static void tell('))
+        if (mountObserver.contains('setCanceled') || mountObserver.contains('startRiding') || mountObserver.contains('addSittingPassenger')
+                || !mountObserver.contains('vehicle.getUUID().equals(task.vehicle)')) {
+            throw new GradleException('M39 fixture mount observer must remain read-only and captured-UUID scoped')
+        }
+        JarFile jar = new JarFile(targetCreateJar)
+        try {
+            def expected = [
+                'com/simibubi/create/content/contraptions/AbstractContraptionEntity.class':
+                    ['addSittingPassenger', 'getPassengerPosition', 'handlePlayerInteraction', 'disassemble', 'ContraptionDismountLocation', 'ContraptionSeatMappingPacket'],
+                'com/simibubi/create/content/contraptions/Contraption.class':
+                    ['moveSeat', 'getSeats', 'getSeatOf', 'addPassengersToWorld', 'initialPassengers'],
+                'com/simibubi/create/content/contraptions/actors/seat/SeatBlock.class':
+                    ['sitDown', 'SeatEntity', 'getLeashed', 'canBePickedUp'],
+                'com/simibubi/create/content/contraptions/actors/seat/SeatEntity.class':
+                    ['getCustomEntitySeatOffset', 'FakePlayer'],
+                'com/simibubi/create/content/contraptions/actors/seat/SeatMovementBehaviour.class':
+                    ['startMoving', 'visitNewPosition', 'SeatIndex', 'ContraptionDismountLocation'],
+                'com/simibubi/create/content/contraptions/ContraptionHandlerClient.class':
+                    ['rayTraceContraption', 'toLocalVector', 'toGlobalVector', 'rightClickingOnContraptionsGetsHandledLocally'],
+                'com/simibubi/create/content/contraptions/sync/ContraptionInteractionPacket.class':
+                    ['lambda$handle$0', 'handlePlayerInteraction', 'localPos'],
+                'com/simibubi/create/content/contraptions/sync/ContraptionSeatMappingPacket.class':
+                    ['setSeatMapping', 'getPassengerPosition']
+            ]
+            expected.each { path, tokens ->
+                def item = jar.getJarEntry(path)
+                if (item == null) throw new GradleException("M39 exact Create class missing ${path}")
+                String bytes = new String(jar.getInputStream(item).readAllBytes(), StandardCharsets.ISO_8859_1)
+                tokens.each { token -> if (!bytes.contains(token)) throw new GradleException("M39 Create canary changed ${path} ${token}") }
+            }
+            def methods = [:]
+            def calls = []
+            new org.objectweb.asm.ClassReader(jar.getInputStream(jar.getJarEntry('com/simibubi/create/content/contraptions/AbstractContraptionEntity.class')).readAllBytes())
+                .accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    @Override
+                    org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
+                        methods[name] = desc
+                        return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                            @Override
+                            void visitMethodInsn(int opcode, String owner, String callee, String descriptor, boolean isInterface) {
+                                calls.add([name, owner, callee, descriptor])
+                            }
+                        }
+                    }
+                }, 0)
+            if (methods['getPassengerPosition'] != '(Lnet/minecraft/world/entity/Entity;F)Lnet/minecraft/world/phys/Vec3;'
+                    || methods['addSittingPassenger'] != '(Lnet/minecraft/world/entity/Entity;I)V'
+                    || !calls.any { it[0] == 'getPassengerPosition' && it[2] == 'toGlobalVector' }
+                    || !calls.any { it[0] == 'addSittingPassenger' && it[3] == '(Lnet/minecraft/world/entity/Entity;Z)Z' }) {
+                throw new GradleException('M39 Seat native descriptors/transform/riding call sites changed')
+            }
+            String movement = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/seat/SeatMovementBehaviourMixin.java').getText('UTF-8')
+            ['visitNewPosition', 'SableSeatPassengers.owner', 'body == null', 'original.call(level, raw)',
+             'transformPosition(Vec3.atCenterOf(raw))', 'SableSeatPassengers.parentPassenger',
+             'SableSeatPassengers.dismount', 'passenger.position()', 'original.call(passenger, safe.x, safe.y, safe.z)'].each { token ->
+                if (!movement.contains(token)) throw new GradleException("M39 forced Seat dismount boundary missing ${token}")
+            }
+            def seatMovementMethods = [:]
+            def seatMovementCalls = []
+            new org.objectweb.asm.ClassReader(jar.getInputStream(jar.getJarEntry('com/simibubi/create/content/contraptions/actors/seat/SeatMovementBehaviour.class')).readAllBytes())
+                .accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    @Override
+                    org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
+                        seatMovementMethods[name] = desc
+                        return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                            @Override
+                            void visitMethodInsn(int opcode, String owner, String callee, String descriptor, boolean isInterface) {
+                                seatMovementCalls.add([name, owner, callee, descriptor])
+                            }
+                        }
+                    }
+                }, 0)
+            if (seatMovementMethods['visitNewPosition'] != '(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/core/BlockPos;)V'
+                    || !seatMovementCalls.any { it[0] == 'visitNewPosition' && it[1] == 'net/minecraft/world/level/Level' && it[3] == '(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/state/BlockState;' }
+                    || !seatMovementCalls.any { it[0] == 'visitNewPosition' && it[1] == 'net/minecraft/world/entity/Entity' && it[3] == '(DDD)V' }) {
+                throw new GradleException('M39 forced Seat dismount lookup/teleport call sites changed')
+            }
+            def actuator = new org.objectweb.asm.tree.ClassNode()
+            new org.objectweb.asm.ClassReader(jar.getInputStream(jar.getJarEntry('com/simibubi/create/content/contraptions/piston/LinearActuatorBlockEntity.class')).readAllBytes()).accept(actuator, 0)
+            def actuatorTick = actuator.methods.find { it.name == 'tick' && it.desc == '()V' }
+            def speedChanged = actuator.methods.find { it.name == 'onSpeedChanged' && it.desc == '(F)V' }
+            def tryPlace = actuator.methods.find { it.name == 'tryDisassemble' && it.desc == '()V' }
+            if (actuatorTick == null || speedChanged == null || tryPlace == null) throw new GradleException('M39 exact native actuator lifecycle missing')
+            def code = tryPlace.instructions.toArray().toList()
+            int neverPlace = code.findIndexOf { it instanceof org.objectweb.asm.tree.FieldInsnNode && it.name == 'MOVE_NEVER_PLACE' }
+            int waitFlag = code.findIndexOf(neverPlace + 1) { it instanceof org.objectweb.asm.tree.FieldInsnNode && it.name == 'waitingForSpeedChange' && it.opcode == org.objectweb.asm.Opcodes.PUTFIELD }
+            int holdReturn = code.findIndexOf(waitFlag + 1) { it.opcode == org.objectweb.asm.Opcodes.RETURN }
+            if (neverPlace < 0 || waitFlag <= neverPlace || holdReturn <= waitFlag
+                    || !actuatorTick.instructions.toArray().any { it instanceof org.objectweb.asm.tree.MethodInsnNode && it.name == 'tryDisassemble' }
+                    || !speedChanged.instructions.toArray().any { it instanceof org.objectweb.asm.tree.FieldInsnNode && it.name == 'assembleNextTick' && it.opcode == org.objectweb.asm.Opcodes.PUTFIELD }) {
+                throw new GradleException('M39 zero-speed native placement / never-place hold semantics changed')
+            }
+        } finally { jar.close() }
+        File output = layout.buildDirectory.dir('m39SeatTest').get().asFile
+        output.mkdirs()
+        def companion = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companion).asPath
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null || compiler.run(null, System.out, System.err, '--release', '17', '-classpath', classpath,
+                '-d', output.absolutePath, test.absolutePath, vehicleTest.absolutePath) != 0) throw new GradleException('M39 Seat tests compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companion.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try {
+            loader.loadClass('dev.ryanhcode.sable.compatibility.create.seat.M39SeatTransformTest').getMethod('run').invoke(null)
+            loader.loadClass('dev.ryanhcode.sable.command.M39SeatFixtureVehicleTest').getMethod('run').invoke(null)
+        } catch (java.lang.reflect.InvocationTargetException failure) {
+            throw new GradleException('M39 Seat transform regression failed', failure.targetException)
+        } finally { loader.close() }
+        logger.lifecycle('verifyM39SeatParentWorld PASS: exact Seat bytecode, physical riding transform, scoped native lifecycle and fixtures')
+    }
+}
+
 tasks.register('verifyM38DispenserParentWorld') {
     group = 'forge backport'
     description = 'Checks exact Create 6.0.8 mounted dispensing and the scoped parent-visible M38 fixture.'

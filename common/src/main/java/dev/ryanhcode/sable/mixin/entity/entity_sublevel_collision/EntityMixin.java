@@ -225,7 +225,7 @@ public abstract class EntityMixin implements EntityMovementExtension {
         final SubLevel containingSubLevel = helper.getContaining((Entity) (Object) this);
 
         // we can't both be tracking a sub-level and be in one
-        if (containingSubLevel != null) {
+        if (containingSubLevel != null || dev.ryanhcode.sable.compatibility.create.seat.SableSeatPassengers.riding((Entity) (Object) this)) {
             this.sable$trackingSubLevel = null;
         } else if (vehicle != null) {
             final SubLevel vehicleSubLevel = helper.getContaining(vehicle);
@@ -297,6 +297,7 @@ public abstract class EntityMixin implements EntityMovementExtension {
      */
     @Override
     public SubLevel sable$getTrackingSubLevel() {
+        if (dev.ryanhcode.sable.compatibility.create.seat.SableSeatPassengers.riding((Entity) (Object) this)) return null;
         return this.sable$trackingSubLevel;
     }
 

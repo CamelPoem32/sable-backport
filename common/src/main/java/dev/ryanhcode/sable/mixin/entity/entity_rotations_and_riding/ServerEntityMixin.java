@@ -1,6 +1,7 @@
 package dev.ryanhcode.sable.mixin.entity.entity_rotations_and_riding;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.compatibility.create.seat.SableSeatPassengers;
 import dev.ryanhcode.sable.api.SubLevelHelper;
 import net.minecraft.server.level.ServerEntity;
 import net.minecraft.world.entity.Entity;
@@ -22,6 +23,7 @@ public abstract class ServerEntityMixin {
 
     @Inject(method = "sendChanges", at = @At(value = "INVOKE", target = "Ljava/util/function/Consumer;accept(Ljava/lang/Object;)V"))
     private void sable$beforeSendChanges(final CallbackInfo ci) {
+        if (SableSeatPassengers.owner(this.entity) != null) return;
         final List<Entity> passengers = this.entity.getPassengers();
 
         if (Sable.HELPER.getContaining(this.entity) != null) {

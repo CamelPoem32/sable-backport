@@ -3,6 +3,7 @@ package dev.ryanhcode.sable.mixin.entity.entity_rotations_and_riding;
 import com.mojang.authlib.GameProfile;
 import dev.ryanhcode.sable.ActiveSableCompanion;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.compatibility.create.seat.SableSeatPassengers;
 import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.api.entity.EntitySubLevelUtil;
 import dev.ryanhcode.sable.companion.math.JOMLConversion;
@@ -57,6 +58,7 @@ public abstract class LocalPlayerMixin extends Player {
 
     @Inject(method = "startRiding(Lnet/minecraft/world/entity/Entity;Z)Z", at = @At("RETURN"))
     private void sable$onStartRiding(final Entity entity, final boolean bl, final CallbackInfoReturnable<Boolean> cir) {
+        if (SableSeatPassengers.parentPassenger(entity, this)) return;
         if (!cir.getReturnValue() || !EntitySubLevelUtil.shouldKick(this)) {
             return;
         }
@@ -79,6 +81,7 @@ public abstract class LocalPlayerMixin extends Player {
 
     @Inject(method = "removeVehicle", at = @At("HEAD"))
     private void sable$onStopRiding(final CallbackInfo ci) {
+        if (SableSeatPassengers.riding(this)) return;
         if (!EntitySubLevelUtil.shouldKick(this)) {
             return;
         }

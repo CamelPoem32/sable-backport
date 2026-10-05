@@ -5,6 +5,7 @@ import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.SubLevelAssemblyHelper;
 import dev.ryanhcode.sable.compatibility.create.contraptions.SableNestedBearingOwnershipTransfer;
+import dev.ryanhcode.sable.compatibility.create.seat.SableSeatPassengers;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
@@ -169,6 +170,8 @@ public final class SimAssemblyHelper {
         if (!occupied.isEmpty()) {
             throw SimAssemblyException.occupied(occupied);
         }
+        // Keep parent Seat riders physical before nested vehicle ownership or plot blocks move.
+        SableSeatPassengers.detachOuter(subLevel);
         try {
             SableNestedBearingOwnershipTransfer.begin(level, blocks, "OUTER_DISASSEMBLY");
         } catch (final RuntimeException | AssemblyException exception) {

@@ -2,6 +2,7 @@ package dev.ryanhcode.sable.mixinhelpers.camera.camera_rotation;
 
 import dev.ryanhcode.sable.ActiveSableCompanion;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.compatibility.create.seat.SableSeatPassengers;
 import dev.ryanhcode.sable.api.entity.EntitySubLevelUtil;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
 import dev.ryanhcode.sable.sublevel.ClientSubLevel;
@@ -49,6 +50,7 @@ public class EntitySubLevelRotationHelper {
      */
 
     public static Quaterniond getSubLevelInheritedOrientation(final Entity cameraEntity, final Function<SubLevel, Pose3dc> poseProvider, final Type type) {
+        if (cameraEntity != null && SableSeatPassengers.riding(cameraEntity)) return null;
         final ActiveSableCompanion helper = Sable.HELPER;
         if (cameraEntity instanceof final LivingEntity livingEntity && livingEntity.isSleeping()) {
             final Optional<BlockPos> sleepingPos = livingEntity.getSleepingPos();
