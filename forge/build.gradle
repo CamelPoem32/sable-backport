@@ -32070,6 +32070,178 @@ tasks.register('verifyM39RuntimeMixinTargets') {
 }
 tasks.named('check').configure { dependsOn tasks.named('verifyM39RuntimeMixinTargets') }
 
+tasks.register('verifyM40BasinParentWorldOutput') {
+    group = 'forge backport'
+    description = 'Checks exact native Basin inversion dumping, physical context, packaged hooks and the bearing fixture.'
+    dependsOn tasks.named('classes')
+    dependsOn project(':sable_companion_1_20').tasks.named('classes')
+    dependsOn tasks.named('verifyStandaloneForgeArtifact')
+    File helper = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/basin/SableBasinOutput.java')
+    File mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/basin/BasinMovementBehaviourMixin.java')
+    File fixture = file('src/main/java/dev/ryanhcode/sable/command/M40BasinFixtureCommands.java')
+    File geometry = file('src/main/java/dev/ryanhcode/sable/command/M40BasinFixtureLayout.java')
+    File test = file('src/m40BasinTest/java/dev/ryanhcode/sable/compatibility/create/basin/M40BasinOutputTest.java')
+    File preconditions = file('src/main/java/dev/ryanhcode/sable/command/M40FixturePreconditions.java')
+    File functions = file('src/main/resources/data/sable/functions/m40')
+    inputs.files(helper, mixin, fixture, geometry, test, preconditions, targetCreateJar)
+    inputs.dir(functions)
+    outputs.dir(layout.buildDirectory.dir('m40BasinTest'))
+    doLast {
+        if (java.security.MessageDigest.getInstance('SHA-256').digest(helper.bytes).encodeHex().toString().toUpperCase() != '1DAD61C7CA30F1FCB2E3180A3B9493293FA291356EC7CC5ECE46F1C30360A2EE'
+                || java.security.MessageDigest.getInstance('SHA-256').digest(mixin.bytes).encodeHex().toString().toUpperCase() != '057825B5F114137326A9D453158C3A762E11BB4CAC23D1D7D853917F9AEC4A5A') {
+            throw new GradleException('M40.1 must not change the untested production Basin output bridge')
+        }
+        String hook = mixin.getText('UTF-8')
+        String observation = helper.getText('UTF-8')
+        String harness = fixture.getText('UTF-8')
+        ['owner == null', 'original.call(context)', 'SableBasinOutput.validPoint',
+         'enterParentInteractionSpace(context, owner)', 'lambda$dump$1',
+         'final boolean added = original.call(level, entity)', 'SableBasinOutput.observe(context, entity, added)'].each { token ->
+            if (!hook.contains(token)) throw new GradleException("M40 scoped native Basin invariant missing ${token}")
+        }
+        ['context.position == null', 'context.world == owner.getLevel()', 'getContaining(owner.getLevel(), visible) == null',
+         'new WeakHashMap', 'item.getUUID()', 'item.getDeltaMovement()', 'SableDiagnosticFlags.TRACE_CREATE_ACTORS'].each { token ->
+            if (!observation.contains(token)) throw new GradleException("M40 output boundary/witness missing ${token}")
+        }
+        [hook, observation].each { source ->
+            if (source =~ /temporaryData\s*=(?!=)/) throw new GradleException('M40 must not set the native dump flag')
+            ['new ItemEntity', 'setStackInSlot', 'extractItem(', 'ItemStack.EMPTY',
+             'PoseStack', '@Overwrite', '20_000_000', 'nearestSubLevel'].each { forbidden ->
+                if (source.contains(forbidden)) throw new GradleException("M40 replaced native output semantics: ${forbidden}")
+            }
+        }
+        ['M38DispenserFixturePlacement.candidateOffsets()', 'M40BasinFixtureLayout.reservation()',
+         'hasChunk(', 'level.getEntity(marker.getUUID()) != marker', 'placed.stream().allMatch',
+         'getIncludedBlockPositions(Direction.EAST, false)', 'payload.getBlocks().size() != 2',
+         'new SuperGlueEntity(level, M40BasinFixtureLayout.glue(origin))',
+         'task.spawns.size() == 2', 'task.before == 6 && task.after == 0', 'context.temporaryData',
+         'getItemStorage() != null', 'bearing.isNearInitialAngle()', 'bearing.disassemble()',
+         'controllerSignature', 'OUTER_DISASSEMBLE', 'assembler.assembleOrDisassemble(null)',
+         'task.phase = Phase.STOP', 'M40Owner', 'post-cleanup footprint not clear',
+         'yaw rolled back', 'handle.teleport(', 'handle.setLinearAndAngularVelocity'].each { token ->
+            if (!harness.contains(token)) throw new GradleException("M40 fixture invariant missing ${token}")
+        }
+        if (harness.contains('new ItemEntity') || harness.contains('setAngle(')
+                || harness.contains('performPrefixedCommand') || harness.contains('betweenClosed')) {
+            throw new GradleException('M40 fixture fakes dumping/rotation or broad reservation')
+        }
+        ['KINETIC_BASELINE', 'KINETIC_NESTED_BEFORE_RECONNECT', 'BEARING_PRECONDITION',
+         'KineticBlockEntity.switchToBlockState', 'clutch.attachKinetics()', 'drive(fixture, 0, false)',
+         'M40LivePayload', 'M40NestedVerified', 'M40BaselinePass', 'Phase.BASELINE',
+         'getBlockEntities().values()', 'M40RawOrigin', 'M40FixturePreconditions.matchingBodies(candidates)',
+         'MULTIPLE_MATCHING_M40_BODIES', 'KNOWN_BODY_CONTROLLER_SIGNATURE_MISSING',
+         'baseline M40 PASS required', 'sourceSpeedNonZero=true bearingRotates=true', 'SNAPSHOT_EXISTING'].each { token ->
+            if (!harness.contains(token)) throw new GradleException("M40.1 fixture kinetic/ownership invariant missing ${token}")
+        }
+        if (harness.contains('.setSpeed(') || harness.contains('.setNetwork(') || harness.contains('.source =')
+                || harness.contains('.network =') || harness.contains('.initialize()')) throw new GradleException('M40.1 harness must use native reconnect, not fabricated speed/initialization')
+        int runStart = harness.indexOf('private static int run(')
+        int gate = harness.indexOf('if (!valid)', runStart)
+        int capture = harness.indexOf('Phase.CAPTURE', runStart)
+        if (gate < runStart || gate >= capture) throw new GradleException('M40.1 zero-speed gate must precede CAPTURE wait')
+        if (harness.indexOf('level.getEntity(marker.getUUID()) != marker') > harness.indexOf('SETUP phase=BUILD')
+                || harness.indexOf('SETUP phase=VALIDATE') > harness.indexOf('fixture.marker.addTag(READY)')) {
+            throw new GradleException('M40 marker/setup transaction ordering changed')
+        }
+        String entry = file('src/main/java/dev/ryanhcode/sable/forge/SableForge.java').getText('UTF-8')
+        if (!entry.contains('M40BasinFixtureCommands.install()') || !entry.contains('M40BasinFixtureCommands.register(event.getDispatcher())')) {
+            throw new GradleException('M40 fixture command dispatch not installed')
+        }
+        JarFile create = new JarFile(targetCreateJar)
+        File artifact = file("${buildDir}/libs/sable-forge-1.20.1-${version}-all.jar")
+        JarFile packaged = new JarFile(artifact)
+        try {
+            def node = { JarFile jar, String name ->
+                def item = jar.getJarEntry(name + '.class')
+                if (item == null) throw new GradleException("M40 missing packaged target ${name}")
+                def result = new org.objectweb.asm.tree.ClassNode()
+                new org.objectweb.asm.ClassReader(jar.getInputStream(item).readAllBytes()).accept(result, 0)
+                return result
+            }
+            def basin = node(create, 'com/simibubi/create/content/processing/basin/BasinMovementBehaviour')
+            String ctx = 'Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;'
+            def tick = basin.methods.find { it.name == 'tick' && it.desc == "(${ctx})V" }
+            def dump = basin.methods.find { it.name == 'dump' && it.desc == "(${ctx}Lnet/minecraft/world/phys/Vec3;)V" }
+            def emit = basin.methods.find { it.name == 'lambda$dump$1' && it.desc == "(${ctx}Lnet/minecraft/world/phys/Vec3;Ljava/lang/String;Lnet/minecraftforge/items/ItemStackHandler;)V" }
+            def inventory = basin.methods.find { it.name == 'getOrReadInventory' && it.desc == "(${ctx})Ljava/util/Map;" }
+            if ([tick, dump, emit, inventory].any { it == null }) throw new GradleException('M40 exact Create Basin callbacks/descriptors changed')
+            def code = emit.instructions.toArray().toList()
+            def calls = code.findAll { it instanceof org.objectweb.asm.tree.MethodInsnNode }
+            def constructor = calls.findAll { it.owner == 'net/minecraft/world/entity/item/ItemEntity' && it.name == '<init>' }
+            def spawn = calls.findAll { it.owner == 'net/minecraft/world/level/Level' && it.desc == '(Lnet/minecraft/world/entity/Entity;)Z' }
+            if (constructor.size() != 1 || constructor[0].desc != '(Lnet/minecraft/world/level/Level;DDDLnet/minecraft/world/item/ItemStack;)V'
+                    || spawn.size() != 1 || code.indexOf(calls.find { it.name == 'setStackInSlot' }) <= code.indexOf(spawn[0])
+                    || !calls.any { it.name == 'serializeNBT' } || !code.any { it instanceof org.objectweb.asm.tree.LdcInsnNode && it.cst == .05d }) {
+                throw new GradleException('M40 native spawn/velocity/clear/serialization order changed')
+            }
+            def fields = code.findAll { it instanceof org.objectweb.asm.tree.FieldInsnNode }
+            if (fields.count { it.name == 'position' } != 3 || fields.count { it.name == 'world' } != 2
+                    || !tick.instructions.toArray().any { it instanceof org.objectweb.asm.tree.MethodInsnNode && it.name == 'dump' }
+                    || !tick.instructions.toArray().any { it instanceof org.objectweb.asm.tree.FieldInsnNode && it.name == 'DOWN' }
+                    || !dump.instructions.toArray().any { it instanceof org.objectweb.asm.tree.FieldInsnNode && it.name == 'temporaryData' && it.opcode == org.objectweb.asm.Opcodes.PUTFIELD }) {
+                throw new GradleException('M40 native context and one-shot latch changed')
+            }
+            def allBlocks = node(create, 'com/simibubi/create/AllBlocks')
+            if (allBlocks.methods.sum { method -> method.instructions.toArray().count { it instanceof org.objectweb.asm.tree.TypeInsnNode && it.desc == basin.name && it.opcode == org.objectweb.asm.Opcodes.NEW } } != 1) {
+                throw new GradleException('M40 BasinMovementBehaviour registration changed')
+            }
+            def fallback = node(create, 'com/simibubi/create/impl/contraption/storage/FallbackMountedStorage')
+            if (!fallback.methods.any { it.name == 'isValid' && it.desc == '(Lnet/minecraftforge/items/IItemHandler;)Z' }) throw new GradleException('M40 native storage validity canary changed')
+            def kinetic = node(create, 'com/simibubi/create/content/kinetics/base/KineticBlockEntity')
+            def reset = kinetic.methods.find { it.name == 'switchToBlockState' && it.desc == '(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)V' }
+            if (reset == null || !reset.instructions.toArray().any { it instanceof org.objectweb.asm.tree.MethodInsnNode && it.name == 'removeSource' }
+                    || !kinetic.methods.find { it.name == 'attachKinetics' }.instructions.toArray().any { it instanceof org.objectweb.asm.tree.MethodInsnNode && it.name == 'handleAdded' }) throw new GradleException('M40.1 native kinetic reset/reconnect canary changed')
+            ['network', 'source', 'updateSpeed'].each { name -> if (!kinetic.fields.any { it.name == name }) throw new GradleException("M40.1 kinetic diagnostic field missing ${name}") }
+            def smart = node(create, 'com/simibubi/create/foundation/blockEntity/SmartBlockEntity')
+            def bearing = node(create, 'com/simibubi/create/content/contraptions/bearing/MechanicalBearingBlockEntity')
+            if (!smart.fields.any { it.name == 'initialized' && it.desc == 'Z' }
+                    || !bearing.fields.any { it.name == 'assembleNextTick' && it.desc == 'Z' }) throw new GradleException('M40.1 private diagnostic field canary changed')
+            def motor = node(create, 'com/simibubi/create/content/kinetics/motor/CreativeMotorBlockEntity')
+            if (!motor.methods.any { method -> method.instructions.toArray().any { it instanceof org.objectweb.asm.tree.MethodInsnNode && it.name == 'updateGeneratedRotation' } }) throw new GradleException('M40.1 native motor generation callback missing')
+            def clutch = node(create, 'com/simibubi/create/content/kinetics/transmission/ClutchBlockEntity')
+            if (!clutch.methods.any { it.name == 'getRotationSpeedModifier' && it.desc == '(Lnet/minecraft/core/Direction;)F' }) throw new GradleException('M40.1 native clutch side semantics changed')
+            String mixinName = 'dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/basin/BasinMovementBehaviourMixin'
+            def shipped = node(packaged, mixinName)
+            def refmap = new JsonSlurper().parseText(packaged.getInputStream(packaged.getJarEntry('sable.refmap.json')).getText('UTF-8'))
+            String rawMember = 'Lnet/minecraft/world/level/Level;addFreshEntity(Lnet/minecraft/world/entity/Entity;)Z'
+            String member = refmap.mappings[mixinName]?.get(rawMember)
+            String expectedMember = 'L' + spawn[0].owner + ';' + spawn[0].name + spawn[0].desc
+            if (member != expectedMember) throw new GradleException("M40 packaged refmap mismatch ${member} vs ${expectedMember}")
+            def wraps = shipped.methods.collectMany { (it.visibleAnnotations ?: []) + (it.invisibleAnnotations ?: []) }
+            if (wraps.count { it.desc == 'Lcom/llamalad7/mixinextras/injector/wrapmethod/WrapMethod;' } != 1
+                    || wraps.count { it.desc == 'Lcom/llamalad7/mixinextras/injector/wrapoperation/WrapOperation;' } != 1) {
+                throw new GradleException('M40 required packaged tick and native-spawn hooks missing')
+            }
+            def config = new JsonSlurper().parseText(packaged.getInputStream(packaged.getJarEntry('sable-common-forge.mixins.json')).getText('UTF-8'))
+            if (!config.mixins.contains('compatibility.create.behaviour_compatibility.basin.BasinMovementBehaviourMixin')) throw new GradleException('M40 packaged mixin not enabled')
+            ['basin', 'run', 'yaw90', 'cleanup'].each { name ->
+                File source = new File(functions, "${name}.mcfunction")
+                def item = packaged.getJarEntry("data/sable/functions/m40/${name}.mcfunction")
+                if (!source.isFile() || source.getText('UTF-8').trim() != "sable_m40 ${name}"
+                        || item == null || packaged.getInputStream(item).getText('UTF-8').trim() != "sable_m40 ${name}") {
+                    throw new GradleException("M40 authoritative dispatch missing ${name}")
+                }
+            }
+        } finally { create.close(); packaged.close() }
+        File output = layout.buildDirectory.dir('m40BasinTest').get().asFile
+        output.mkdirs()
+        def companion = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companion).asPath
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null || compiler.run(null, System.out, System.err, '--release', '17', '-classpath', classpath,
+                '-d', output.absolutePath, test.absolutePath) != 0) throw new GradleException('M40 Basin tests compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companion.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try { loader.loadClass('dev.ryanhcode.sable.compatibility.create.basin.M40BasinOutputTest').getMethod('run').invoke(null) }
+        catch (java.lang.reflect.InvocationTargetException failure) { throw new GradleException('M40 Basin geometry regression failed', failure.targetException) }
+        finally { loader.close() }
+        logger.lifecycle('verifyM40BasinParentWorldOutput PASS: exact dump bytecode/refmap, native mutation, physical geometry and fixture lifecycle')
+    }
+}
+tasks.named('check').configure { dependsOn tasks.named('verifyM40BasinParentWorldOutput') }
+
 tasks.register('verifyM39SeatParentWorld') {
     group = 'forge backport'
     description = 'Checks exact Create Seat hooks, parent passenger transforms and the scoped native riding fixture.'

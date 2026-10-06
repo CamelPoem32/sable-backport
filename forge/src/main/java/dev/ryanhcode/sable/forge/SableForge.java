@@ -18,6 +18,7 @@ import dev.ryanhcode.sable.command.M36PortableInterfaceFixtureCommands;
 import dev.ryanhcode.sable.command.M37FunnelFixtureCommands;
 import dev.ryanhcode.sable.command.M38DispenserFixtureCommands;
 import dev.ryanhcode.sable.command.M39SeatFixtureCommands;
+import dev.ryanhcode.sable.command.M40BasinFixtureCommands;
 import dev.ryanhcode.sable.command.argument.SubLevelSelectorModifiers;
 import dev.ryanhcode.sable.index.SableAttributes;
 import dev.ryanhcode.sable.network.tcp.SableTCPPackets;
@@ -57,6 +58,7 @@ public final class SableForge {
         M37FunnelFixtureCommands.install();
         M38DispenserFixtureCommands.install();
         M39SeatFixtureCommands.install();
+        M40BasinFixtureCommands.install();
         M39SeatLifecycleEvents.install();
         MinecraftForge.EVENT_BUS.addListener(this::registerCommand);
         MinecraftForge.EVENT_BUS.addListener(this::registerReloadListeners);
@@ -109,6 +111,7 @@ public final class SableForge {
         M37FunnelFixtureCommands.register(event.getDispatcher());
         M38DispenserFixtureCommands.register(event.getDispatcher());
         M39SeatFixtureCommands.register(event.getDispatcher());
+        M40BasinFixtureCommands.register(event.getDispatcher());
         SableForgeRuntimeSmoke.commandRegistered();
     }
 
