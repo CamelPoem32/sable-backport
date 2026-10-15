@@ -469,3 +469,19 @@ to M41 delivery, not the later M42 jar. M42 adds only the door adapter/mixin plu
 fixture dispatch. Other retained production hashes are required unchanged.
 The refreshed packaged structural manifest has 204 checks; no old canary is
 removed. Overall MovementBehaviour coverage remains OPEN.
+
+## M43 follow-up (2026-10-15)
+
+M42 is now runtime accepted by the user. M43 addresses the four remaining F rows
+(three families): Plough throw vector, Drill and Saw physical entity visits in
+non-conducting cells independent of terrain eligibility, and Blaze Burner gaze.
+The current manifest assigns these rows C / M43. Inventory and registration
+fingerprints are rechecked, not regenerated or relaxed: 23 concrete classes,
+22 registered classes, 27 registration sites and 46 block variants. The resulting
+F count is computed from every manifest row, not hardcoded to zero.
+
+See `M43_FINAL_MOVEMENT_BEHAVIOUR_RESIDUALS.md` for exact native callsites, packaged
+injection counts, source ownership and runtime gates. Static coverage is not
+runtime closure. M43 and M41 functional closure remain runtime pending until the
+Plough, Drill, Saw and Blaze fixture gates all succeed in Minecraft. The old
+M41 production-hash/artifact numbers above remain historical delivery evidence.

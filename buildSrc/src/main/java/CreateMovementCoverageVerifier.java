@@ -298,8 +298,8 @@ public final class CreateMovementCoverageVerifier {
                     continue;
                 }
                 String constants = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
-                if (constants.matches("(?s).*dev[/.]ryanhcode[/.]sable[/.]command[/.]M(?:3[1-9]|40)[A-Za-z]*Fixture[A-Za-z]*.*")
-                        || constants.matches("(?s).*sable_m(?:3[1-9]|40)_(?:origin|ready|output|glue).*")) {
+                if (constants.matches("(?s).*dev[/.]ryanhcode[/.]sable[/.]command[/.]M(?:3[1-9]|4[0-3])[A-Za-z]*Fixture[A-Za-z]*.*")
+                        || constants.matches("(?s).*sable_m(?:3[1-9]|4[0-3])_(?:origin|ready|output|glue).*")) {
                     throw new IllegalStateException("M41 production depends on fixture ownership/state " + type.name);
                 }
                 checked++;

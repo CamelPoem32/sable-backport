@@ -4,6 +4,7 @@ import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.simibubi.create.api.behaviour.movement.MovementBehaviour;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
+import dev.ryanhcode.sable.Sable;
 import com.simibubi.create.content.kinetics.base.BlockBreakingMovementBehaviour;
 import com.simibubi.create.content.contraptions.actors.plough.PloughMovementBehaviour;
 import com.simibubi.create.content.kinetics.drill.DrillMovementBehaviour;
@@ -17,6 +18,13 @@ import dev.ryanhcode.sable.compatibility.create.block_breakers.SableRollerTerrai
 import dev.ryanhcode.sable.compatibility.create.block_breakers.SubLevelBlockBreakingUtility;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.util.SableDiagnosticFlags;
+import dev.ryanhcode.sable.compatibility.create.residuals.ResidualActorGeometry;
+import dev.ryanhcode.sable.compatibility.create.residuals.SableActorEntityEvidence;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.phys.AABB;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
@@ -55,6 +63,7 @@ public abstract class BlockBreakingMovementBehaviourMixin implements MovementBeh
 
         final SubLevelBlockBreakingUtility.TargetResolution resolution = sable$resolve(context, owner);
         SableM31CreateActorTrace.resolution(context, owner, proposedRaw, resolution);
+        sable$visitPhysicalEntityCell(context, owner);
         if (resolution.target() == null) {
             return;
         }
@@ -75,6 +84,9 @@ public abstract class BlockBreakingMovementBehaviourMixin implements MovementBeh
         final SubLevelBlockBreakingUtility.TargetResolution resolution = sable$resolve(context, owner);
         SableM31CreateActorTrace.resolution(context, owner, BlockPos.containing(context.position), resolution);
         final boolean pointActor = (Object) this instanceof PloughMovementBehaviour;
+        if (!pointActor && !context.stall) {
+            sable$visitPhysicalEntityCell(context, owner);
+        }
         final BlockPos current = sable$getBlockPos(context.data,
                 pointActor ? SABLE$EXTERNAL_TARGET : "BreakingPos");
         final ExternalBlockBreakingTargetState.Transition transition =
@@ -98,6 +110,79 @@ public abstract class BlockBreakingMovementBehaviourMixin implements MovementBeh
         if (resolution.target() != null) {
             ((BlockBreakingMovementBehaviour) (Object) this).visitNewPosition(context, resolution.target());
         }
+    }
+
+    /** The native non-conductor/entity phase precedes canBreak; lack of a terrain target is not ineligibility. */
+    @Unique
+    private void sable$visitPhysicalEntityCell(final MovementContext context, final SubLevel owner) {
+        if (!((Object) this instanceof DrillMovementBehaviour) && !((Object) this instanceof SawMovementBehaviour)) return;
+        if (context.position == null) return;
+        final Vec3 direction = context.rotation.apply(this.getActiveAreaOffset(context)).normalize();
+        final var point = SubLevelBlockBreakingUtility.findExternalPointTarget(owner, context.world,
+                SableCreateActorWorldContext.resolveActivePoint(context, owner, direction));
+        if (point.target() == null) return;
+        final BlockPos cell = point.target();
+        final String key = "SableM43EntityCell";
+        if (context.data.contains(key) && NbtUtils.readBlockPos(context.data.getCompound(key)).equals(cell)) return;
+        context.data.put(key, NbtUtils.writeBlockPos(cell));
+        if (!point.targetState().isRedstoneConductor(context.world, cell)) {
+            ((BlockBreakingMovementBehaviour) (Object) this).damageEntities(context, cell, context.world);
+        }
+    }
+
+    /** The independent physical phase above replaces this one native call, never adds a second query. */
+    @WrapOperation(method = "visitNewPosition", at = @At(value = "INVOKE",
+            target = "Lcom/simibubi/create/content/kinetics/base/BlockBreakingMovementBehaviour;damageEntities(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/Level;)V"))
+    private void sable$avoidSecondEntityPhase(final BlockBreakingMovementBehaviour behaviour,
+                                               final MovementContext context, final BlockPos pos, final Level world,
+                                               final Operation<Void> original) {
+        if (sable$owner(context) == null || !((Object) this instanceof DrillMovementBehaviour)
+                && !((Object) this instanceof SawMovementBehaviour)) original.call(behaviour, context, pos, world);
+    }
+
+    /** Only the input motion changes; native world-up lift, cap, selection and final mutation remain native. */
+    @WrapMethod(method = "throwEntity")
+    protected void sable$rotateNativeEntityMotion(final MovementContext context, final Entity entity,
+                                                   final Operation<Void> original) {
+        final SubLevel owner = sable$owner(context);
+        if (owner == null) { original.call(context, entity); return; }
+        if (entity.level() != owner.getLevel() || Sable.HELPER.getContaining(entity) != null) return;
+        final Vec3 rawMotion = context.motion;
+        final Vec3 physicalMotion = ResidualActorGeometry.rotate(owner.logicalPose(), rawMotion);
+        final Vec3 before = entity.getDeltaMovement();
+        try {
+            context.motion = physicalMotion;
+            original.call(context, entity);
+        } finally { context.motion = rawMotion; }
+        SableActorEntityEvidence.record(context, new SableActorEntityEvidence.Event(context.world.getGameTime(),
+                "THROW", entity.blockPosition(), entity.getUUID(), rawMotion, physicalMotion, before,
+                entity.getDeltaMovement(), 0, 0, true, false, 1));
+    }
+
+    @WrapOperation(method = "damageEntities", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/world/level/Level;getEntitiesOfClass(Ljava/lang/Class;Lnet/minecraft/world/phys/AABB;)Ljava/util/List;", remap = true))
+    private List<Entity> sable$observeNativeEntityQuery(final Level world, final Class<Entity> type, final AABB bounds,
+                                                        final Operation<List<Entity>> original,
+                                                        final MovementContext context, final BlockPos pos, final Level level) {
+        final List<Entity> result = original.call(world, type, bounds);
+        if (sable$owner(context) != null) SableActorEntityEvidence.record(context,
+                new SableActorEntityEvidence.Event(world.getGameTime(), "QUERY", pos, null, null, null, null, null,
+                        0, 0, true, world.getBlockState(pos).isAir(), result.size()));
+        return result;
+    }
+
+    @WrapOperation(method = "damageEntities", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/world/entity/Entity;hurt(Lnet/minecraft/world/damagesource/DamageSource;F)Z", remap = true))
+    private boolean sable$observeNativeDamage(final Entity entity, final DamageSource source, final float damage,
+                                              final Operation<Boolean> original, final MovementContext context,
+                                              final BlockPos pos, final Level world) {
+        if (sable$owner(context) == null) return original.call(entity, source, damage);
+        final float before = SableActorEntityEvidence.health(entity);
+        final boolean accepted = original.call(entity, source, damage);
+        SableActorEntityEvidence.record(context, new SableActorEntityEvidence.Event(world.getGameTime(), "DAMAGE", pos,
+                entity.getUUID(), null, null, null, null, before, SableActorEntityEvidence.health(entity), accepted,
+                world.getBlockState(pos).isAir(), 1));
+        return accepted;
     }
 
     @WrapMethod(method = "tick")

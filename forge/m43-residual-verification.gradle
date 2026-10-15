@@ -1,0 +1,81 @@
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+import java.util.jar.JarFile
+
+tasks.register('verifyM43MovementBehaviourResiduals') {
+    group = 'forge backport'
+    description = 'Independent native Plough, Drill, Saw and Blaze residual gates, packaged injection matching and headless geometry.'
+    dependsOn 'compileJava', 'verifyStandaloneForgeArtifact'
+    doLast {
+        File create = file('build-m287/targetModpackRepository/create-1.20.1-6.0.8.jar')
+        M43ResidualBytecodeVerifier.verify(create)
+        File artifact = tasks.named('jarJar').get().archiveFile.get().asFile
+        JarFile jar = new JarFile(artifact)
+        try {
+            def config = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry('sable-common-forge.mixins.json')).getText('UTF-8'))
+            def refmap = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry(config.refmap)).getText('UTF-8'))
+            File minecraft = new File(gradle.gradleUserHomeDir, 'caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/1.20.1-47.4.20/forge-1.20.1-47.4.20-srg.jar')
+            def report = CreateMovementCoverageVerifier.mixins(artifact, create, minecraft, sourceSets.main.runtimeClasspath.files.toList(), config, refmap)
+            file('build/m43Audit').mkdirs()
+            file('build/m43Audit/mixin-targets.json').setText(JsonOutput.prettyPrint(JsonOutput.toJson(report)), 'UTF-8')
+            M43ResidualBytecodeVerifier.packagedChecks(report)
+            String blaze = 'dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/residuals/BlazeBurnerMovementBehaviourMixin'
+            String breaker = 'dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin'
+            if (!refmap.mappings[blaze]?.values()?.any { it.contains('m_82546_') }
+                    || !refmap.mappings[breaker]?.values()?.any { it.contains('m_45976_') }
+                    || !refmap.mappings[breaker]?.values()?.any { it.contains('m_6469_') }) throw new GradleException('M43 packaged remapping absent')
+            ['setup', 'run_all', 'yaw90', 'cleanup'].each { command ->
+                def entry = jar.getJarEntry("data/sable/functions/m43/${command}.mcfunction")
+                if (entry == null || jar.getInputStream(entry).getText('UTF-8').trim() != "sable_m43 ${command}") throw new GradleException("M43 function not packaged ${command}")
+            }
+            def manifest = new JsonSlurper().parse(rootProject.file('config/m41-create-movement-coverage.json'))
+            ['PloughMovementBehaviour', 'DrillMovementBehaviour', 'SawMovementBehaviour', 'BlazeBurnerMovementBehaviour'].each { name ->
+                def rows = manifest.coverage.findAll { key, value -> key.endsWith('/' + name) }
+                if (rows.size() != 1 || rows.values().first().category != 'C' || rows.values().first().milestone != 'M43') throw new GradleException("M43 manifest owner missing ${name}")
+            }
+        } finally { jar.close() }
+        String root = 'common/src/main/java/dev/ryanhcode/sable/'
+        String breaker = rootProject.file(root + 'mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java').getText('UTF-8')
+        String gaze = rootProject.file(root + 'compatibility/create/residuals/SableBlazeGaze.java').getText('UTF-8')
+        String mixin = rootProject.file(root + 'mixin/compatibility/create/behaviour_compatibility/residuals/BlazeBurnerMovementBehaviourMixin.java').getText('UTF-8')
+        String fixture = file('src/main/java/dev/ryanhcode/sable/command/M43ResidualFixtureCommands.java').getText('UTF-8')
+        ['owner == null', 'original.call(context, proposedRaw)', 'sable$avoidSecondEntityPhase', 'findExternalPointTarget',
+         'SableM43EntityCell', 'isRedstoneConductor(context.world, cell)', ').damageEntities(context, cell, context.world)',
+         'ResidualActorGeometry.rotate(owner.logicalPose(), rawMotion)', 'finally { context.motion = rawMotion; }',
+         'original.call(context, entity)', 'original.call(entity, source, damage)'].each { token ->
+            if (!breaker.contains(token)) throw new GradleException("M43 scoped native boundary absent ${token}")
+        }
+        [breaker, gaze, mixin].each { text ->
+            ['@Overwrite', 'require = 0', 'context.world =', 'M43ResidualFixture', 'sable_m43_', '.hurt(', '.setDeltaMovement(', 'PoseStack'].each { forbidden ->
+                if (text.contains(forbidden)) throw new GradleException("M43 native/fixture boundary violation ${forbidden}")
+            }
+        }
+        ['client.renderPose(1)', 'pose.transformPosition(rawActor)', 'camera.subtract(visible)',
+         'ResidualActorGeometry.inverseRotate(pose, physical)', 'reverseRotation(sableVector, 1)', 'nativeAngle'].each { token ->
+            if (!gaze.contains(token)) throw new GradleException("M43 client frame/angle contract absent ${token}")
+        }
+        if (!mixin.contains('if (owner == null) return original.call(camera, rawActor)')) throw new GradleException('M43 normal-world Blaze bypass absent')
+        ['phase=BUILD', 'phase=VALIDATE', 'phase=READY', 'ROLLBACK', 'footprintClear=', 'controller.movedContraption',
+         'getControllerPos(entity)', 'getContainingSubLevel(entity) == f.body', 'removeRegressionBlocks(f)',
+         'allPassed(', 'M43BaselinePass', 'nativeAssembler.assembleOrDisassemble(null)', 'M43NativeOuterRemoved',
+         'e.healthAfter() < e.healthBefore()', 'impulse.afterVelocity().subtract(impulse.beforeVelocity())', 'task.nonce'].each { token ->
+            if (!fixture.contains(token)) throw new GradleException("M43 real witness/lifecycle missing ${token}")
+        }
+        if (fixture.contains('.hurt(') || fixture.contains('.damageEntities(') || fixture.contains('.throwEntity(')) throw new GradleException('M43 fixture substitutes native actor operation')
+        File output = file('build/m43ResidualTest'); output.mkdirs()
+        def companion = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        String classpath = files(sourceSets.main.runtimeClasspath, companion).asPath
+        File test = file('src/m43ResidualTest/java/dev/ryanhcode/sable/compatibility/create/residuals/M43ResidualGeometryTest.java')
+        if (compiler == null || compiler.run(null, System.out, System.err, '--release', '17', '-classpath', classpath, '-d', output.absolutePath, test.absolutePath) != 0) throw new GradleException('M43 headless tests compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companion.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try { loader.loadClass('dev.ryanhcode.sable.compatibility.create.residuals.M43ResidualGeometryTest').getMethod('run').invoke(null) }
+        catch (java.lang.reflect.InvocationTargetException failure) { throw new GradleException('M43 geometry/policy regression failed', failure.targetException) }
+        finally { loader.close() }
+        ['PLOUGH_ENTITY_IMPULSE', 'DRILL_AIR_ENTITY_DAMAGE', 'SAW_AIR_ENTITY_DAMAGE', 'BLAZE_GAZE'].each { section -> logger.lifecycle("M43 ${section} STATIC PASS") }
+        logger.lifecycle('verifyM43MovementBehaviourResiduals PASS; native Minecraft runtime closure remains pending')
+    }
+}

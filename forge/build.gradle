@@ -32517,6 +32517,7 @@ tasks.register('verifyCreateMovementBehaviourCoverage') {
     dependsOn tasks.named('verifyCreateProductionFixtureBoundary')
     dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
     dependsOn 'verifyM42SlidingDoorParentWorld'
+    dependsOn 'verifyM43MovementBehaviourResiduals'
     dependsOn 'verifyM31CreateActorWorldMutation', 'verifyM32CreateWorldInteractionActors',
             'verifyM33DeployerParentWorldInteraction', 'verifyM33_1DeployerMountedStorage',
             'verifyM34MovementBehaviourCoverage', 'verifyM35MechanicalRollerParentWorld',
@@ -32573,11 +32574,14 @@ tasks.register('verifyCreateMovementBehaviourCoverage') {
                         || name == 'dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/sliding_door/SlidingDoorMovementBehaviourMixin.class'
                         || name.startsWith('dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedPistonOwnershipTransfer')
                         || name.startsWith('dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer')
+                        || name.startsWith('dev/ryanhcode/sable/compatibility/create/residuals/')
+                        || name == 'dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.class'
+                        || name == 'dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/residuals/BlazeBurnerMovementBehaviourMixin.class'
             }.toSet()
             if (changed != allowedM42 || before.keySet().any { !after.containsKey(it) }) {
-                throw new GradleException("M41 unexplained production bytecode change beyond M42: ${changed - allowedM42}")
+                throw new GradleException("M41 unexplained production bytecode change beyond M42/M43: ${changed - allowedM42}")
             }
-            logger.lifecycle("M42 explained production delta: ${changed.sort()}")
+            logger.lifecycle("M42/M43 explained production delta: ${changed.sort()}")
         }
         int gaps = expected.coverage.values().count { it.category == 'F' }
         logger.lifecycle("verifyCreateMovementBehaviourCoverage PASS: exhaustive pinned inventory/owners/mixin canaries; REAL_GAP_FOUND=${gaps}; functional coverage is NOT declared complete when gaps exist")
@@ -32723,6 +32727,8 @@ tasks.register('verifyM42SlidingDoorParentWorld') {
     }
 }
 tasks.named('check').configure { dependsOn tasks.named('verifyM42SlidingDoorParentWorld') }
+
+apply from: 'm43-residual-verification.gradle'
 
 tasks.register('verifyM38DispenserParentWorld') {
     group = 'forge backport'

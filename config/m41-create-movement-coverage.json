@@ -96,12 +96,15 @@
       ]
     },
     "com/simibubi/create/content/processing/burner/BlazeBurnerMovementBehaviour": {
-      "category": "F",
+      "category": "C",
+      "milestone": "M43",
       "blocks": [
         "create:blaze_burner"
       ],
       "owners": [
-        "common/src/main/java/dev/ryanhcode/sable/mixin/particle/ParticleEngineMixin.java"
+        "common/src/main/java/dev/ryanhcode/sable/mixin/particle/ParticleEngineMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/residuals/BlazeBurnerMovementBehaviourMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/residuals/SableBlazeGaze.java"
       ]
     },
     "com/simibubi/create/content/contraptions/behaviour/CampfireMovementBehaviour": {
@@ -160,7 +163,8 @@
       ]
     },
     "com/simibubi/create/content/kinetics/drill/DrillMovementBehaviour": {
-      "category": "F",
+      "category": "C",
+      "milestone": "M43",
       "blocks": [
         "create:mechanical_drill"
       ],
@@ -214,12 +218,14 @@
       ]
     },
     "com/simibubi/create/content/contraptions/actors/plough/PloughMovementBehaviour": {
-      "category": "F",
+      "category": "C",
+      "milestone": "M43",
       "blocks": [
         "create:mechanical_plough"
       ],
       "owners": [
-        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/plough_behaviour/PloughMovementBehaviourMixin.java"
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/plough_behaviour/PloughMovementBehaviourMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java"
       ]
     },
     "com/simibubi/create/content/contraptions/actors/psi/PortableStorageInterfaceMovement": {
@@ -244,12 +250,14 @@
       ]
     },
     "com/simibubi/create/content/kinetics/saw/SawMovementBehaviour": {
-      "category": "F",
+      "category": "C",
+      "milestone": "M43",
       "blocks": [
         "create:mechanical_saw"
       ],
       "owners": [
-        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/SawMovementBehaviourMixin.java"
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/SawMovementBehaviourMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java"
       ]
     },
     "com/simibubi/create/content/contraptions/actors/seat/SeatMovementBehaviour": {
@@ -310,7 +318,7 @@
       ]
     }
   },
-  "mixinTargetsSha256": "8d7428642165fc40662009c146c11b189f696923acf1b24bc8eea4f180d7dfd2",
+  "mixinTargetsSha256": "c0b06d3adbcb2d18f0447a421a0f6e342707a39bafe4e7098de6f64bdc617750",
   "mixinTargetChecks": 204,
   "specializedPointCount": 0
 }
