@@ -9,6 +9,7 @@
         "minVersion": "0.5.0"
     },
     "client": [
+        "compatibility.tfmg.GoggleOverlayRendererMixin",
         "compatibility.create.behaviour_compatibility.residuals.BlazeBurnerMovementBehaviourMixin",
         "block_decal_render.LevelRendererMixin",
         "camera.camera_rotation.CompassItemPropertyFunctionMixin",

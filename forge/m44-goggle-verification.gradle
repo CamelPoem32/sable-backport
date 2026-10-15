@@ -1,0 +1,65 @@
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+import java.util.jar.JarFile
+
+tasks.register('verifyM44GoggleOverlayCompatibility') {
+    group = 'forge backport'
+    description = 'TFMG unsafe callback ownership, native Create guard, optional overlay wrapper, packaged target and actual wrapping-stage smoke.'
+    dependsOn 'compileJava', 'verifyStandaloneForgeArtifact'
+    doLast {
+        File create = file('build-m287/targetModpackRepository/create-1.20.1-6.0.8.jar')
+        File tfmg = rootProject.file('../target_modpack/mods/tfmg-1.0.2f.jar')
+        M44GoggleOverlayVerifier.nativeOwner(create, tfmg)
+        File artifact = tasks.named('jarJar').get().archiveFile.get().asFile
+        File output = file('build/m44Audit'); output.mkdirs()
+        JarFile jar = new JarFile(artifact)
+        try {
+            def config = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry('sable-common-forge.mixins.json')).getText('UTF-8'))
+            def refmap = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry(config.refmap)).getText('UTF-8'))
+            File minecraft = new File(gradle.gradleUserHomeDir, 'caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/1.20.1-47.4.20/forge-1.20.1-47.4.20-srg.jar')
+            def report = CreateMovementCoverageVerifier.mixins(artifact, create, minecraft, sourceSets.main.runtimeClasspath.files.toList(), config, refmap)
+            new File(output, 'mixin-targets.json').setText(JsonOutput.prettyPrint(JsonOutput.toJson(report)), 'UTF-8')
+            M44GoggleOverlayVerifier.packaged(artifact, report)
+        } finally { jar.close() }
+        File extrasOuter = sourceSets.main.runtimeClasspath.files.find { it.name == 'mixinextras-forge-0.5.3.jar' }
+        if (extrasOuter == null) throw new GradleException('M44 pinned MixinExtras 0.5.3 dependency absent')
+        File extras = new File(output, 'MixinExtras-0.5.3.jar')
+        JarFile external = new JarFile(extrasOuter)
+        try { extras.bytes = external.getInputStream(external.getJarEntry('META-INF/jars/MixinExtras-0.5.3.jar')).bytes }
+        finally { external.close() }
+        M44GoggleOverlayVerifier.wrappingSmoke(create, tfmg, artifact, extras, sourceSets.main.runtimeClasspath.files.toList())
+        String mixin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/tfmg/GoggleOverlayRendererMixin.java').getText('UTF-8')
+        String guard = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/goggles/SableGoggleOverlayGuard.java').getText('UTF-8')
+        String policy = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/goggles/GoggleOverlayHitPolicy.java').getText('UTF-8')
+        [mixin, guard, policy].each { source ->
+            ['@Redirect', '@Overwrite', 'require = 0', 'catch (', '(BlockHitResult)', 'PoseStack', 'minecraft.hitResult =', 'new BlockHitResult', '.setBlock(', 'getEntitiesOfClass('].each { forbidden ->
+                if (source.contains(forbidden)) throw new GradleException("M44 forbidden raycast/native mutation ${forbidden}")
+            }
+        }
+        ['@WrapMethod', '@MixinModVersionConstraint("[1.0.2f]")', 'original.call(gui, graphics, partialTicks, width, height)'].each { token ->
+            if (!mixin.contains(token)) throw new GradleException("M44 scoped optional wrapper absent ${token}")
+        }
+        ['instanceof BlockHitResult', 'HitResult.Type.MISS', 'HitResult.Type.ENTITY', 'hit == null', 'hiddenBlock'].each { token ->
+            if (!policy.contains(token)) throw new GradleException("M44 hit policy lost ${token}")
+        }
+        if (!guard.contains('SABLE_M44_GOGGLE') || !guard.contains('logged >= 32') || !guard.contains('TRACE_CREATE_ACTORS')) throw new GradleException('M44 bounded diagnostics absent')
+        String plugin = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/AbstractSableMixinPlugin.java').getText('UTF-8')
+        if (!plugin.contains('parts[5] : parts[6]') || !plugin.contains('isModLoaded && this.mixinConstraints.handleClassAnnotation')) throw new GradleException('M44 optional/version plugin boundary changed')
+        def exactVersion = org.apache.maven.artifact.versioning.VersionRange.createFromVersionSpec('[1.0.2f]')
+        if (!exactVersion.containsVersion(new org.apache.maven.artifact.versioning.DefaultArtifactVersion('1.0.2f'))
+                || exactVersion.containsVersion(new org.apache.maven.artifact.versioning.DefaultArtifactVersion('1.0.3'))) throw new GradleException('M44 audited version envelope')
+        File test = file('src/m44GoggleTest/java/dev/ryanhcode/sable/compatibility/create/goggles/M44GoggleHitPolicyTest.java')
+        def companion = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companion).asPath
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null || compiler.run(null, System.out, System.err, '--release', '17', '-classpath', classpath, '-d', output.absolutePath, test.absolutePath) != 0) throw new GradleException('M44 tests compilation failed')
+        def urls = [output.toURI().toURL()]
+        urls.addAll(sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() })
+        urls.addAll(companion.files.collect { it.toURI().toURL() })
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try { loader.loadClass('dev.ryanhcode.sable.compatibility.create.goggles.M44GoggleHitPolicyTest').getMethod('run').invoke(null) }
+        catch (java.lang.reflect.InvocationTargetException failure) { throw new GradleException('M44 hit-result regression failed', failure.targetException) }
+        finally { loader.close() }
+        logger.lifecycle('verifyM44GoggleOverlayCompatibility PASS: TFMG ownership, native guard, hit policy, version scope, packaged target and real MixinExtras wrapping-stage smoke; Minecraft runtime pending')
+    }
+}
