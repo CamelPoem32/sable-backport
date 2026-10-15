@@ -1,7 +1,52 @@
 # Sable Forge 1.20.1 Backport Status
 
+## Final Accepted Release: M45.2
+
+**Sable 2.0.0, NeoForge 1.21.1 -> Forge 1.20.1: FUNCTIONALLY COMPLETE.**
+**Create Aeronautics compatibility: ACCEPTED. Release: READY. No M46 required.**
+
+| Final milestone / gate | Accepted result |
+|---|---|
+| M28-M45 | CLOSED / PASS |
+| M41 Create 6.0.8 MovementBehaviour coverage | CLOSED / COMPLETE: 23 concrete classes, 22 registered types, 27 sites, 46 variants, REAL_GAP_FOUND=0 |
+| M45 static release audit | PASS |
+| M45.1 production/fixture boundary | PASS: 0 direct lifecycle edges; static architecture and full build PASS |
+| M45.1 live fixture-owned subscription smoke | PASS |
+| Final runtime smoke | PASS |
+| Accepted release candidate | ACCEPTED / RELEASE READY |
+
+The final runtime acceptance is the user's reported evidence supplied for M45.2,
+not a newly executed build or Minecraft session. M27 body capture, sample steps
+0/1/2/5/20 with FINITE states, inspect and safe cleanup passed; its
+`aero_surface_basic` control-surface payload is NOT_APPLICABLE (expected blocks
+0, surface count 0, bearing owner UNAVAILABLE). M39 mount/update/detach, M42
+physical door mutation, and M43 gaze/impulse/AIR-damage/block regressions passed.
+No final-smoke goggle_info exception, InjectionError, hidden-PoseStack violation
+or huge-query regression was reported. The M38 missing-sublevel movement-packet
+warning is an observed non-blocking synchronization warning, not a confirmed
+M45.1 regression; cleanup completed without an associated crash or stack trace.
+
+Accepted existing artifact: `forge/build/libs/sable-forge-1.20.1-2.0.0-all.jar`,
+**12,970,238 bytes**, SHA-256
+`8FB42371EE5FCE3C0D0842AAA0AC6FE2F36A2DE940AFA5ABF917138ADE1355DC`.
+M45.2 independently verified those bytes without rebuilding or modifying the jar.
+See `M45_FINAL_RELEASE_AUDIT.md` for separate static/runtime evidence and
+`FINAL_KNOWN_LIMITATIONS.md` for retained scope and M37's accepted fixture caveat.
+
+Git release tagging remains a bookkeeping exception: the accepted M45.1
+implementation/build changes are still uncommitted. This pass commits only
+release documentation and does not create a misleading tag of older source.
+Functional/artifact acceptance is complete; formal source-tag closure remains
+blocked until the accepted implementation is committed and provenance verified.
+Nothing is pushed.
+
+Earlier entries below are historical snapshots, including failures and pending
+results. They are preserved, not retrospectively relabeled as successful tests;
+the final accepted ledger above supersedes their then-current project status.
+
 ## Target And Baseline
 
+- Sable: `2.0.0`
 - Minecraft: `1.20.1`
 - Forge: `47.4.20`
 - Java: `17`
