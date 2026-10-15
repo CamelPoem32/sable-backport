@@ -2868,7 +2868,7 @@ tasks.register('verifyTargetModpackDependencies') {
 
 tasks.register('verifyVeilDependency') {
     group = 'verification'
-    description = 'Confirms ForgeGradle compiles against mapped Veil 1.20 rather than its raw production jar.'
+    description = 'Confirms the separately resolved Veil preparation inputs and staged runtime use mapped names rather than raw production names.'
     dependsOn prepareVeilDevelopmentRuntime
     dependsOn tasks.named('preparePonderDevelopmentRuntime')
     dependsOn tasks.named('prepareCreateDevelopmentRuntime')
@@ -2885,17 +2885,17 @@ tasks.register('verifyVeilDependency') {
         }
         File rawVeil = rawFiles.first().canonicalFile
 
-        def veilArtifacts = configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
+        def veilArtifacts = configurations.veilMapped.resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
             artifact.name == "Veil-forge-${forge_minecraft_version}" && artifact.classifier == 'slim'
         }
         if (veilArtifacts.size() != 1) {
-            throw new GradleException("Expected one compile Veil artifact, resolved ${veilArtifacts*.moduleVersion*.id}")
+            throw new GradleException("Expected one mapped Veil preparation artifact, resolved ${veilArtifacts*.moduleVersion*.id}")
         }
 
         def mappedArtifact = veilArtifacts.first()
         File mappedVeil = mappedArtifact.file.canonicalFile
         if (mappedVeil == rawVeil) {
-            throw new GradleException("Compile classpath uses the raw Veil artifact: ${rawVeil}")
+            throw new GradleException("Veil preparation uses the raw artifact: ${rawVeil}")
         }
         if (sha256(mappedVeil) == sha256(rawVeil)) {
             throw new GradleException('Mapped and raw Veil artifacts have identical SHA-256 hashes')
@@ -21939,13 +21939,14 @@ tasks.register('verifyM24AssemblyBodyIdCaptureBoundary') {
     doLast {
         String assembler = rootProject.file('forge/src/main/java/dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.java').getText('UTF-8')
         String commands = rootProject.file('forge/src/main/java/dev/ryanhcode/sable/command/M24SimulatedSystemsCommands.java').getText('UTF-8')
+        String observers = file('src/main/java/dev/ryanhcode/sable/command/M45FixtureLifecycleSubscriptions.java').getText('UTF-8')
         [
                 'parentAssemblerPos',
                 'M24SimulatedSystemsCommands.onM22AssemblyCreated',
                 'timing=ASSEMBLY_COMPLETION_BEFORE_AUTOPAIR',
                 'SABLE_M24_BODY_ID_CAPTURE'
         ].each { token ->
-            if (!(assembler + commands).contains(token)) {
+            if (!(assembler + commands + observers).contains(token)) {
                 throw new GradleException("M24.5 assembly body-id capture missing token: ${token}")
             }
         }
@@ -25723,13 +25724,15 @@ tasks.register('verifyM27AuthoritativeAssemblyCaptureBoundary') {
     doLast {
         String assembler = m27AssemblerSource.getText('UTF-8')
         String command = m27CommandSource.getText('UTF-8')
-        ['M27AerodynamicsCommands.onM22AssemblyCreated(',
+        String observers = file('src/main/java/dev/ryanhcode/sable/command/M45FixtureLifecycleSubscriptions.java').getText('UTF-8')
+        ['new ForgeSableAssemblyCompletedEvent(',
          'level, parentAssemblerPos, result.subLevel(), result.offset()'].each { token ->
             if (!assembler.contains(token)) {
                 throw new GradleException("Physics Assembler completion lost M27 capture token ${token}")
             }
         }
-        if (assembler.indexOf('M27AerodynamicsCommands.onM22AssemblyCreated(')
+        if (!observers.contains('M27AerodynamicsCommands.onM22AssemblyCreated(')
+                || assembler.indexOf('new ForgeSableAssemblyCompletedEvent(')
                 < assembler.indexOf('SimAssemblyHelper.assembleFromSingleBlock')) {
             throw new GradleException('M27 capture runs before successful assembly returns')
         }
@@ -32507,7 +32510,7 @@ tasks.register('verifyCreateProductionFixtureBoundary') {
     dependsOn tasks.named('verifyStandaloneForgeArtifact')
     doLast {
         int count = CreateMovementCoverageVerifier.productionBoundary(tasks.named('jarJar').get().archiveFile.get().asFile)
-        logger.lifecycle("verifyCreateProductionFixtureBoundary PASS: ${count} production classes; M37 read-only fixture observer explicitly isolated")
+        logger.lifecycle("Legacy Create-only fixture scan passed: ${count} classes; M37 observer isolated; whole-artifact boundary result follows")
     }
 }
 
@@ -32580,11 +32583,14 @@ tasks.register('verifyCreateMovementBehaviourCoverage') {
                         || name == 'dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/residuals/BlazeBurnerMovementBehaviourMixin.class'
                         || name.startsWith('dev/ryanhcode/sable/compatibility/create/goggles/')
                         || name == 'dev/ryanhcode/sable/mixin/compatibility/tfmg/GoggleOverlayRendererMixin.class'
+                        || name == 'dev/eriksonn/aeronautics/forge/AeronauticsForge.class'
+                        || name == 'dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.class'
+                        || name == 'dev/ryanhcode/sable/forge/event/ForgeSableAssemblyCompletedEvent.class'
             }.toSet()
             if (changed != allowedM42 || before.keySet().any { !after.containsKey(it) }) {
-                throw new GradleException("M41 unexplained production bytecode change beyond M42/M43/M44: ${changed - allowedM42}")
+                throw new GradleException("M41 unexplained production bytecode change beyond M42/M43/M44/M45.1: ${changed - allowedM42}")
             }
-            logger.lifecycle("M42/M43/M44 explained production delta: ${changed.sort()}")
+            logger.lifecycle("M42/M43/M44/M45.1 explained production delta: ${changed.sort()}")
         }
         int gaps = expected.coverage.values().count { it.category == 'F' }
         logger.lifecycle("verifyCreateMovementBehaviourCoverage PASS: exhaustive pinned inventory/owners/mixin canaries; REAL_GAP_FOUND=${gaps}; functional coverage is NOT declared complete when gaps exist")
@@ -32733,6 +32739,7 @@ tasks.named('check').configure { dependsOn tasks.named('verifyM42SlidingDoorPare
 
 apply from: 'm43-residual-verification.gradle'
 apply from: 'm44-goggle-verification.gradle'
+apply from: 'm45-final-release.gradle'
 
 tasks.register('verifyM38DispenserParentWorld') {
     group = 'forge backport'

@@ -1,0 +1,130 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.util.jar.JarFile
+
+def writeM45 = { String name, Object value ->
+    File output = file("build/m45Audit/${name}.json")
+    output.parentFile.mkdirs()
+    output.setText(JsonOutput.prettyPrint(JsonOutput.toJson(value)) + '\n', 'UTF-8')
+}
+
+tasks.register('auditM45ReleaseEvidence') {
+    group = 'verification'
+    description = 'Read-only full release evidence, source classification and all configured runtime mixin targets; no game launch.'
+    dependsOn 'verifyStandaloneForgeArtifact', 'packageRapierIntoFinalForgeArtifact'
+    doLast {
+        File artifact = tasks.named('jarJar').get().archiveFile.get().asFile
+        def packaged = M45FinalReleaseVerifier.artifact(artifact)
+        writeM45('artifact', packaged)
+        def selected = (sourceSets.main.allJava.files + sourceSets.rapierBackport.allJava.files
+                + project(':sable_companion_1_20').sourceSets.main.allJava.files).collect { it.canonicalFile }.toSet()
+        def sources = []
+        ['common/src/main/java', 'forge/src/main/java', 'sable_companion_1_20/src/main/java', 'sable_rapier/src/main/java', 'buildSrc/src/main/java'].each { root ->
+            rootProject.fileTree(root).matching { include '**/*.java' }.files.sort().each { source ->
+                String path = rootProject.relativePath(source).replace('\\', '/')
+                String category = path.startsWith('buildSrc/') ? 'BUILD_VERIFIER' : !selected.contains(source.canonicalFile) ? 'LEGACY_UNUSED' : M45FinalReleaseVerifier.category(path)
+                sources.add([source: path, category: category, selectedForForge: selected.contains(source.canonicalFile),
+                             reason: category == 'LEGACY_UNUSED' ? 'Excluded/replaced in Forge source set; not claimed dead upstream' : 'Selected source role; compiled nested classes inherit owner role'])
+            }
+        }
+        rootProject.fileTree('forge/src').matching { include '**/*.java'; exclude 'main/**' }.files.sort().each { source ->
+            sources.add([source: rootProject.relativePath(source).replace('\\', '/'), category: 'BUILD_VERIFIER', selectedForForge: false, reason: 'Isolated headless regression source set; not packaged'])
+        }
+        writeM45('sources', [counts: sources.countBy { it.category }, classes: sources])
+        def diagnostics = []
+        selected.sort().each { source ->
+            String text = source.getText('UTF-8')
+            def families = (text =~ /(SABLE_[A-Z][A-Z0-9_]+)/).collect { it[1] }.unique().sort()
+            def properties = (text =~ /["'](sable\.[A-Za-z0-9_.]+)["']/).collect { it[1] }.unique().sort()
+            if (families || properties) diagnostics.add([source: rootProject.relativePath(source).replace('\\', '/'), families: families, properties: properties,
+                policy: M45FinalReleaseVerifier.category(source.path.replace('\\', '/')) == 'FIXTURE_RUNTIME' || source.name.contains('RuntimeSmoke') ? 'KEEP_FIXTURE_ONLY'
+                    : text.contains('TRACE_') || text.contains('Boolean.getBoolean') || text.contains('isDebugEnabled') ? 'KEEP_DEBUG_GATED' : 'KEEP_ALWAYS',
+                note: 'Source-family policy; bounded failure/invariant logging remains always available even in debug-gated sources', removed: false])
+        }
+        writeM45('diagnostics', diagnostics)
+        JarFile jar = new JarFile(artifact)
+        try {
+            def configs = jar.entries().findAll { !it.directory && it.name.startsWith('sable') && it.name.endsWith('mixins.json') }.collect { it.name }.sort()
+            def all = []
+            configs.each { path ->
+                def config = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry(path)).getText('UTF-8'))
+                def refmap = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry(config.refmap)).getText('UTF-8'))
+                def inventory = M45FinalReleaseVerifier.mixinInventory(artifact, config, refmap)
+                all.addAll(inventory.collect { it + [config: path] })
+                writeM45('mixins', all)
+                if (inventory.empty) return
+                File minecraft = new File(gradle.gradleUserHomeDir, 'caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/1.20.1-47.4.20/forge-1.20.1-47.4.20-srg.jar')
+                File create = file('build-m287/targetModpackRepository/create-1.20.1-6.0.8.jar')
+                def dependencies = sourceSets.main.runtimeClasspath.files.toList() + rootProject.fileTree('../target_modpack/mods').matching { include '*.jar' }.files.toList()
+                def targets = CreateMovementCoverageVerifier.mixins(artifact, create, minecraft, dependencies, config, refmap, true)
+                writeM45('mixin-targets', targets)
+                logger.lifecycle("M45 all-configured runtime target fingerprint=${CreateMovementCoverageVerifier.fingerprint(targets)} checks=${targets.checks.size()} failures=${targets.failures.size()}")
+            }
+        } finally { jar.close() }
+        logger.lifecycle("M45 evidence: source counts=${sources.countBy { it.category }}; packaged counts=${packaged.classificationCounts}")
+    }
+}
+
+tasks.register('verifyM45ArtifactInvariants') {
+    group = 'verification'
+    description = 'Independent package, provider, frozen application-bytecode and full mixin checks; distinct from the release boundary gate.'
+    dependsOn 'auditM45ReleaseEvidence'
+    doLast {
+        M45FinalReleaseVerifier.negativeTests()
+        def report = new JsonSlurper().parse(file('build/m45Audit/artifact.json'))
+        ['duplicateEntriesOrClasses', 'forbiddenBundledClasses', 'serviceFailures'].each { key ->
+            if (report[key]) throw new GradleException("M45 release audit failed ${key}: ${report[key]}")
+        }
+        if (report.splitPackages) throw new GradleException("M45 nested split package: ${report.splitPackages}")
+        if (report.java21ApiReferences) throw new GradleException("M45 Java21 API reference: ${report.java21ApiReferences}")
+        def before = new JsonSlurper().parse(rootProject.file('config/m45-production-class-hashes.json'))
+        def after = report.hashes
+        def differences = (before.keySet() + after.keySet()).unique().findAll { before[it]?.toLowerCase() != after[it]?.toLowerCase() }
+        def reviewed = new JsonSlurper().parse(rootProject.file('config/m45_1-reviewed-class-delta.json'))
+        writeM45('hash-comparison', [baselineCount: before.size(), retainedUnchanged: before.size() - differences.count { before.containsKey(it) },
+                changed: differences.findAll { before.containsKey(it) && after.containsKey(it) },
+                added: differences.findAll { !before.containsKey(it) }, removed: differences.findAll { !after.containsKey(it) },
+                changedAddedRemoved: differences, reviewed: reviewed])
+        if (differences.toSet() != reviewed.keySet() || reviewed.any { name, row -> !row.reason || after[name] != row.sha256 }) {
+            throw new GradleException("M45 unreviewed class/hash delta against preserved M44 baseline: ${differences}")
+        }
+        def targets = new JsonSlurper().parse(file('build/m45Audit/mixin-targets.json'))
+        if (targets.failures) throw new GradleException("M45 runtime target mismatches: ${targets.failures}")
+        if (targets.specializedPoints) throw new GradleException("M45 unchecked specialized injection points: ${targets.specializedPoints}")
+        File fingerprint = rootProject.file('config/m45-runtime-mixin-targets.sha256')
+        if (!fingerprint.isFile() || CreateMovementCoverageVerifier.fingerprint(targets) != fingerprint.text.trim()) throw new GradleException('M45 full runtime mixin inventory fingerprint changed; explicit review required')
+        logger.lifecycle('verifyM45ArtifactInvariants PASS: packages/providers/Java17/mixin targets/frozen classes; release boundary is checked separately')
+    }
+}
+
+tasks.register('verifySableFinalRelease') {
+    group = 'verification'
+    description = 'Final composed release gates; never skips a failed production/fixture boundary.'
+    dependsOn 'verifyM45ArtifactInvariants', 'verifyM45FixtureLifecycleSubscriptions', 'verifyCreateMovementBehaviourCoverage', 'verifyCreateProductionFixtureBoundary',
+            'verifyRuntimeModuleBoundary', 'verifyRetainedMixinCoexistence', 'verifyEarlyMixinOptionalModDetectionBoundary',
+            'verifyCompanionProductionNamespace', 'verifyRapierProductionNamespace',
+            'verifySableProductionBaseline', 'verifyStandaloneRunConfiguration'
+    doLast { logger.lifecycle('verifySableFinalRelease PASS: static release gates; runtime smoke pending') }
+}
+
+tasks.register('verifyM45FixtureLifecycleSubscriptions') {
+    group = 'verification'
+    description = 'Packaged ASM assembly completion ordering plus isolated actual-subscriber cadence/argument regression tests.'
+    dependsOn 'auditM45ReleaseEvidence'
+    doLast {
+        M45LifecycleBoundaryVerifier.verify(tasks.named('jarJar').get().archiveFile.get().asFile)
+        M45LifecycleBoundaryVerifier.subscriberTests(rootProject.projectDir, file('build/m45Audit/subscriber-tests'))
+        logger.lifecycle('verifyM45FixtureLifecycleSubscriptions PASS: assembly success-only once after state commitment; M24/M27 arguments/order; END server-level M25/M26/M27 cadence; no swallowed failure')
+    }
+}
+
+tasks.named('check') { dependsOn 'verifySableFinalRelease' }
+
+tasks.named('verifyCreateProductionFixtureBoundary') {
+    dependsOn 'auditM45ReleaseEvidence'
+    doLast {
+        def report = new JsonSlurper().parse(file('build/m45Audit/artifact.json'))
+        if (report.productionFixtureEdges) throw new GradleException("RELEASE_BLOCKER_FOUND: M45 production/fixture dependency: ${report.productionFixtureEdges}")
+        logger.lifecycle("M45 whole-artifact fixture boundary: zero gameplay edges; ${report.explicitFixtureRegistrationEdges.size()} explicit Forge bootstrap registration calls retained")
+    }
+}

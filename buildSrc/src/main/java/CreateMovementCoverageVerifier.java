@@ -137,13 +137,19 @@ public final class CreateMovementCoverageVerifier {
     }
 
     public static Map<String, Object> mixins(File artifact, File create, File minecraft, List<File> dependencies, Map<?, ?> config, Map<?, ?> refmap) throws Exception {
+        return mixins(artifact, create, minecraft, dependencies, config, refmap, false);
+    }
+
+    public static Map<String, Object> mixins(File artifact, File create, File minecraft, List<File> dependencies, Map<?, ?> config, Map<?, ?> refmap, boolean all) throws Exception {
         List<File> files = new ArrayList<>(List.of(artifact, create, minecraft));
         files.addAll(dependencies.stream().filter(f -> f.isFile() && f.getName().endsWith(".jar")).toList());
         try (Library library = new Library(files.toArray(File[]::new))) {
             List<Map<String, Object>> checks = new ArrayList<>();
             List<String> exclusions = new ArrayList<>();
+            List<String> failures = new ArrayList<>();
             Map<?, ?> references = map(refmap.get("mappings"));
             for (String side : List.of("mixins", "client", "server")) for (Object relative : list(config.get(side))) {
+                try {
                 String name = (config.get("package") + "." + relative).replace('.', '/');
                 ClassNode mixin = library.require(name);
                 AnnotationNode declaration = annotation(mixin, "Mixin");
@@ -152,14 +158,14 @@ public final class CreateMovementCoverageVerifier {
                 for (Object target : list(value(declaration, "targets"))) targets.add(target.toString().replace('.', '/'));
                 boolean relevant = relative.toString().contains("compatibility.create.") || relative.toString().matches("m(?:11|17|18|19|20|24|28|29|39)\\..*")
                         || targets.stream().anyMatch(t -> t.startsWith("com/simibubi/create/"));
-                if (!relevant) continue;
+                if (!relevant && !all) continue;
                 for (String targetName : targets) {
                     ClassNode target = library.require(targetName);
                     Map<?, ?> mappings = map(references.get(mixin.name));
                     for (MethodNode handler : mixin.methods) for (AnnotationNode operation : annotations(handler)) {
                         String kind = Type.getType(operation.desc).getClassName();
                         if (kind.endsWith(".Accessor")) {
-                            String raw = String.valueOf(value(operation, "value"));
+                            String raw = value(operation, "value") == null && all ? inferredMember(handler.name) : String.valueOf(value(operation, "value"));
                             String member = resolve(raw, mappings);
                             if (member.contains(":")) member = member.substring(0, member.indexOf(':'));
                             Type fieldType = Type.getReturnType(handler.desc).equals(Type.VOID_TYPE)
@@ -172,7 +178,7 @@ public final class CreateMovementCoverageVerifier {
                             continue;
                         }
                         if (kind.endsWith(".Invoker")) {
-                            String raw = String.valueOf(value(operation, "value"));
+                            String raw = value(operation, "value") == null && all ? inferredMember(handler.name) : String.valueOf(value(operation, "value"));
                             String selector = resolve(raw, mappings);
                             if (!selector.contains("(")) selector += handler.desc;
                             if (!library.method(target, selector, new HashSet<>())) {
@@ -197,6 +203,16 @@ public final class CreateMovementCoverageVerifier {
                             for (MethodNode method : target.methods) if (matches(method, selector)) selected.put(method.name + method.desc, method);
                         }
                         if (selected.isEmpty()) throw new IllegalStateException("M41 missing target method " + name + ";" + handler.name + " target=" + targetName + " selectors=" + selectors);
+                        if (all && !points(value(operation, "slice")).isEmpty()) throw new IllegalStateException("M45 explicit slice review required " + name + ";" + handler.name);
+                        if (all && kind.endsWith(".ModifyConstant")) {
+                            for (MethodNode method : selected.values()) for (AnnotationNode constant : points(value(operation, "constant"))) {
+                                int count = constantCount(method, handler, constant);
+                                int ordinal = value(constant, "ordinal") instanceof Integer index ? index : -1;
+                                if (count <= Math.max(0, ordinal)) throw new IllegalStateException("M45 constant injection missing " + name + ";" + handler.name + " count=" + count + " ordinal=" + ordinal);
+                                checks.add(check(name, handler, targetName, method, kind, "CONSTANT:" + value(constant, "doubleValue") + ":ordinal=" + ordinal, count));
+                            }
+                            continue;
+                        }
                         List<AnnotationNode> points = points(value(operation, "at"));
                         if (kind.endsWith("WrapMethod")) points = List.of();
                         for (AnnotationNode point : points) {
@@ -213,7 +229,8 @@ public final class CreateMovementCoverageVerifier {
                             for (AnnotationNode point : points) {
                                 String at = String.valueOf(value(point, "value"));
                                 String member = value(point, "target") == null ? "" : resolve(value(point, "target").toString(), mappings);
-                                int count = count(method, at, member);
+                                int count = all && at.equals("STORE") ? storeCount(method, handler, operation) : count(method, at, member);
+                                if (all && at.equals("TAIL") && count > 0) count = 1;
                                 if (count < 0) {
                                     exclusions.add(name + ";" + handler.name + ":" + at + ":" + member);
                                     continue;
@@ -228,7 +245,12 @@ public final class CreateMovementCoverageVerifier {
                         }
                     }
                 }
+                } catch (Exception failure) {
+                    if (!all) throw failure;
+                    failures.add(relative + ": " + failure.getMessage());
+                }
             }
+            if (all) return Map.of("checks", checks, "specializedPoints", exclusions, "targetFingerprints", library.fingerprints, "failures", failures);
             return Map.of("checks", checks, "specializedPoints", exclusions, "targetFingerprints", library.fingerprints);
         }
     }
@@ -236,6 +258,41 @@ public final class CreateMovementCoverageVerifier {
     private static Map<String, Object> check(String mixin, MethodNode handler, String target, MethodNode method, String kind, String at, int count) {
         return Map.of("mixin", mixin, "handler", handler.name + handler.desc, "target", target,
                 "method", method.name + method.desc, "injector", kind, "at", at, "matches", count);
+    }
+
+    private static String inferredMember(String handler) {
+        var match = java.util.regex.Pattern.compile("^(?:get|set|is|invoke|call)([A-Z].*)$").matcher(handler);
+        if (!match.matches()) throw new IllegalStateException("Cannot infer accessor/invoker member " + handler);
+        String member = match.group(1);
+        return member.equals(member.toUpperCase(java.util.Locale.ROOT)) ? member : Character.toLowerCase(member.charAt(0)) + member.substring(1);
+    }
+
+    private static int storeCount(MethodNode target, MethodNode handler, AnnotationNode operation) {
+        if (!operation.desc.endsWith("/ModifyVariable;")) throw new IllegalStateException("Unsupported STORE injector " + operation.desc);
+        Type type = Type.getReturnType(handler.desc);
+        int opcode = type.getOpcode(Opcodes.ISTORE);
+        int wanted = value(operation, "ordinal") instanceof Integer ordinal ? ordinal : -1;
+        int index = value(operation, "index") instanceof Integer slot ? slot : -1;
+        List<Integer> slots = new ArrayList<>();
+        for (AbstractInsnNode instruction : target.instructions) if (instruction instanceof VarInsnNode store && store.getOpcode() == opcode && !slots.contains(store.var)) slots.add(store.var);
+        if (index < 0 && wanted >= 0 && wanted < slots.size()) index = slots.get(wanted);
+        if (index < 0) throw new IllegalStateException("STORE local discriminator unavailable " + handler.name + " typedSlots=" + slots);
+        int matches = 0;
+        for (AbstractInsnNode instruction : target.instructions) if (instruction instanceof VarInsnNode store && store.getOpcode() == opcode && store.var == index) matches++;
+        return matches;
+    }
+
+    private static int constantCount(MethodNode target, MethodNode handler, AnnotationNode constant) {
+        Type type = Type.getReturnType(handler.desc);
+        if (!type.equals(Type.DOUBLE_TYPE)) throw new IllegalStateException("M45 unreviewed constant type " + handler.desc);
+        Object expected = value(constant, "doubleValue");
+        int count = 0;
+        for (AbstractInsnNode instruction : target.instructions) {
+            Double actual = instruction instanceof LdcInsnNode literal && literal.cst instanceof Double number ? number
+                    : instruction.getOpcode() == Opcodes.DCONST_0 ? Double.valueOf(0) : instruction.getOpcode() == Opcodes.DCONST_1 ? Double.valueOf(1) : null;
+            if (actual != null && (expected == null || expected.equals(actual))) count++;
+        }
+        return count;
     }
 
     private static boolean matches(MethodNode method, String selector) {

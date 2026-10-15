@@ -113,6 +113,7 @@ tasks.register('verifyRuntimeModuleBoundary') {
     dependsOn tasks.named('classes')
     dependsOn tasks.named('prepareCreateDevelopmentRuntime')
     dependsOn tasks.named('prepareVeilDevelopmentRuntime')
+    dependsOn tasks.named('prepareStandaloneRuntimeSmoke')
     dependsOn project(':sable_companion_1_20').tasks.named('classes')
 
     doLast {
@@ -130,7 +131,7 @@ tasks.register('verifyRuntimeModuleBoundary') {
             it.moduleVersion.id.group == 'io.github.llamalad7' && it.name == 'mixinextras-forge'
                     && it.moduleVersion.id.version == '0.5.3'
         }?.file?.canonicalFile
-        [create, veil, flywheel, ponder, mixinExtrasForge].each { required ->
+        [create, flywheel, ponder, mixinExtrasForge].each { required ->
             if (required == null || !runtimeFiles.contains(required)) {
                 throw new GradleException("Expected effective runtime file is missing: ${required}")
             }
@@ -277,10 +278,35 @@ tasks.register('verifyRuntimeModuleBoundary') {
                 veil    : veilMods
         ]
         List<String> modIds = modMetadata.values().collectMany { declaredModIds(it) }
-        if ((modIds as Set) != (['sable', 'create', 'flywheel', 'ponder', 'veil'] as Set)
+        Set<String> intendedModIds = ['sable', 'simulated', 'aeronautics', 'create', 'flywheel', 'ponder', 'veil'] as Set
+        if ((modIds as Set) != intendedModIds
                 || modIds.size() != (modIds as Set).size()) {
             throw new GradleException("Duplicate or unexpected runtime mod IDs: ${modIds}")
         }
+
+        // Veil is an external staged mod for the empty-root standalone launcher, not a main source-set entry.
+        def veilArtifacts = configurations.veilRuntimeMapped.resolvedConfiguration.resolvedArtifacts
+        if (veilArtifacts.size() != 1) throw new GradleException("Ambiguous Veil preparation inputs: ${veilArtifacts}")
+        def selectedVeil = veilArtifacts.iterator().next()
+        if (selectedVeil.moduleVersion.id.group != 'foundry.veil' || selectedVeil.name != "Veil-forge-${forge_minecraft_version}") {
+            throw new GradleException("Unexpected Veil preparation owner: ${selectedVeil}")
+        }
+        File reconstructed = layout.buildDirectory.file('runtimePreflight/veil-reconstructed.jar').get().asFile
+        VeilDevelopmentRuntimePatcher.patch(selectedVeil.file,
+                layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile, reconstructed)
+        File stagedMods = file('run/standalone-client/mods')
+        List<String> stagedModIds = (stagedMods.listFiles() ?: []).findAll { it.name.endsWith('.jar') }.collectMany { staged ->
+            byte[] metadata = jarEntryBytes(staged, 'META-INF/mods.toml')
+            metadata == null ? [] : declaredModIds(new String(metadata, 'UTF-8'))
+        }
+        if (stagedModIds.size() != (stagedModIds as Set).size() || (stagedModIds as Set) != intendedModIds) {
+            throw new GradleException("Duplicate or unexpected staged runtime mod IDs: ${stagedModIds}")
+        }
+        M45VeilRuntimeVerifier.verify(veil, reconstructed, new File(stagedMods, veil.name),
+                runtimeFiles, (stagedMods.listFiles() ?: []) as List,
+                selectedVeil.moduleVersion.id.version.toString(), forge_veil_version.toString(), modIds as Set, intendedModIds)
+        M45VeilRuntimeVerifier.negativeTests(layout.buildDirectory.dir('runtimePreflight/veil-negative-tests').get().asFile)
+        logger.lifecycle('Veil staged-runtime proof PASS: exact pinned preparation bytes, aliases/AT, single staged owner, no raw development leak; seven negative cases rejected')
 
         logger.lifecycle("Effective runtime module names: ${moduleNames}")
         logger.lifecycle("Derived Registrate module ${moduleNames.registrate} from ${registrate.name}")

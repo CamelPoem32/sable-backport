@@ -2,13 +2,18 @@
 
 Generated mechanically by `:forge:verifyRetainedMixinCoexistence`. Only the retained Sable Forge config is included; deferred Create/Flywheel Sable Mixins remain disabled.
 
-Classification counts: `[SAFE_INDEPENDENT:164, ORDER_SENSITIVE:1, NEEDS_BYTECODE_CHECK:0, LIKELY_RUNTIME_CONFLICT:0]`.
+Classification counts: `[SAFE_INDEPENDENT:174, ORDER_SENSITIVE:1, NEEDS_BYTECODE_CHECK:0, LIKELY_RUNTIME_CONFLICT:0]`.
 
 | Target | Sable mixin | External mixin | Priority | Classification | Detail |
 |---|---|---|---:|---|---|
 | `net.minecraft.client.Camera` | `dev.ryanhcode.sable.mixin.camera.camera_zoom.CameraMixin` | `Create:com.simibubi.create.foundation.mixin.client.CameraMixin` | `1000/1100` | `SAFE_INDEPENDENT` | shared target class only |
 | `net.minecraft.client.Camera` | `dev.ryanhcode.sable.mixin.entity.entity_sublevel_collision.CameraMixin` | `Create:com.simibubi.create.foundation.mixin.client.CameraMixin` | `1000/1100` | `SAFE_INDEPENDENT` | shared method [setup], distinct injection points |
 | `net.minecraft.client.Camera` | `dev.ryanhcode.sable.mixin.entity.entity_swimming.CameraMixin` | `Create:com.simibubi.create.foundation.mixin.client.CameraMixin` | `1000/1100` | `SAFE_INDEPENDENT` | shared target class only |
+| `net.minecraft.client.Minecraft` | `dev.ryanhcode.sable.mixin.m11.interaction.MinecraftMixin` | `Flywheel:dev.engine_room.flywheel.impl.mixin.MinecraftMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
+| `net.minecraft.client.Minecraft` | `dev.ryanhcode.sable.mixin.m11.interaction.MinecraftMixin` | `Ponder:net.createmod.ponder.mixin.client.WindowResizeMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
+| `net.minecraft.client.Minecraft` | `dev.ryanhcode.sable.mixin.m11.interaction.MinecraftMixin` | `Veil:foundry.veil.forge.mixin.client.MinecraftMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
+| `net.minecraft.client.Minecraft` | `dev.ryanhcode.sable.mixin.m11.interaction.MinecraftMixin` | `Veil:foundry.veil.mixin.client.pipeline.MinecraftMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
+| `net.minecraft.client.Minecraft` | `dev.ryanhcode.sable.mixin.m11.interaction.MinecraftMixin` | `Veil:foundry.veil.mixin.debug.MinecraftMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
 | `net.minecraft.client.Minecraft` | `dev.ryanhcode.sable.mixin.plot.MinecraftMixin` | `Flywheel:dev.engine_room.flywheel.impl.mixin.MinecraftMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
 | `net.minecraft.client.Minecraft` | `dev.ryanhcode.sable.mixin.plot.MinecraftMixin` | `Ponder:net.createmod.ponder.mixin.client.WindowResizeMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
 | `net.minecraft.client.Minecraft` | `dev.ryanhcode.sable.mixin.plot.MinecraftMixin` | `Veil:foundry.veil.forge.mixin.client.MinecraftMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
@@ -32,6 +37,11 @@ Classification counts: `[SAFE_INDEPENDENT:164, ORDER_SENSITIVE:1, NEEDS_BYTECODE
 | `net.minecraft.client.player.LocalPlayer` | `dev.ryanhcode.sable.mixin.entity.entities_stick_sublevels.player.LocalPlayerMixin` | `Create:com.simibubi.create.foundation.mixin.client.HeavyBootsOnPlayerMixin` | `1000/1100` | `SAFE_INDEPENDENT` | shared target class only |
 | `net.minecraft.client.player.LocalPlayer` | `dev.ryanhcode.sable.mixin.entity.entity_rotations_and_riding.LocalPlayerMixin` | `Create:com.simibubi.create.foundation.mixin.client.HeavyBootsOnPlayerMixin` | `1000/1100` | `SAFE_INDEPENDENT` | shared target class only |
 | `net.minecraft.client.player.LocalPlayer` | `dev.ryanhcode.sable.mixin.player_freezing.LocalPlayerMixin` | `Create:com.simibubi.create.foundation.mixin.client.HeavyBootsOnPlayerMixin` | `1000/1100` | `SAFE_INDEPENDENT` | shared target class only |
+| `net.minecraft.client.renderer.GameRenderer` | `dev.ryanhcode.sable.mixin.clip_overwrite.GameRendererMixin` | `Create:com.simibubi.create.foundation.mixin.client.GameRendererMixin` | `1000/1100` | `SAFE_INDEPENDENT` | shared target class only |
+| `net.minecraft.client.renderer.GameRenderer` | `dev.ryanhcode.sable.mixin.clip_overwrite.GameRendererMixin` | `Ponder:net.createmod.ponder.mixin.client.accessor.GameRendererAccessor` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
+| `net.minecraft.client.renderer.GameRenderer` | `dev.ryanhcode.sable.mixin.clip_overwrite.GameRendererMixin` | `Veil:foundry.veil.mixin.accessor.GameRendererAccessor` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
+| `net.minecraft.client.renderer.GameRenderer` | `dev.ryanhcode.sable.mixin.clip_overwrite.GameRendererMixin` | `Veil:foundry.veil.mixin.client.pipeline.GameRendererMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared method [renderLevel], distinct injection points |
+| `net.minecraft.client.renderer.GameRenderer` | `dev.ryanhcode.sable.mixin.clip_overwrite.GameRendererMixin` | `Veil:foundry.veil.mixin.client.shader.GameRendererMixin` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
 | `net.minecraft.client.renderer.GameRenderer` | `dev.ryanhcode.sable.mixin.entity.entities_turn_with_sub_levels.GameRendererMixin` | `Create:com.simibubi.create.foundation.mixin.client.GameRendererMixin` | `1000/1100` | `SAFE_INDEPENDENT` | shared target class only |
 | `net.minecraft.client.renderer.GameRenderer` | `dev.ryanhcode.sable.mixin.entity.entities_turn_with_sub_levels.GameRendererMixin` | `Ponder:net.createmod.ponder.mixin.client.accessor.GameRendererAccessor` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |
 | `net.minecraft.client.renderer.GameRenderer` | `dev.ryanhcode.sable.mixin.entity.entities_turn_with_sub_levels.GameRendererMixin` | `Veil:foundry.veil.mixin.accessor.GameRendererAccessor` | `1000/1000` | `SAFE_INDEPENDENT` | shared target class only |

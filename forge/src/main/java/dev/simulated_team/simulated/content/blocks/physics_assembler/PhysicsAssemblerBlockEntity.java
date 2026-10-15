@@ -4,8 +4,7 @@ import com.simibubi.create.content.contraptions.AssemblyException;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.physics.mass.MassData;
-import dev.ryanhcode.sable.command.M24SimulatedSystemsCommands;
-import dev.ryanhcode.sable.command.M27AerodynamicsCommands;
+import dev.ryanhcode.sable.forge.event.ForgeSableAssemblyCompletedEvent;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.util.SableDiagnosticFlags;
 import dev.ryanhcode.sable.sublevel.SubLevel;
@@ -22,6 +21,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraftforge.common.MinecraftForge;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Vector3d;
 
@@ -109,9 +109,8 @@ public class PhysicsAssemblerBlockEntity extends BlockEntity {
         this.lastAssemblyFailureStage = DIAGNOSTIC_NONE;
         this.lastDisassemblyResult = DIAGNOSTIC_NONE;
         this.setChanged();
-        M24SimulatedSystemsCommands.onM22AssemblyCreated(level, parentAssemblerPos, result.subLevel());
-        M27AerodynamicsCommands.onM22AssemblyCreated(
-                level, parentAssemblerPos, result.subLevel(), result.offset());
+        MinecraftForge.EVENT_BUS.post(new ForgeSableAssemblyCompletedEvent(
+                level, parentAssemblerPos, result.subLevel(), result.offset()));
 
         if (SableDiagnosticFlags.TRACE_OUTER_TRANSFER) {
             Sable.LOGGER.info("SABLE_M22_ASSEMBLY_TRANSFORM parentAnchor={} localAnchor={} rawAnchor={} visibleOrigin={} visibleDeltaAfterAssembly={}",

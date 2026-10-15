@@ -1,0 +1,18 @@
+{
+  "dev/eriksonn/aeronautics/forge/AeronauticsForge.class": {
+    "sha256": "b515a29478df42460a7aaeebb0f0f8313cd3a860d0a357fdc402853b41100d37",
+    "reason": "Remove the production-owned END-level fixture listener and its three direct fixture calls; Aeronautics initialization/configuration unchanged."
+  },
+  "dev/ryanhcode/sable/command/M45FixtureLifecycleSubscriptions.class": {
+    "sha256": "0f3e0bd9e394b3de15dfc7bd69911292e99b6710b9741fbc61795281c4102f3b",
+    "reason": "Added automatic Forge fixture-owned subscriber; preserves END/server-level M25-M26-M27 cadence and synchronous M24-M27 assembly observation."
+  },
+  "dev/ryanhcode/sable/forge/event/ForgeSableAssemblyCompletedEvent.class": {
+    "sha256": "4cb72fda674783403e9402e5db5c0a81707a0f606e99808ba8c2b493a3468a89",
+    "reason": "Added neutral synchronous successful-assembly notification containing only ServerLevel, immutable assembler/offset BlockPos values and returned ServerSubLevel."
+  },
+  "dev/simulated_team/simulated/content/blocks/physics_assembler/PhysicsAssemblerBlockEntity.class": {
+    "sha256": "96c717b376fcf2f67f397aa7fce50c2defa49d37c83b618167425ca8211a95a9",
+    "reason": "Replace two direct fixture callbacks with one Forge assembly-completed event at the same post-setChanged success boundary; assembly/disassembly logic unchanged."
+  }
+}
