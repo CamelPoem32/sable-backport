@@ -133,6 +133,7 @@
         "compatibility.create.behaviour_compatibility.funnel.FunnelFixtureTimingMixin",
         "compatibility.create.behaviour_compatibility.dispenser.DropperMovementBehaviourMixin",
         "compatibility.create.behaviour_compatibility.basin.BasinMovementBehaviourMixin",
+        "compatibility.create.behaviour_compatibility.sliding_door.SlidingDoorMovementBehaviourMixin",
         "compatibility.create.crushing_wheel.CrushingWheelBlockMixin",
         "compatibility.create.crushing_wheel_entity_processing.CrushingWheelControllerBlockEntityMixin",
         "compatibility.create.deployer.DeployerMovementBehaviourMixin",

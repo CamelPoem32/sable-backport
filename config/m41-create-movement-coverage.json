@@ -1,0 +1,316 @@
+{
+  "sourceCommit": "1a1a9a2819b4f89f78caec41b55ed8cb222fa24b",
+  "concreteTypes": 23,
+  "registeredTypes": 22,
+  "affectedBlocks": 46,
+  "behaviours": {
+    "com/simibubi/create/content/contraptions/actors/contraptionControls/ContraptionControlsMovement": "2a4805a9a85ee99178b46a9214fb210b532c49eb094ea25838ff39d281b69775",
+    "com/simibubi/create/content/contraptions/actors/harvester/HarvesterMovementBehaviour": "7789736f5e150168d6f4e9f7f5edd847e3ac5808b35b0c0abd185127732858ce",
+    "com/simibubi/create/content/contraptions/actors/plough/PloughMovementBehaviour": "2470fee9f493051c158b8af1be03dd26caa31b8e6149c72a1ee3a3d64329b1d0",
+    "com/simibubi/create/content/contraptions/actors/psi/PortableStorageInterfaceMovement": "9b793570f16c2c56e83e9336931e846e1c23ac82919728f698e483bc4d78844d",
+    "com/simibubi/create/content/contraptions/actors/roller/RollerMovementBehaviour": "ce00e2a69bae643c77bfca804f121be01b5a18b7058deaf55da2bb8196bd1d05",
+    "com/simibubi/create/content/contraptions/actors/seat/SeatMovementBehaviour": "bc966fdc4d9b20806f5e24b41687a6d6aad417988c8b574cdc8dfdcddf621fd0",
+    "com/simibubi/create/content/contraptions/actors/trainControls/ControlsMovementBehaviour": "fd3dd4c3f9b7a8bdf5b8ec8f4fefb5d3c9632d3ac1376761528deeb3b86181ef",
+    "com/simibubi/create/content/contraptions/bearing/StabilizedBearingMovementBehaviour": "2ae46715280510abb1c43f04783d2dd8dd6223149bc5b1ae84caad5b07130bb2",
+    "com/simibubi/create/content/contraptions/behaviour/BellMovementBehaviour": "18fee553d823b61ea4e52240c33169ddc1108ad2b055811c5589f45e8ad0aeed",
+    "com/simibubi/create/content/contraptions/behaviour/CampfireMovementBehaviour": "d42353aca9d9ca27c556b82e40c6b78941db81f0bbedd76aceedaaf6e11ac951",
+    "com/simibubi/create/content/contraptions/behaviour/dispenser/DispenserMovementBehaviour": "43d753e380151983e29e15ce07f796ff0a6b8a415e3379b23330e373962262da",
+    "com/simibubi/create/content/contraptions/behaviour/dispenser/DropperMovementBehaviour": "d3cf2d5f7014d37184117a6020e68a33f2cd6f2b52f42bc7e12f43511470f71f",
+    "com/simibubi/create/content/decoration/slidingDoor/SlidingDoorMovementBehaviour": "afcefe2a8e1d390c342b92df7a133aa9e4fc85882b060223b9346ecf21ee2eed",
+    "com/simibubi/create/content/equipment/bell/HauntedBellMovementBehaviour": "1ca7ead45b22b68556298c50afb1e5dcbd99fe2da374241efc9aa2842486851e",
+    "com/simibubi/create/content/fluids/tank/FluidTankMovementBehavior": "1272a1d852c393a1e759aba35790f6afdc0a3b65d8cd18b78440944627156d83",
+    "com/simibubi/create/content/kinetics/base/BlockBreakingMovementBehaviour": "b9105582c9063ba03aaf8347f6c06d96302cbecc1414832dd61ac33ca5184900",
+    "com/simibubi/create/content/kinetics/deployer/DeployerMovementBehaviour": "07b941d7a2b738b846410763e6ba0bc706cf057d95a36de69eeabb7cd15ac0fc",
+    "com/simibubi/create/content/kinetics/drill/DrillMovementBehaviour": "da64baa2434a1cd4922d9324e75bae71071ecfe1c27859402bab93dabca7af6b",
+    "com/simibubi/create/content/kinetics/saw/SawMovementBehaviour": "b5b4e37663ecd31517d064869162a661b7043868da1c466061e2d3f39616af32",
+    "com/simibubi/create/content/logistics/funnel/FunnelMovementBehaviour": "a3661a2dd923be042c7e185992ccd6b288dc7bba9da0b88f542ad5c176a44703",
+    "com/simibubi/create/content/processing/basin/BasinMovementBehaviour": "022f61f90e65f7c769fe83c4b4291c2474c9ca0b99de874d8a3d02060413a043",
+    "com/simibubi/create/content/processing/burner/BlazeBurnerMovementBehaviour": "cad8519ec9b0dcdfc61cdb78bc6188cea5e75aa9145e74b7690a5f00fb417178",
+    "com/simibubi/create/content/redstone/contact/ContactMovementBehaviour": "0476a3539e11d2137e0899f9a2ceaefda9cc7f33ae1992cf5f7f4b88aef7c65a"
+  },
+  "registrations": [
+    "com/simibubi/create/AllBlocks;<clinit>()V#0->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#1->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#10->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#11->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#12->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#13->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#14->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#15->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#16->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#17->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#18->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#19->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#2->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#3->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#4->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#5->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#6->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#7->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#8->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;<clinit>()V#9->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllBlocks;lambda$static$429(Lnet/minecraft/world/item/DyeColor;)Lcom/tterrag/registrate/util/entry/BlockEntry;#0->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;",
+    "com/simibubi/create/AllMovementBehaviours;registerDefaults()V#0->com/simibubi/create/api/registry/SimpleRegistry;register(Ljava/lang/Object;Ljava/lang/Object;)V",
+    "com/simibubi/create/AllMovementBehaviours;registerDefaults()V#1->com/simibubi/create/api/registry/SimpleRegistry;register(Ljava/lang/Object;Ljava/lang/Object;)V",
+    "com/simibubi/create/AllMovementBehaviours;registerDefaults()V#2->com/simibubi/create/api/registry/SimpleRegistry;register(Ljava/lang/Object;Ljava/lang/Object;)V",
+    "com/simibubi/create/AllMovementBehaviours;registerDefaults()V#3->com/simibubi/create/api/registry/SimpleRegistry;register(Ljava/lang/Object;Ljava/lang/Object;)V",
+    "com/simibubi/create/AllMovementBehaviours;registerDefaults()V#4->com/simibubi/create/api/registry/SimpleRegistry;register(Ljava/lang/Object;Ljava/lang/Object;)V",
+    "com/simibubi/create/foundation/data/BuilderTransformers;lambda$slidingDoor$30(Ljava/lang/String;Lcom/tterrag/registrate/builders/BlockBuilder;)Lcom/tterrag/registrate/builders/BlockBuilder;#0->com/simibubi/create/api/behaviour/movement/MovementBehaviour;movementBehaviour(Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;)Lcom/tterrag/registrate/util/nullness/NonNullConsumer;"
+  ],
+  "variantCallsites": [
+    "<clinit>()V->slidingDoor(Ljava/lang/String;)Lcom/tterrag/registrate/util/nullness/NonNullUnaryOperator;:[andesite]",
+    "<clinit>()V->slidingDoor(Ljava/lang/String;)Lcom/tterrag/registrate/util/nullness/NonNullUnaryOperator;:[brass]",
+    "<clinit>()V->slidingDoor(Ljava/lang/String;)Lcom/tterrag/registrate/util/nullness/NonNullUnaryOperator;:[copper]",
+    "<clinit>()V->slidingDoor(Ljava/lang/String;)Lcom/tterrag/registrate/util/nullness/NonNullUnaryOperator;:[glass]",
+    "<clinit>()V->slidingDoor(Ljava/lang/String;)Lcom/tterrag/registrate/util/nullness/NonNullUnaryOperator;:[train]"
+  ],
+  "registrationOwnerHashes": {
+    "com/simibubi/create/AllBlocks": "614d29c4b2dd444e9b192916204146a659fa8031d4fb1811192f712e2dc1a7be",
+    "com/simibubi/create/AllMovementBehaviours": "105eff839fd91dcb5b2e261ef48b5b895b8a21bbf7b713533d13f578e7690ec1",
+    "com/simibubi/create/foundation/data/BuilderTransformers": "11ca9a452734cb0cb0ea73b9a186bc3ed15fb0ab0001409afd00d31061a53cc7"
+  },
+  "interfaceSha256": "1ebc9b63b5b4d3bbc6ee32f4d152afe33dd6192d1ce0a05b55b5fc5259355a67",
+  "dyedBlockListSha256": "05efd62153766d2deda242975637a3cf4feb77275e233d10a2b7a4d5246872ba",
+  "seatBlockVariants": ["create:black_seat","create:blue_seat","create:brown_seat","create:cyan_seat","create:gray_seat","create:green_seat","create:light_blue_seat","create:light_gray_seat","create:lime_seat","create:magenta_seat","create:orange_seat","create:pink_seat","create:purple_seat","create:red_seat","create:white_seat","create:yellow_seat"],
+  "coverage": {
+    "com/simibubi/create/content/processing/basin/BasinMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "create:basin"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/basin/BasinMovementBehaviourMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/basin/SableBasinOutput.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/behaviour/BellMovementBehaviour": {
+      "category": "B",
+      "blocks": [
+        "minecraft:bell",
+        "create:peculiar_bell",
+        "create:desk_bell"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/plot/PlayerListMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/mixin/sublevel_sounds/SoundEngineMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/processing/burner/BlazeBurnerMovementBehaviour": {
+      "category": "F",
+      "blocks": [
+        "create:blaze_burner"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/particle/ParticleEngineMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/behaviour/CampfireMovementBehaviour": {
+      "category": "B",
+      "blocks": [
+        "minecraft:campfire",
+        "minecraft:soul_campfire"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/particle/ParticleMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/mixin/particle/ParticleEngineMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/redstone/contact/ContactMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "create:redstone_contact"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/contact_behaviour/ContactMovementBehaviourMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/actors/contraptionControls/ContraptionControlsMovement": {
+      "category": "A",
+      "blocks": [
+        "create:contraption_controls"
+      ],
+      "owners": []
+    },
+    "com/simibubi/create/content/contraptions/actors/trainControls/ControlsMovementBehaviour": {
+      "category": "D",
+      "blocks": [
+        "create:controls"
+      ],
+      "owners": []
+    },
+    "com/simibubi/create/content/kinetics/deployer/DeployerMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "create:deployer"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/deployer/DeployerMovementBehaviourMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/deployer/SubLevelDeployerInteractionUtility.java",
+        "common/src/main/java/dev/ryanhcode/sable/mixin/entity/entity_kicking/ServerLevelMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/behaviour/dispenser/DispenserMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "minecraft:dispenser"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/dispenser/DropperMovementBehaviourMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/dispenser/SableMountedDispenserTarget.java"
+      ]
+    },
+    "com/simibubi/create/content/kinetics/drill/DrillMovementBehaviour": {
+      "category": "F",
+      "blocks": [
+        "create:mechanical_drill"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/behaviour/dispenser/DropperMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "minecraft:dropper"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/dispenser/DropperMovementBehaviourMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/fluids/tank/FluidTankMovementBehavior": {
+      "category": "A",
+      "blocks": [
+        "create:fluid_tank"
+      ],
+      "owners": []
+    },
+    "com/simibubi/create/content/logistics/funnel/FunnelMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "create:andesite_funnel",
+        "create:brass_funnel"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/funnel/FunnelMovementBehaviourMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/funnel/SableMovingFunnelTarget.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/actors/harvester/HarvesterMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "create:mechanical_harvester"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/harvester_behaviour/HarvesterMovementBehaviourMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/equipment/bell/HauntedBellMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "create:haunted_bell"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/haunted_bell_behaviour/HauntedBellMovementBehaviourMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/actors/plough/PloughMovementBehaviour": {
+      "category": "F",
+      "blocks": [
+        "create:mechanical_plough"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/plough_behaviour/PloughMovementBehaviourMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/actors/psi/PortableStorageInterfaceMovement": {
+      "category": "C",
+      "blocks": [
+        "create:portable_storage_interface",
+        "create:portable_fluid_interface"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/portable_interface/PortableStorageInterfaceMovementMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/portable_interface/SablePortableInterfaceTarget.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/actors/roller/RollerMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "create:mechanical_roller"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/roller_behaviour/RollerMovementBehaviourMixin.java",
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/block_breakers/SableRollerTerrain.java"
+      ]
+    },
+    "com/simibubi/create/content/kinetics/saw/SawMovementBehaviour": {
+      "category": "F",
+      "blocks": [
+        "create:mechanical_saw"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/SawMovementBehaviourMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/actors/seat/SeatMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "create:white_seat",
+        "create:orange_seat",
+        "create:magenta_seat",
+        "create:light_blue_seat",
+        "create:yellow_seat",
+        "create:lime_seat",
+        "create:pink_seat",
+        "create:gray_seat",
+        "create:light_gray_seat",
+        "create:cyan_seat",
+        "create:purple_seat",
+        "create:blue_seat",
+        "create:brown_seat",
+        "create:green_seat",
+        "create:red_seat",
+        "create:black_seat"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/seat/SableSeatPassengers.java",
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/seat/SeatContraptionEntityMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/decoration/slidingDoor/SlidingDoorMovementBehaviour": {
+      "category": "C",
+      "milestone": "M42",
+      "blocks": [
+        "create:andesite_door",
+        "create:brass_door",
+        "create:copper_door",
+        "create:train_door",
+        "create:framed_glass_door"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/sliding_door/SableSlidingDoorTarget.java",
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/sliding_door/SlidingDoorMovementBehaviourMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/contraptions/bearing/StabilizedBearingMovementBehaviour": {
+      "category": "C",
+      "blocks": [
+        "create:mechanical_bearing"
+      ],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer.java",
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/contraptions/ContraptionEntityRendererMixin.java"
+      ]
+    },
+    "com/simibubi/create/content/kinetics/base/BlockBreakingMovementBehaviour": {
+      "category": "C",
+      "blocks": [],
+      "owners": [
+        "common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/block_breaking_behaviour/BlockBreakingMovementBehaviourMixin.java"
+      ]
+    }
+  },
+  "mixinTargetsSha256": "8d7428642165fc40662009c146c11b189f696923acf1b24bc8eea4f180d7dfd2",
+  "mixinTargetChecks": 204,
+  "specializedPointCount": 0
+}

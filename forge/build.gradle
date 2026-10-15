@@ -1,4 +1,5 @@
 import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
 import org.apache.maven.artifact.versioning.DefaultArtifactVersion
 import org.apache.maven.artifact.versioning.VersionRange
 import org.gradle.api.attributes.LibraryElements
@@ -32471,6 +32472,257 @@ tasks.register('verifyM39SeatParentWorld') {
         logger.lifecycle('verifyM39SeatParentWorld PASS: exact Seat bytecode, physical riding transform, scoped native lifecycle and fixtures')
     }
 }
+
+tasks.register('generateCreateMovementBehaviourAudit') {
+    group = 'forge backport'
+    description = 'Writes a read-only ASM inventory of the pinned Create jar; never updates the accepted manifest.'
+    inputs.file(targetCreateJar)
+    doLast {
+        def inventory = CreateMovementCoverageVerifier.inventory(targetCreateJar)
+        File output = file('build/m41Audit/create-inventory.json')
+        output.parentFile.mkdirs()
+        output.setText(JsonOutput.prettyPrint(JsonOutput.toJson(inventory)) + '\n', 'UTF-8')
+        File baseline = file('build/m41Audit/production-before.json')
+        if (!baseline.exists()) {
+            baseline.setText(JsonOutput.toJson(CreateMovementCoverageVerifier.productionHashes(
+                    tasks.named('jarJar').get().archiveFile.get().asFile)), 'UTF-8')
+        }
+        File artifact = tasks.named('jarJar').get().archiveFile.get().asFile
+        JarFile jar = new JarFile(artifact)
+        try {
+            def config = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry('sable-common-forge.mixins.json')).getText('UTF-8'))
+            def refmap = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry(config.refmap)).getText('UTF-8'))
+            File minecraft = new File(gradle.gradleUserHomeDir,
+                    "caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/${forge_minecraft_version}-${forge_version}/forge-${forge_minecraft_version}-${forge_version}-srg.jar")
+            def mixins = CreateMovementCoverageVerifier.mixins(artifact, targetCreateJar, minecraft, sourceSets.main.runtimeClasspath.files.toList(), config, refmap)
+            file('build/m41Audit/mixin-targets.json').setText(JsonOutput.prettyPrint(JsonOutput.toJson(mixins)) + '\n', 'UTF-8')
+        } finally { jar.close() }
+        logger.lifecycle("M41 ASM inventory: concrete=${inventory.behaviours.count { !it.abstract }}, abstract=${inventory.behaviours.count { it.abstract }}, registrationSites=${inventory.registrations.size()}")
+    }
+}
+
+tasks.register('verifyCreateProductionFixtureBoundary') {
+    group = 'forge backport'
+    description = 'Rejects production compatibility references to fixture ownership/state; audits the one read-only fixture observer separately.'
+    dependsOn tasks.named('verifyStandaloneForgeArtifact')
+    doLast {
+        int count = CreateMovementCoverageVerifier.productionBoundary(tasks.named('jarJar').get().archiveFile.get().asFile)
+        logger.lifecycle("verifyCreateProductionFixtureBoundary PASS: ${count} production classes; M37 read-only fixture observer explicitly isolated")
+    }
+}
+
+tasks.register('verifyCreateMovementBehaviourCoverage') {
+    group = 'forge backport'
+    description = 'Pinned exhaustive MovementBehaviour inventory, owner manifest and packaged runtime mixin structural canaries. Audit completeness is distinct from functional coverage completeness.'
+    dependsOn tasks.named('verifyCreateProductionFixtureBoundary')
+    dependsOn tasks.named('packageRapierIntoFinalForgeArtifact')
+    dependsOn 'verifyM42SlidingDoorParentWorld'
+    dependsOn 'verifyM31CreateActorWorldMutation', 'verifyM32CreateWorldInteractionActors',
+            'verifyM33DeployerParentWorldInteraction', 'verifyM33_1DeployerMountedStorage',
+            'verifyM34MovementBehaviourCoverage', 'verifyM35MechanicalRollerParentWorld',
+            'verifyM35RollerMovingRendering', 'verifyM36PortableInterfaces', 'verifyM37FunnelParentWorld',
+            'verifyM38DispenserParentWorld', 'verifyM39SeatParentWorld', 'verifyM39RuntimeMixinTargets',
+            'verifyM40BasinParentWorldOutput'
+    File manifest = rootProject.file('config/m41-create-movement-coverage.json')
+    inputs.files(manifest, targetCreateJar, rootProject.file('M41_CREATE_MOVEMENT_BEHAVIOUR_CLOSURE.md'),
+            rootProject.file('buildSrc/src/main/java/CreateMovementCoverageVerifier.java'))
+    doLast {
+        def expected = new JsonSlurper().parse(manifest)
+        def actual = CreateMovementCoverageVerifier.inventory(targetCreateJar)
+        CreateMovementCoverageVerifier.negativeTests()
+        def fingerprints = actual.behaviours.collectEntries { [(it['class']): it.sha256] }
+        if (fingerprints != expected.behaviours || actual.registrations != expected.registrations
+                || actual.variantCallsites != expected.variantCallsites
+                || actual.registrationOwnerHashes != expected.registrationOwnerHashes
+                || actual.interfaceSha256 != expected.interfaceSha256
+                || actual.dyedBlockListSha256 != expected.dyedBlockListSha256
+                || actual.seatBlockVariants != expected.seatBlockVariants) {
+            throw new GradleException('M41 pinned behaviour/registration/callback bytecode changed; explicit re-audit required')
+        }
+        if (expected.coverage.keySet() != fingerprints.keySet()) throw new GradleException('M41 unclassified concrete/abstract behaviour')
+        expected.coverage.each { name, row ->
+            if (!(row.category in ['A', 'B', 'C', 'D', 'E', 'F'])) throw new GradleException("M41 invalid classification ${name}")
+            row.owners.each { owner ->
+                if (!rootProject.file(owner).isFile()) throw new GradleException("M41 compatibility owner missing: ${owner}")
+            }
+        }
+        if (expected.coverage.values().sum { it.blocks.size() } != 46 || actual.seatBlockVariants.size() != 16) {
+            throw new GradleException('M41 block/variant mapping incomplete')
+        }
+        File artifact = tasks.named('jarJar').get().archiveFile.get().asFile
+        JarFile jar = new JarFile(artifact)
+        try {
+            def config = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry('sable-common-forge.mixins.json')).getText('UTF-8'))
+            def refmap = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry(config.refmap)).getText('UTF-8'))
+            File minecraft = new File(gradle.gradleUserHomeDir,
+                    "caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/${forge_minecraft_version}-${forge_version}/forge-${forge_minecraft_version}-${forge_version}-srg.jar")
+            def mixins = CreateMovementCoverageVerifier.mixins(artifact, targetCreateJar, minecraft, sourceSets.main.runtimeClasspath.files.toList(), config, refmap)
+            File report = file('build/m41Audit/mixin-targets.json')
+            report.parentFile.mkdirs()
+            report.setText(JsonOutput.prettyPrint(JsonOutput.toJson(mixins)) + '\n', 'UTF-8')
+            if (CreateMovementCoverageVerifier.fingerprint(mixins) != expected.mixinTargetsSha256) throw new GradleException('M41 runtime method/member/match-count manifest changed; re-audit required')
+        } finally { jar.close() }
+        File baseline = file('build/m41Audit/production-before.json')
+        if (baseline.isFile()) {
+            def before = new JsonSlurper().parse(baseline)
+            def after = CreateMovementCoverageVerifier.productionHashes(artifact)
+            def changed = (before.keySet() + after.keySet()).findAll { before[it] != after[it] }.toSet()
+            def allowedM42 = changed.findAll { name ->
+                name == 'dev/ryanhcode/sable/forge/SableForge.class'
+                        || name.startsWith('dev/ryanhcode/sable/compatibility/create/sliding_door/SableSlidingDoorTarget')
+                        || name == 'dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/sliding_door/SlidingDoorMovementBehaviourMixin.class'
+                        || name.startsWith('dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedPistonOwnershipTransfer')
+                        || name.startsWith('dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer')
+            }.toSet()
+            if (changed != allowedM42 || before.keySet().any { !after.containsKey(it) }) {
+                throw new GradleException("M41 unexplained production bytecode change beyond M42: ${changed - allowedM42}")
+            }
+            logger.lifecycle("M42 explained production delta: ${changed.sort()}")
+        }
+        int gaps = expected.coverage.values().count { it.category == 'F' }
+        logger.lifecycle("verifyCreateMovementBehaviourCoverage PASS: exhaustive pinned inventory/owners/mixin canaries; REAL_GAP_FOUND=${gaps}; functional coverage is NOT declared complete when gaps exist")
+    }
+}
+tasks.named('check').configure { dependsOn tasks.named('verifyCreateMovementBehaviourCoverage') }
+
+tasks.register('verifyM42SlidingDoorParentWorld') {
+    group = 'forge backport'
+    description = 'Exact Sliding Door handoff callsites, packaged remapping, level/cardinal geometry and fixture lifecycle.'
+    dependsOn tasks.named('classes'), project(':sable_companion_1_20').tasks.named('classes')
+    dependsOn tasks.named('verifyStandaloneForgeArtifact'), tasks.named('packageRapierIntoFinalForgeArtifact')
+    File hook = rootProject.file('common/src/main/java/dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/sliding_door/SlidingDoorMovementBehaviourMixin.java')
+    File target = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/sliding_door/SableSlidingDoorTarget.java')
+    File fixture = file('src/main/java/dev/ryanhcode/sable/command/M42SlidingDoorFixtureCommands.java')
+    File layout = file('src/main/java/dev/ryanhcode/sable/command/M42SlidingDoorFixtureLayout.java')
+    File test = file('src/m42SlidingDoorTest/java/dev/ryanhcode/sable/compatibility/create/sliding_door/M42SlidingDoorGeometryTest.java')
+    File pistonTransfer = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedPistonOwnershipTransfer.java')
+    File transferTransaction = rootProject.file('common/src/main/java/dev/ryanhcode/sable/compatibility/create/contraptions/SableNestedBearingOwnershipTransfer.java')
+    inputs.files(hook, target, fixture, layout, test, pistonTransfer, transferTransaction, targetCreateJar)
+    inputs.dir(file('src/main/resources/data/sable/functions/m42'))
+    doLast {
+        String source = hook.getText('UTF-8')
+        String resolver = target.getText('UTF-8')
+        String harness = fixture.getText('UTF-8')
+        String pistonAdapter = pistonTransfer.getText('UTF-8')
+        String transaction = transferTransaction.getText('UTF-8')
+        ['Phase.PREPARE', 'MovementMode.MOVE_NEVER_PLACE', 'drive(f, 0, true)', 'M42LiveUuid',
+         'INNER_PRE_OUTER_ASSEMBLY', 'INNER_POST_OUTER_ASSEMBLY', 'M42NestedVerified',
+         'RUN phase=PRECHECK', 'INNER_CONTRAPTION_MISSING', 'expectedStatic',
+         'M42FixtureOwner', 'ASSEMBLED_RECOVERABLE', 'PRESERVE_REANCHOR_TO_ORIGINAL_RESERVED_ORIGIN'].each { text ->
+            if (!harness.contains(text)) throw new GradleException("M42 live-payload preflight/recovery missing ${text}")
+        }
+        ['instanceof MechanicalPistonBlockEntity', 'instanceof PistonContraption', 'instanceof SlidingDoorBlock',
+         'contraption.writeNBT(false)', 'restored.readNBT(targetLevel', 'restored.anchor = transform.apply',
+         'controller.offset', 'beforeStorage.equals(afterStorage)', 'actor.right.data.equals',
+         'detach(snapshot.controller, snapshot.entity)', 'snapshot.entity.discard()', 'void rollback()',
+         'target.attach(replacement)', 'transform.getRotation() != Rotation.NONE'].each { text ->
+            if (!pistonAdapter.contains(text == 'controller.offset' ? 'piston.offset' : text)) throw new GradleException("M42 native piston ownership contract missing ${text}")
+        }
+        ['SableNestedPistonOwnershipTransfer.capture', 'pistons.restore(', 'pistons.requireRestored()',
+         'pistons.commit()', 'pistons.verify()', 'pistons.rollback()', 'pistons.validateTransform('].each { text ->
+            if (!transaction.contains(text)) throw new GradleException("M42 adapter not joined to existing transaction ${text}")
+        }
+        if (pistonAdapter.contains('Fixture') || pistonAdapter.contains('setBlock(')) throw new GradleException('M42 piston transfer depends on fixture reconstruction')
+        ['@Mixin(value = SlidingDoorMovementBehaviour.class, remap = false)', 'method = "tickOpen"',
+         'owner == null', 'original.call(door, entity, level, state, target, open)',
+         'require = 2, allow = 2', 'require = 1, allow = 1'].each { text ->
+            if (!source.contains(text)) throw new GradleException("M42 native/scope canary missing ${text}")
+        }
+        ['owner.getLevel() != context.world', 'pose.transformPosition(raw)', 'pose.transformNormal(innerFacing)',
+         'UNSUPPORTED_ORIENTATION', 'HIDDEN_PLOT_TARGET', 'REJECT_CROSS_SABLE', 'hasChunkAt',
+         'target.below(), target, target.above()', 'WeakHashMap'].each { text ->
+            if (!resolver.contains(text)) throw new GradleException("M42 target/half safety missing ${text}")
+        }
+        [source, resolver].each { text ->
+            ['M42SlidingDoorFixture', 'sable_m42_', 'setBlock(', '@Overwrite',
+             'PoseStack', 'AABB.INFINITE'].each { forbidden ->
+                if (text.contains(forbidden)) throw new GradleException("M42 production/fixture/native authority violation ${forbidden}")
+            }
+            if (text =~ /\bcontext\.(position|rotation)\s*=(?!=)/) throw new GradleException('M42 leaked MovementContext assignment')
+        }
+        ['marker unavailable before BUILD', 'SETUP phase=VALIDATE', 'SETUP phase=READY',
+         'SETUP ROLLBACK INCOMPLETE', 'getIncludedBlockPositions', 'payload.assemble',
+         'candidateOffsets()', 'getControllerPos(vehicle)', 'Phase.SETTLE', 'piston(f).getSpeed() != 0',
+         'snapshot.forEach', 'unrelated station damage preserved', 'CLEANUP COMPLETE',
+         'return; // Re-resolve ownership', 'e.before().getOptionalValue(DoorBlock.OPEN).orElse(false)',
+         '!e.after().getOptionalValue(DoorBlock.OPEN).orElse(true)'].each { text ->
+            if (!harness.contains(text)) throw new GradleException("M42 transactional/native evidence missing ${text}")
+        }
+        ['validateNativeAttachment(level, origin)', 'M42SlidingDoorFixtureLayout.capturedBlockIds()',
+         'rangeActual.equals(rangeExpected)', 'missing.isEmpty() && extra.isEmpty()',
+         'wrongBlocks.isEmpty() && wrongStates.isEmpty() && halves == 2',
+         'chassisExpected=', 'chassisActual=', 'missingStates=', 'glue=NONE_DURING_NATIVE_CAPTURE'].each { text ->
+            if (!harness.contains(text)) throw new GradleException("M42 exact full native capture guard missing ${text}")
+        }
+        if (harness.contains('included.contains(origin.offset(M42SlidingDoorFixtureLayout.LOWER))')) {
+            throw new GradleException('M42 brittle door incorrectly required in chassis range, rather than full native capture')
+        }
+        if (harness.indexOf('validateNativeAttachment(level, origin)') > harness.indexOf('glue = new SuperGlueEntity')) {
+            throw new GradleException('M42 inner topology incorrectly depends on fixture Super Glue')
+        }
+        JarFile attachmentJar = new JarFile(targetCreateJar)
+        try {
+            [
+                'com/simibubi/create/content/contraptions/chassis/ChassisBlockEntity.class': '8B16F5B680CC6941489EE6D0DDC13181BAFCB9AF0B7F014151D3566AF52A6660',
+                'com/simibubi/create/content/contraptions/chassis/RadialChassisBlock.class': '5878CA3E6007889653045EFB43891D369DC4A1501A9FD634C6CBDEFD6793442D',
+                'com/simibubi/create/impl/contraption/BlockMovementChecksImpl.class': '786DC54E115CC6D94A5B51E18CD797109472C4754E5F2EBF45F613E5AF65A2FA',
+                'com/simibubi/create/content/contraptions/Contraption.class': '07727B63607CD3C20AC3E7C0CB14EC996F5156971950B15D440B8682AD69F14D',
+                'com/simibubi/create/content/contraptions/piston/PistonContraption.class': 'FB012335C7B146F58B2E3422422FC817A1A2B84D7D233C9982F615C28E5BEB62',
+                'com/simibubi/create/content/contraptions/piston/MechanicalPistonBlockEntity.class': '137285651851D00C8359D898C67562879713D3C6B77CD389B1938BA39F9B8E30',
+                'com/simibubi/create/content/contraptions/piston/LinearActuatorBlockEntity.class': '458D4B8CA325630817F032CBD69165F789E67C376EAC7A45F95003073C168CB5',
+                'com/simibubi/create/content/contraptions/ControlledContraptionEntity.class': 'D71E4CDDDDBF0B7F4D66DE7C6EF288E5183626699C4FA98F90E91836F5AFA61E',
+                'com/simibubi/create/content/contraptions/behaviour/MovementContext.class': '4C598D69DB6A818D419721E57E6144169B0C0282C6A3E472AA33A31C207AF15B',
+                'com/simibubi/create/content/decoration/slidingDoor/SlidingDoorBlock.class': '1B22C397FBCA15502A2140B9C2D9BE98555415FDBEB7747CA9756DC25F23FFA7',
+                'data/create/tags/blocks/brittle.json': 'F959C13807E54E776B36510A7A9632EA5D191904EC5835B47E8351443D47866D',
+                'data/minecraft/tags/blocks/doors.json': '8E2019A8EBD09399F29B88FEF2C780C5243DDD60B44F283FDC730CCBE6CDBBB7'
+            ].each { path, sha ->
+                def entry = attachmentJar.getJarEntry(path)
+                if (entry == null || attachmentJar.getInputStream(entry).withCloseable { stream ->
+                    MessageDigest.getInstance('SHA-256').digest(stream.bytes).encodeHex().toString().toUpperCase()
+                } != sha) throw new GradleException("M42 pinned native attachment contract changed ${path}")
+            }
+        } finally { attachmentJar.close() }
+        def inventory = CreateMovementCoverageVerifier.inventory(targetCreateJar)
+        def door = inventory.behaviours.find { it['class'] == 'com/simibubi/create/content/decoration/slidingDoor/SlidingDoorMovementBehaviour' }
+        def expected = new JsonSlurper().parse(rootProject.file('config/m41-create-movement-coverage.json'))
+        if (door == null || door.sha256 != expected.behaviours[door['class']]
+                || expected.coverage[door['class']].blocks.size() != 5
+                || expected.coverage[door['class']].milestone != 'M42') throw new GradleException('M42 exact native behavior/registration drift')
+        File artifact = tasks.named('jarJar').get().archiveFile.get().asFile
+        JarFile jar = new JarFile(artifact)
+        try {
+            def config = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry('sable-common-forge.mixins.json')).getText('UTF-8'))
+            def refmap = new JsonSlurper().parseText(jar.getInputStream(jar.getJarEntry(config.refmap)).getText('UTF-8'))
+            File minecraft = new File(gradle.gradleUserHomeDir, "caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/${forge_minecraft_version}-${forge_version}/forge-${forge_minecraft_version}-${forge_version}-srg.jar")
+            def report = CreateMovementCoverageVerifier.mixins(artifact, targetCreateJar, minecraft, sourceSets.main.runtimeClasspath.files.toList(), config, refmap)
+            def checks = report.checks.findAll { it.mixin.endsWith('/sliding_door/SlidingDoorMovementBehaviourMixin') }
+            if (checks.size() != 4 || checks.collect { it.matches }.sort() != [1, 1, 1, 2]
+                    || checks.any { !it.method.startsWith('tickOpen(') }) throw new GradleException("M42 packaged injection points missing/duplicated: ${checks}")
+            def mapping = refmap.mappings['dev/ryanhcode/sable/mixin/compatibility/create/behaviour_compatibility/sliding_door/SlidingDoorMovementBehaviourMixin']
+            ['m_274446_', 'm_8055_', 'm_153165_'].each { runtimeName ->
+                if (mapping == null || !mapping.values().any { it.contains(runtimeName) }) throw new GradleException("M42 remap absent ${runtimeName}")
+            }
+            ['door', 'run', 'yaw90', 'cleanup'].each { command ->
+                String path = "data/sable/functions/m42/${command}.mcfunction"
+                if (jar.getJarEntry(path) == null || jar.getInputStream(jar.getJarEntry(path)).getText('UTF-8').trim() != "sable_m42 ${command}") throw new GradleException("M42 function not packaged ${command}")
+            }
+        } finally { jar.close() }
+        File output = file('build/m42SlidingDoorTest')
+        output.mkdirs()
+        def companion = project(':sable_companion_1_20').sourceSets.main.output.classesDirs
+        String classpath = files(sourceSets.main.runtimeClasspath, companion).asPath
+        def compiler = javax.tools.ToolProvider.systemJavaCompiler
+        if (compiler == null || compiler.run(null, System.out, System.err, '--release', '17', '-classpath', classpath,
+                '-d', output.absolutePath, test.absolutePath) != 0) throw new GradleException('M42 geometry tests compilation failed')
+        def urls = [output.toURI().toURL()] + sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() } + companion.files.collect { it.toURI().toURL() }
+        URLClassLoader loader = new URLClassLoader(urls as URL[], (ClassLoader) null)
+        try { loader.loadClass('dev.ryanhcode.sable.compatibility.create.sliding_door.M42SlidingDoorGeometryTest').getMethod('run').invoke(null) }
+        catch (java.lang.reflect.InvocationTargetException failure) { throw new GradleException('M42 geometry regression failed', failure.targetException) }
+        finally { loader.close() }
+        logger.lifecycle('verifyM42SlidingDoorParentWorld PASS: exact native callsites/refmap, physical geometry, orientation/cross-body policy and packaged transactional fixture')
+    }
+}
+tasks.named('check').configure { dependsOn tasks.named('verifyM42SlidingDoorParentWorld') }
 
 tasks.register('verifyM38DispenserParentWorld') {
     group = 'forge backport'

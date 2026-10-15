@@ -71,7 +71,13 @@ public final class SableNestedBearingOwnershipTransfer {
     public static void bindTransform(final AssemblyTransform transform) {
         final TransferSession session = ACTIVE.get();
         if (session != null) {
-            session.transform = transform;
+            try {
+                session.pistons.validateTransform(transform);
+                session.transform = transform;
+            } catch (final RuntimeException failure) {
+                finish(false);
+                throw failure;
+            }
         }
     }
 
@@ -96,6 +102,7 @@ public final class SableNestedBearingOwnershipTransfer {
             if (!(targetLevel instanceof final ServerLevel serverTarget)) {
                 throw new IllegalStateException("Nested bearing destination is not a ServerLevel");
             }
+            session.pistons.restore(serverTarget, sourcePos, targetPos, session.transform);
             session.restoreBearing(sourceLevel, serverTarget, sourcePos, targetPos);
         }
     }
@@ -150,6 +157,7 @@ public final class SableNestedBearingOwnershipTransfer {
         private @Nullable ServerSubLevel destinationSubLevel;
         private boolean sourceOwnershipCommitted;
         private int copiedBlockCount;
+        private SableNestedPistonOwnershipTransfer pistons;
 
         private TransferSession(final ServerLevel sourceLevel, final Set<BlockPos> selectedBlocks,
                                 final String operation) {
@@ -160,6 +168,7 @@ public final class SableNestedBearingOwnershipTransfer {
         }
 
         private void capture() throws AssemblyException {
+            this.pistons = SableNestedPistonOwnershipTransfer.capture(this.sourceLevel, this.selectedBlocks);
             final Set<Object> steeringNetworks = this.selectedBlocks.stream()
                     .filter(pos -> BuiltInRegistries.BLOCK.getKey(this.sourceLevel.getBlockState(pos).getBlock())
                             .toString().equals("simulated:steering_wheel"))
@@ -391,6 +400,7 @@ public final class SableNestedBearingOwnershipTransfer {
         }
 
         private void commitSourceOwnership() {
+            this.pistons.requireRestored();
             if (this.snapshots.values().stream().anyMatch(snapshot -> snapshot.destination == null)) {
                 throw new IllegalStateException("Not every nested bearing snapshot was reconstructed");
             }
@@ -411,6 +421,7 @@ public final class SableNestedBearingOwnershipTransfer {
                 }
                 this.verifyOwnership(snapshot, "SOURCE_COMMITTED");
             }
+            this.pistons.commit();
             this.sourceOwnershipCommitted = true;
             this.logTransition("TRANSFER_COMMITTED", null, null,
                     this.snapshots.values().stream().mapToInt(snapshot -> snapshot.entries.size()).sum(),
@@ -431,6 +442,7 @@ public final class SableNestedBearingOwnershipTransfer {
         }
 
         private void verifyImmediateOwnership() {
+            this.pistons.verify();
             if (!this.sourceOwnershipCommitted) {
                 throw new IllegalStateException("Nested source ownership was not committed");
             }
@@ -498,6 +510,7 @@ public final class SableNestedBearingOwnershipTransfer {
             if (this.sourceOwnershipCommitted) {
                 return;
             }
+            this.pistons.rollback();
             for (final NestedSnapshot snapshot : this.snapshots.values()) {
                 if (snapshot.destination != null) {
                     resetDestinationBearing(snapshot.destination.bearing, snapshot.destination.entity);
